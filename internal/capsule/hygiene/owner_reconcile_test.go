@@ -3,7 +3,9 @@ package hygiene
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +14,7 @@ import (
 
 func TestOwnerReconcilePlansAndMarksOnlyProvenOrphanedActiveRecordFailed(t *testing.T) {
 	root := t.TempDir()
-	now := time.Date(2026, 7, 27, 8, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Add(time.Second)
 	workspace := writeManagedWorkspace(t, root, "orphan", control.StateReady, now.Add(-96*time.Hour), false)
 	if err := os.WriteFile(filepath.Join(workspace, workspaceSentinel), []byte("orphan\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -100,6 +102,80 @@ func TestOwnerReconcileRejectsUnexpiredLease(t *testing.T) {
 	if len(plan.Candidates) != 1 || plan.Candidates[0].Eligible || plan.Candidates[0].Reason != "workspace lease is still unexpired" {
 		t.Fatalf("plan=%#v", plan)
 	}
+}
+
+func TestOwnerReconcileAcceptsStrictPreMarkerGitIdentity(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Add(time.Second)
+	workspace := writeManagedWorkspace(t, root, "legacy", control.StateReady, now.Add(-96*time.Hour), false)
+	if err := os.WriteFile(filepath.Join(workspace, workspaceSentinel), []byte("legacy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setOwnerReconcileDurableGitIdentity(t, root, "legacy", workspace, false)
+	plan, err := BuildOwnerReconcilePlan(context.Background(), OwnerReconcileOptions{ProjectRoot: root, MinAge: time.Nanosecond, Now: func() time.Time { return now }, ReadWorkspaceActivity: inactiveOwnerReconcileActivity, ReadWorkspaceCommands: inactiveOwnerReconcileActivity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 1 || !plan.Candidates[0].Eligible || !containsOwnerReconcileEvidence(plan.Candidates[0].Evidence, "legacy_git_identity") {
+		t.Fatalf("plan=%#v", plan)
+	}
+}
+
+func TestOwnerReconcileRejectsPreMarkerGitIdentityMismatch(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Add(time.Second)
+	workspace := writeManagedWorkspace(t, root, "legacy-mismatch", control.StateMaterializing, now.Add(-96*time.Hour), false)
+	if err := os.WriteFile(filepath.Join(workspace, workspaceSentinel), []byte("legacy-mismatch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setOwnerReconcileDurableGitIdentity(t, root, "legacy-mismatch", workspace, true)
+	plan, err := BuildOwnerReconcilePlan(context.Background(), OwnerReconcileOptions{ProjectRoot: root, MinAge: time.Nanosecond, Now: func() time.Time { return now }, ReadWorkspaceActivity: inactiveOwnerReconcileActivity, ReadWorkspaceCommands: inactiveOwnerReconcileActivity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 1 || plan.Candidates[0].Eligible || !strings.Contains(plan.Candidates[0].Reason, "Git HEAD does not match durable record") {
+		t.Fatalf("plan=%#v", plan)
+	}
+}
+
+func setOwnerReconcileDurableGitIdentity(t *testing.T, root, id, workspace string, mismatch bool) {
+	t.Helper()
+	head := ownerReconcileGit(t, workspace, "rev-parse", "HEAD")
+	branch := ownerReconcileGit(t, workspace, "branch", "--show-current")
+	store := control.FileInstanceStore{Root: filepath.Join(root, ".capsules", "workspaces")}
+	in, err := store.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CompareAndSwap(context.Background(), in.ID, in.Generation, func(cur *control.Instance) error {
+		cur.Head, cur.Branch = head, branch
+		if mismatch {
+			cur.Head = strings.Repeat("0", len(head))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ownerReconcileGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func containsOwnerReconcileEvidence(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func inactiveOwnerReconcileActivity(context.Context, []string) (WorkspaceActivity, error) {

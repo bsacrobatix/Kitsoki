@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -149,11 +150,12 @@ func inspectOwnerReconcileCandidate(ctx context.Context, project string, in cont
 		c.Reason = "workspace has an initialization marker"
 		return c
 	}
-	if err := reconcileIdentity(path, in); err != nil {
+	identity, err := reconcileIdentity(ctx, path, in)
+	if err != nil {
 		c.Reason = "workspace identity is not proven: " + err.Error()
 		return c
 	}
-	c.Evidence = append(c.Evidence, "managed_path", "manifest_identity", "owner_marker")
+	c.Evidence = append(c.Evidence, "managed_path", "manifest_identity", identity)
 	activityReader := opts.ReadWorkspaceActivity
 	if activityReader == nil {
 		activityReader = ProbeWorkspaceActivity
@@ -191,23 +193,43 @@ func inspectOwnerReconcileCandidate(ctx context.Context, project string, in cont
 	return c
 }
 
-func reconcileIdentity(path string, in control.Instance) error {
+func reconcileIdentity(ctx context.Context, path string, in control.Instance) (string, error) {
 	sentinel, err := os.ReadFile(filepath.Join(path, workspaceSentinel))
 	if err != nil {
-		return fmt.Errorf("capsule sentinel: %w", err)
+		return "", fmt.Errorf("capsule sentinel: %w", err)
 	}
 	owner, err := os.ReadFile(filepath.Join(path, ".kitsoki-owner"))
-	if err != nil {
-		return fmt.Errorf("owner marker: %w", err)
+	if err == nil {
+		if strings.TrimSpace(string(owner)) != in.Lease.Owner {
+			return "", fmt.Errorf("owner marker does not match lease owner")
+		}
+		if err := reconcileWorkspaceManifest(path, in, strings.TrimSpace(string(sentinel)) == "dev-workspace"); err != nil {
+			return "", err
+		}
+		return "owner_marker", nil
 	}
-	if strings.TrimSpace(string(owner)) != in.Lease.Owner {
-		return fmt.Errorf("owner marker does not match lease owner")
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("owner marker: %w", err)
 	}
-	if strings.TrimSpace(string(sentinel)) == in.ID {
+	// Pre-owner-marker records are recoverable only through stronger durable
+	// Git identity. A missing marker is never silently treated as ownership
+	// absence: the checkout must prove the exact recorded head and branch.
+	if err := reconcileWorkspaceManifest(path, in, strings.TrimSpace(string(sentinel)) == "dev-workspace"); err != nil {
+		return "", err
+	}
+	if err := reconcileLegacyGitIdentity(ctx, path, in); err != nil {
+		return "", err
+	}
+	return "legacy_git_identity", nil
+}
+
+func reconcileWorkspaceManifest(path string, in control.Instance, devWorkspace bool) error {
+	if !devWorkspace {
+		sentinel, err := os.ReadFile(filepath.Join(path, workspaceSentinel))
+		if err != nil || strings.TrimSpace(string(sentinel)) != in.ID {
+			return fmt.Errorf("capsule sentinel does not bind this instance")
+		}
 		return nil
-	}
-	if strings.TrimSpace(string(sentinel)) != "dev-workspace" {
-		return fmt.Errorf("unexpected capsule sentinel")
 	}
 	var manifest struct {
 		ID        string `json:"id"`
@@ -222,4 +244,29 @@ func reconcileIdentity(path string, in control.Instance) error {
 		return fmt.Errorf("development manifest does not bind this instance")
 	}
 	return nil
+}
+
+func reconcileLegacyGitIdentity(ctx context.Context, path string, in control.Instance) error {
+	if strings.TrimSpace(in.Head) == "" || strings.TrimSpace(in.Branch) == "" {
+		return fmt.Errorf("legacy record lacks durable head or branch identity")
+	}
+	head, err := reconcileGit(ctx, path, "rev-parse", "HEAD")
+	if err != nil || strings.TrimSpace(head) != strings.TrimSpace(in.Head) {
+		return fmt.Errorf("Git HEAD does not match durable record")
+	}
+	branch, err := reconcileGit(ctx, path, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(branch) != strings.TrimSpace(in.Branch) {
+		return fmt.Errorf("Git branch does not match durable record")
+	}
+	return nil
+}
+
+func reconcileGit(ctx context.Context, path string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
