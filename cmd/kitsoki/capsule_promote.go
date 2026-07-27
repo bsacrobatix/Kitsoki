@@ -46,22 +46,24 @@ const (
 )
 
 type capsulePromoteResult struct {
-	Schema           string                `json:"schema"`
-	Status           string                `json:"status"`
-	ProjectRoot      string                `json:"project_root"`
-	WorkspaceID      string                `json:"workspace_id"`
-	CandidateSHA     string                `json:"candidate_sha"`
-	ReceiptID        string                `json:"receipt_id"`
-	Doctor           *ci.DoctorReport      `json:"doctor,omitempty"`
-	QueueCandidate   queue.Candidate       `json:"queue_candidate"`
-	QueueState       queue.State           `json:"queue_state,omitempty"`
-	Plan             reconcile.Plan        `json:"plan,omitempty"`
-	Promotion        reconcile.ApplyResult `json:"promotion,omitempty"`
-	ProtectedMainSHA string                `json:"protected_main_sha,omitempty"`
+	Schema           string                 `json:"schema"`
+	Status           string                 `json:"status"`
+	ProjectRoot      string                 `json:"project_root"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	CandidateSHA     string                 `json:"candidate_sha"`
+	ReceiptID        string                 `json:"receipt_id"`
+	Doctor           *ci.DoctorReport       `json:"doctor,omitempty"`
+	QueueCandidate   queue.Candidate        `json:"queue_candidate"`
+	QueueState       queue.State            `json:"queue_state,omitempty"`
+	RemoteAdmission  *remoteAdmissionResult `json:"remote_admission,omitempty"`
+	Plan             reconcile.Plan         `json:"plan,omitempty"`
+	Promotion        reconcile.ApplyResult  `json:"promotion,omitempty"`
+	ProtectedMainSHA string                 `json:"protected_main_sha,omitempty"`
 }
 
 func capsulePromoteCmd() *cobra.Command {
 	var project, workspace, pipeline, target, gate, message, resolver, repair string
+	var remoteURL, remoteTokenEnv, remoteBucketURL, remoteKeyEnv, remoteSecretEnv, remoteTargetBaseSHA, remoteTrain string
 	var current, wait, jsonOut, skipTests bool
 	cmd := &cobra.Command{
 		Use:   "promote",
@@ -87,6 +89,7 @@ func capsulePromoteCmd() *cobra.Command {
 				RepairCommand:   repair,
 				SkipTests:       skipTests,
 				Wait:            wait,
+				RemoteAdmission: remoteAdmissionOptions{URL: remoteURL, TokenEnv: remoteTokenEnv, BucketURL: remoteBucketURL, KeyEnv: remoteKeyEnv, SecretEnv: remoteSecretEnv, TargetBaseSHA: remoteTargetBaseSHA, TrainID: remoteTrain},
 			})
 			if err != nil {
 				return err
@@ -106,6 +109,13 @@ func capsulePromoteCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipTests, "skip-tests", false, "emergency override: bypass Capsule CI receipt admission; recorded in the durable queue candidate")
 	cmd.Flags().BoolVar(&wait, "wait", false, "process the local queue and apply protected-main CAS before returning")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	cmd.Flags().StringVar(&remoteURL, "remote-admission-url", "", "authenticated external admission service base URL; enables remote Capsule promotion")
+	cmd.Flags().StringVar(&remoteTokenEnv, "remote-admission-token-env", "KITSOKI_QUEUE_ADMISSION_TOKEN", "environment variable holding the remote admission bearer token")
+	cmd.Flags().StringVar(&remoteBucketURL, "remote-bucket-url", "", "Spaces/S3 bucket URL for sealed remote promotion objects")
+	cmd.Flags().StringVar(&remoteKeyEnv, "remote-bucket-key-env", "KITSOKI_WORKER_OUTPUTS_ACCESS_KEY", "environment variable holding the bucket access key")
+	cmd.Flags().StringVar(&remoteSecretEnv, "remote-bucket-secret-env", "KITSOKI_WORKER_OUTPUTS_SECRET_KEY", "environment variable holding the bucket secret")
+	cmd.Flags().StringVar(&remoteTargetBaseSHA, "remote-target-base-sha", "", "exact integration target base SHA bound into remote admission")
+	cmd.Flags().StringVar(&remoteTrain, "remote-train", "", "immutable integration train identity required for remote admission")
 	return cmd
 }
 
@@ -120,6 +130,7 @@ type capsulePromoteOptions struct {
 	RepairCommand   string
 	SkipTests       bool
 	Wait            bool
+	RemoteAdmission remoteAdmissionOptions
 }
 
 // promoteReceiptReuse is the durable hand-off between Capsule CI and queue
@@ -182,6 +193,17 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	if strings.TrimSpace(opts.Pipeline) == "" || strings.TrimSpace(opts.TargetRef) == "" {
 		return capsulePromoteResult{}, fmt.Errorf("capsule promote: pipeline and target are required")
 	}
+	if strings.TrimSpace(opts.RemoteAdmission.URL) != "" && opts.SkipTests {
+		return capsulePromoteResult{}, fmt.Errorf("capsule promote: remote admission never permits --skip-tests")
+	}
+	if strings.TrimSpace(opts.RemoteAdmission.URL) != "" && opts.Wait {
+		return capsulePromoteResult{}, fmt.Errorf("capsule promote: --wait only processes the local queue; inspect the remote queue status using the returned admission identity")
+	}
+	if strings.TrimSpace(opts.RemoteAdmission.URL) != "" {
+		if err := validateRemoteAdmissionOptions(opts); err != nil {
+			return capsulePromoteResult{}, err
+		}
+	}
 	root, err := filepath.Abs(opts.ProjectRoot)
 	if err != nil {
 		return capsulePromoteResult{}, err
@@ -237,6 +259,16 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 			return capsulePromoteResult{}, err
 		}
 		candidateSHA = stored.Receipt.Envelope.SourceDigest
+	}
+	if strings.TrimSpace(opts.RemoteAdmission.URL) != "" {
+		if opts.SkipTests { // defensive: this branch is unreachable after validation above.
+			return capsulePromoteResult{}, fmt.Errorf("capsule promote: remote admission requires a receipt")
+		}
+		admitted, err := remoteCapsuleAdmission(ctx, opts, instance, workspacePath, branch, stored)
+		if err != nil {
+			return capsulePromoteResult{}, err
+		}
+		return capsulePromoteResult{Schema: "capsule-promote/v1", Status: "remote_admitted", ProjectRoot: root, WorkspaceID: instance.ID, CandidateSHA: candidateSHA, ReceiptID: stored.Receipt.ReceiptID, RemoteAdmission: &admitted}, nil
 	}
 	// The candidate commit exists only in the managed dev-workspace clone at
 	// this point. Publish it into the protected project root before the

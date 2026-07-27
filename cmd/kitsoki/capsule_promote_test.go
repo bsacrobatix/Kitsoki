@@ -1,18 +1,26 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/capsule/admissionserver"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/queue"
+	"kitsoki/internal/capsule/receipt"
 	"kitsoki/internal/capsule/record"
+	"kitsoki/internal/objectstore"
 )
 
 func TestCapsulePromoteExposesExplicitEmergencySkipTestsFlag(t *testing.T) {
@@ -22,6 +30,84 @@ func TestCapsulePromoteExposesExplicitEmergencySkipTestsFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Fatalf("skip-tests default = %q", flag.DefValue)
+	}
+}
+
+func TestCapsulePromoteRemoteAdmissionFlagsAreExplicit(t *testing.T) {
+	cmd := capsulePromoteCmd()
+	for _, name := range []string{"remote-admission-url", "remote-admission-token-env", "remote-bucket-url", "remote-target-base-sha", "remote-train"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("capsule promote is missing --%s", name)
+		}
+	}
+}
+
+func TestPostRemoteAdmissionDistinguishesUnauthorizedAndRateLimited(t *testing.T) {
+	t.Setenv("KITSOKI_TEST_REMOTE_TOKEN", "test-token")
+	request := admissionserver.Request{Schema: admissionserver.RequestSchema}
+	for _, tc := range []struct {
+		name, retryAfter string
+		code             int
+		remoteCode       string
+		retryable        bool
+	}{
+		{name: "unauthorized", code: http.StatusUnauthorized, remoteCode: "unauthorized", retryable: false},
+		{name: "rate limited", code: http.StatusTooManyRequests, remoteCode: "rate_limited", retryAfter: "7200", retryable: true},
+		{name: "replay substitution", code: http.StatusConflict, remoteCode: "replay_substitution", retryable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.WriteHeader(tc.code)
+				_, _ = w.Write([]byte(`{"error":{"code":"` + tc.remoteCode + `","message":"typed failure","request_id":"request-1"}}`))
+			}))
+			defer server.Close()
+			_, err := postRemoteAdmission(context.Background(), remoteAdmissionOptions{URL: server.URL, TokenEnv: "KITSOKI_TEST_REMOTE_TOKEN"}, request)
+			var typed *remoteAdmissionHTTPError
+			if !errors.As(err, &typed) || typed.Status != tc.code || typed.Code != tc.remoteCode || typed.RequestID != "request-1" || typed.Retryable != tc.retryable {
+				t.Fatalf("error did not preserve typed remote status: %#v", err)
+			}
+			if tc.retryable && typed.RetryAfter != time.Hour {
+				t.Fatalf("429 retry-after = %s, want bounded 1h", typed.RetryAfter)
+			}
+			if !tc.retryable && typed.RetryAfter != 0 {
+				t.Fatalf("401 unexpectedly became retryable: %#v", typed)
+			}
+		})
+	}
+}
+
+func TestRemoteCapsuleAdmissionRejectsNonIntegrationTargetBeforeObjectStore(t *testing.T) {
+	_, err := remoteCapsuleAdmission(context.Background(), capsulePromoteOptions{TargetRef: "main", RemoteAdmission: remoteAdmissionOptions{URL: "https://example.invalid"}}, control.Instance{}, "", "", record.Stored{})
+	if err == nil || !strings.Contains(err.Error(), "integration/*") {
+		t.Fatalf("non-integration target was accepted: %v", err)
+	}
+}
+
+func TestRemoteExecutionIdentityIncludesSealedBundleDigest(t *testing.T) {
+	instance := control.Instance{ID: "workspace-1", Generation: 2, Head: strings.Repeat("a", 40)}
+	opts := capsulePromoteOptions{TargetRef: "integration/train-1"}
+	stored := record.Stored{Receipt: receipt.Receipt{ReceiptID: "sha256:" + strings.Repeat("b", 64)}}
+	first := remoteExecutionID(instance, opts, stored, "sha256:"+strings.Repeat("c", 64))
+	if got := remoteExecutionID(instance, opts, stored, "sha256:"+strings.Repeat("c", 64)); got != first {
+		t.Fatalf("exact bundle retry changed execution identity: %s != %s", got, first)
+	}
+	if got := remoteExecutionID(instance, opts, stored, "sha256:"+strings.Repeat("d", 64)); got == first {
+		t.Fatalf("byte-different bundle reused object identity %s", got)
+	}
+}
+
+func TestPutImmutableObjectRejectsExistingByteSubstitution(t *testing.T) {
+	objects := objectstore.NewFake()
+	if _, err := objects.Put(context.Background(), "runs/capsule-1/wip/refs.bundle", bytes.NewReader([]byte("wrong")), 5, objectstore.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	err := putImmutableObject(context.Background(), objects, "runs/capsule-1/wip/refs.bundle", []byte("right"), "application/vnd.git.bundle")
+	if err == nil || !strings.Contains(err.Error(), "different bytes") {
+		t.Fatalf("existing object substitution was accepted: %v", err)
 	}
 }
 

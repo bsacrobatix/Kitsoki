@@ -102,6 +102,24 @@ func TestPOGWorkerHandoffCanonicalDigestInterop(t *testing.T) {
 	}
 }
 
+func TestSealHandoffBuildsAdmissionCompatibleCanonicalIdentity(t *testing.T) {
+	fixture := newAdmissionFixture(t)
+	receiptRaw, err := base64.StdEncoding.DecodeString(fixture.request.ReceiptBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := SealHandoff(fixture.request.Handoff.Result, receiptRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed != fixture.request.Handoff {
+		t.Fatalf("sealed handoff drifted from canonical fixture:\ngot=%#v\nwant=%#v", sealed, fixture.request.Handoff)
+	}
+	if err := validateHandoff(sealed, queue.DefaultMaxExternalBundle); err != nil {
+		t.Fatalf("sealed handoff rejected: %v", err)
+	}
+}
+
 func TestRemoteAdmissionHTTPAcceptsSealedRequest(t *testing.T) {
 	fixture := newAdmissionFixture(t)
 	server := newFixtureServer(t, fixture, Config{})
@@ -125,6 +143,33 @@ func TestRemoteAdmissionHTTPAcceptsSealedRequest(t *testing.T) {
 	if decoded.Schema != ResponseSchema || decoded.Admission.ID == "" ||
 		decoded.Anchor.ID == "" || decoded.Candidate.ID == "" {
 		t.Fatalf("incomplete response: %#v", decoded)
+	}
+}
+
+func TestRemoteAdmissionHTTPExactReplayReturnsSameDurableCandidate(t *testing.T) {
+	fixture := newAdmissionFixture(t)
+	server := newFixtureServer(t, fixture, Config{})
+	raw, err := json.Marshal(fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var responses []Response
+	for attempt := 0; attempt < 2; attempt++ {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/queue/admissions", bytes.NewReader(raw)))
+		if response.Code != http.StatusCreated {
+			t.Fatalf("attempt %d = %d %s", attempt, response.Code, response.Body.String())
+		}
+		var decoded Response
+		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+			t.Fatal(err)
+		}
+		responses = append(responses, decoded)
+	}
+	if responses[0].Admission.ID != responses[1].Admission.ID ||
+		responses[0].Candidate.ID != responses[1].Candidate.ID ||
+		responses[0].Anchor.ID != responses[1].Anchor.ID {
+		t.Fatalf("exact HTTP replay changed durable identities: %#v %#v", responses[0], responses[1])
 	}
 }
 
