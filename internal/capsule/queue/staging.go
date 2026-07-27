@@ -71,6 +71,12 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	// onto yet; that is not an error, it is every candidate's situation
 	// today.
 	createBase, stackedOn := c.SHA, ""
+	if c.SourceAnchorID != "" {
+		// External worker objects live only in the queue-private bare
+		// repository. Create the managed workspace from the protected target;
+		// the exact candidate is fetched into that disposable workspace below.
+		createBase = target
+	}
 	if stackTree, predID, predWorkspace := stackBaseFor(ahead); stackTree != "" {
 		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", predWorkspace, stackTree); err == nil {
 			createBase, stackedOn = stackTree, predID
@@ -79,14 +85,19 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", createBase, "--target", target); err != nil {
 		return Speculation{}, Environmental(err)
 	}
+	if err := (Store{ProjectRoot: root}).materializeExternalCandidate(ctx, workspace, c); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
 	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
 	if err != nil {
 		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(fmt.Errorf("queue: refresh preparation local config: %w", err))
 	}
 	var stackEvidence []string
 	if stackedOn != "" {
-		if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", "--no-write-fetch-head", root, c.SHA); err != nil {
-			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+		if c.SourceAnchorID == "" {
+			if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", "--no-write-fetch-head", root, c.SHA); err != nil {
+				return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+			}
 		}
 		if err := p.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
 			// The predecessor's changes conflict with this candidate's own
@@ -111,6 +122,10 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 			stackEvidence = []string{"queue:stack-conflict-with=" + stackedOn + " fell-back-to-unstacked"}
 		} else {
 			stackEvidence = []string{"queue:stacked-on=" + stackedOn}
+		}
+	} else if c.SourceAnchorID != "" {
+		if _, err := gitOutput(ctx, workspace, "checkout", "-B", branch, c.SHA); err != nil {
+			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 		}
 	}
 	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
@@ -625,6 +640,9 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 		// candidate: classify environmental so a transient create race burns
 		// the lenient env-retry budget, matching ProtectedIntegration.
 		return Speculation{}, Environmental(err)
+	}
+	if err := (Store{ProjectRoot: root}).materializeExternalCandidate(ctx, workspace, c); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 	}
 	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
 	if err != nil {

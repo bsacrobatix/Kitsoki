@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +19,40 @@ import (
 	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/capsule/receipt"
 )
+
+func TestReadQueueExternalResultIsStrictAndRejectsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.json")
+	valid := `{
+  "schema":"capsule-external-worker-result/v1",
+  "execution_id":"execution-1",
+  "job_id":"job-1",
+  "train_id":"train-1",
+  "manifest_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "branch":"worker/train-1/job-1",
+  "candidate_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "target_ref":"main",
+  "receipt_id":"sha256:receipt",
+  "bundle_digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "bundle_bytes":123,
+  "bundle_key":"trains/train-1/job-1/refs.bundle"
+}`
+	require.NoError(t, os.WriteFile(path, []byte(valid), 0o600))
+	result, err := readQueueExternalResult(path)
+	require.NoError(t, err)
+	require.Equal(t, "execution-1", result.ExecutionID)
+
+	require.NoError(t, os.WriteFile(path, []byte(strings.Replace(valid, `"execution_id"`, `"unknown"`, 1)), 0o600))
+	_, err = readQueueExternalResult(path)
+	require.ErrorContains(t, err, "unknown field")
+
+	require.NoError(t, os.WriteFile(path, []byte(valid), 0o600))
+	link := filepath.Join(dir, "result-link.json")
+	require.NoError(t, os.Symlink(path, link))
+	_, err = readQueueExternalResult(link)
+	require.ErrorContains(t, err, "regular non-symlink")
+}
 
 func TestQueueProcessDepsDefaultsToExactProtectedStagingCAS(t *testing.T) {
 	deps := queueProcessDeps("/project", "make test", "", "", "", "worker-1")

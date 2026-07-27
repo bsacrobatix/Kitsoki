@@ -140,6 +140,7 @@ type Candidate struct {
 	RuntimeInstance          string             `json:"runtime_instance,omitempty"`
 	RuntimeReceipt           string             `json:"runtime_receipt,omitempty"`
 	RequiredReceiptIDs       []string           `json:"required_receipt_ids,omitempty"`
+	SourceAnchorID           string             `json:"source_anchor_id,omitempty"`
 	Approval                 *Approval          `json:"approval,omitempty"`
 	EnvRetries               int                `json:"env_retries,omitempty"`
 	FirstEnvFailureAt        time.Time          `json:"first_env_failure_at,omitempty"`
@@ -176,6 +177,7 @@ type Submit struct {
 	RuntimeInstance          string
 	RuntimeReceipt           string
 	RequiredReceiptIDs       []string
+	SourceAnchorID           string
 	Now                      time.Time
 }
 
@@ -352,6 +354,9 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 	return s.mutate(func(state *State) (Candidate, error) {
 		for _, c := range state.Candidates {
 			if c.SHA == in.SHA && c.TargetRef == in.targetRef() && c.admission() == in.admission() && c.ReceiptID == in.Receipt.ReceiptID {
+				if strings.TrimSpace(in.SourceAnchorID) != "" && c.SourceAnchorID != strings.TrimSpace(in.SourceAnchorID) {
+					return Candidate{}, fmt.Errorf("queue: existing candidate source anchor does not match external submission")
+				}
 				return c, nil
 			}
 		}
@@ -367,7 +372,7 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 			projectID = filepath.Base(mustAbs(s.ProjectRoot))
 		}
 		identity := in.identity()
-		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs)}
+		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs), SourceAnchorID: strings.TrimSpace(in.SourceAnchorID)}
 		// A resubmission of the same SHA (fresh receipt) supersedes any active
 		// prior candidate rather than racing it in the FIFO, and inherits its
 		// durable attempt count so bounded retries cannot be reset by
@@ -730,6 +735,20 @@ func (s Store) publishCandidateRef(in Submit) error {
 	root, err := filepath.Abs(s.ProjectRoot)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(in.SourceAnchorID) != "" {
+		anchor, err := s.externalAnchor(context.Background(), strings.TrimSpace(in.SourceAnchorID))
+		if err != nil {
+			return err
+		}
+		if anchor.Result.CandidateSHA != in.SHA ||
+			anchor.Result.Branch != in.Branch ||
+			anchor.Result.TargetRef != in.targetRef() ||
+			anchor.Result.ReceiptID != in.Receipt.ReceiptID ||
+			anchor.Result.ManifestDigest != strings.TrimSpace(in.ManifestDigest) {
+			return fmt.Errorf("queue: external bundle anchor does not match queue submission")
+		}
+		return nil
 	}
 	if _, err := gitOutput(context.Background(), root, "rev-parse", "--git-dir"); err != nil {
 		return nil

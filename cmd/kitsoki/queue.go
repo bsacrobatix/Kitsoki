@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -17,7 +18,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd(), queueSweepCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd(), queueSweepCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -153,6 +154,90 @@ func queueSubmitCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("sha")
 	_ = cmd.MarkFlagRequired("receipt")
 	return cmd
+}
+
+func queueSubmitExternalCmd() *cobra.Command {
+	var project, resultPath, bundlePath, receiptPath, targetBase, targetPolicy, policy, runtimeInstance, runtimeReceipt string
+	var paths, requiredReceipts []string
+	cmd := &cobra.Command{
+		Use:   "submit-external",
+		Short: "Verify a typed external worker result and Git bundle into queue-private storage, then admit it",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := readQueueExternalResult(resultPath)
+			if err != nil {
+				return err
+			}
+			raw, err := os.ReadFile(receiptPath)
+			if err != nil {
+				return fmt.Errorf("queue: read receipt: %w", err)
+			}
+			var r receipt.Receipt
+			if err := json.Unmarshal(raw, &r); err != nil {
+				return fmt.Errorf("queue: parse receipt: %w", err)
+			}
+			candidate, anchor, err := (queue.Store{ProjectRoot: project}).AdmitExternalBundle(cmd.Context(), queue.ExternalBundleSubmission{
+				Result:     result,
+				BundlePath: bundlePath,
+				Submit: queue.Submit{
+					Branch: result.Branch, SHA: result.CandidateSHA,
+					TargetRef: result.TargetRef, TargetBaseSHAAtAdmission: targetBase,
+					TargetPolicy: queue.TargetPolicy(targetPolicy), Receipt: r, ReceiptRef: receiptPath,
+					Backend: "external-worker", Paths: paths,
+					FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: result.ManifestDigest,
+					RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt,
+					RequiredReceiptIDs: requiredReceipts,
+				},
+			})
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+				Anchor    queue.ExternalBundleAnchor `json:"anchor"`
+				Candidate queue.Candidate            `json:"candidate"`
+			}{Anchor: anchor, Candidate: candidate})
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&resultPath, "result", "", "strict capsule-external-worker-result/v1 JSON file")
+	cmd.Flags().StringVar(&bundlePath, "bundle", "", "already-downloaded local Git bundle")
+	cmd.Flags().StringVar(&receiptPath, "receipt", "", "promotion-eligible Capsule CI receipt JSON")
+	cmd.Flags().StringVar(&targetBase, "target-base-sha", "", "protected target SHA observed at admission")
+	cmd.Flags().StringVar(&targetPolicy, "target-policy", string(queue.WaveAutoPolicy), "target policy: wave-auto or steward-approved")
+	cmd.Flags().StringSliceVar(&paths, "path", nil, "changed path (repeatable)")
+	cmd.Flags().StringVar(&policy, "finalization-policy", string(queue.AutonomousFinalization), "finalization policy: autonomous or steward_review")
+	cmd.Flags().StringVar(&runtimeInstance, "runtime-instance", "", "optional exact runtime instance identifier required for review")
+	cmd.Flags().StringVar(&runtimeReceipt, "runtime-receipt", "", "optional runtime receipt identifier required for review")
+	cmd.Flags().StringSliceVar(&requiredReceipts, "required-receipt", nil, "additional receipt id required before approval (repeatable)")
+	_ = cmd.MarkFlagRequired("result")
+	_ = cmd.MarkFlagRequired("bundle")
+	_ = cmd.MarkFlagRequired("receipt")
+	_ = cmd.MarkFlagRequired("target-base-sha")
+	return cmd
+}
+
+func readQueueExternalResult(path string) (queue.ExternalWorkerResult, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return queue.ExternalWorkerResult{}, fmt.Errorf("queue: inspect external result: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > 64<<10 {
+		return queue.ExternalWorkerResult{}, fmt.Errorf("queue: external result must be a regular non-symlink file no larger than 64 KiB")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return queue.ExternalWorkerResult{}, fmt.Errorf("queue: open external result: %w", err)
+	}
+	defer file.Close()
+	var result queue.ExternalWorkerResult
+	decoder := json.NewDecoder(io.LimitReader(file, (64<<10)+1))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		return queue.ExternalWorkerResult{}, fmt.Errorf("queue: parse external result: %w", err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return queue.ExternalWorkerResult{}, fmt.Errorf("queue: parse external result: trailing JSON value")
+	}
+	return result, nil
 }
 func queueStatusCmd() *cobra.Command {
 	var project string

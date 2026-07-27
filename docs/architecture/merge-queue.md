@@ -32,6 +32,30 @@ Resubmitting the same SHA (e.g. with a fresh CI receipt) supersedes the prior
 active candidate and inherits its attempt count, so bounded retries cannot be
 reset by resubmission races.
 
+## External worker results: verify privately, then admit
+
+`kitsoki queue submit-external` admits source produced by a disposable worker
+without requiring its commit to exist in the controller project repository.
+The strict `capsule-external-worker-result/v1` record binds execution, CI job,
+train, manifest, branch, candidate and base SHAs, target, receipt, and bundle
+digest/size/object key. The caller downloads the named object and supplies the
+local bundle path; object-store credentials and URLs never enter queue state.
+
+Admission copies a regular non-symlink bounded file into queue-private staging,
+checks its SHA-256, runs `git bundle verify`, requires exactly the declared
+advertised head, imports into `.capsules/queue/external-objects.git`, and proves
+the declared base is an ancestor of the candidate. Only then does it publish
+an immutable `refs/kitsoki/external-results/<anchor>` ref and anchor record.
+Queue submission must consume that anchor, so an interrupted or partial import
+cannot become a candidate. Replaying the exact result returns the same anchor.
+A different result cannot replace it.
+
+The protected project object database and worktree remain untouched during
+admission. During ordinary preparation, the queue fetches the anchored commit
+only into the managed speculative workspace; the existing receipt gate,
+target binding, deterministic gate, and protected compare-and-swap finalizer
+remain unchanged.
+
 ## Divergence: disjoint continues, conflicts get resolved
 
 When a candidate has diverged from the protected target, the reconciler
@@ -88,7 +112,7 @@ the typed `queue.ErrBusy` result within the configured lock wait.
 ## Surfaces
 
 - **CLI**: `kitsoki queue kick|park|resume|emergency|override|reject <id>
-  [--actor --reason --project]`, plus `submit`, `status`, `worker`
+  [--actor --reason --project]`, plus `submit`, `submit-external`, `status`, `worker`
   (`--retry-delay`, `--max-retry-delay`, `--max-attempts`).
 - **JSON-RPC** (runstatus server): `queue.status`, `queue.kick`, `queue.park`,
   `queue.resume`, `queue.emergency`, `queue.override`, `queue.reject` with
