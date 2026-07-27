@@ -42,6 +42,10 @@ without accepting caller-controlled symlink paths. Kitsoki opens the leaf with
 `O_NOFOLLOW`, validates one bounded JSON value with no unknown fields, and uses
 that one open inode as the lease snapshot.
 
+That compatibility mapping applies only to the cleaned exact `/etc` path
+component. It is not general symlink resolution: `/etc/../...` and every other
+symlinked parent remain subject to the ordinary rejection path.
+
 `Pool.Acquire` resolves the pointer for every new worker. It writes the exact
 generation, environment, source SHA, image ID, and digest into durable vmpool
 state before asking the provider to create the VM. Pointer activation therefore
