@@ -1,12 +1,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/record"
+	"kitsoki/internal/capsule/sourceartifact"
+	"kitsoki/internal/objectstore"
 )
 
 // queueCapsulePromotionExecutorCmd is deliberately a host-side command.  Its
@@ -16,7 +24,7 @@ import (
 // bundle and never needs the admission or object-store credentials.
 func queueCapsulePromotionExecutorCmd() *cobra.Command {
 	var project, workspace, pipeline, target, gate, message string
-	var admissionURL, tokenEnv, bucketURL, keyEnv, secretEnv, targetBase, train, statusCommand string
+	var admissionURL, tokenEnv, bucketURL, keyEnv, secretEnv, targetBase, train, statusCommand, sourceArtifact, sourceRoot string
 	cmd := &cobra.Command{
 		Use:          "execute-capsule-promotion",
 		Short:        "Hosted executor: run a registered Capsule through CI and authenticated integration admission",
@@ -34,7 +42,13 @@ func queueCapsulePromotionExecutorCmd() *cobra.Command {
 			if err := validateHostedCapsulePromotion(opts); err != nil {
 				return err
 			}
-			result, err := runCapsulePromote(cmd.Context(), opts)
+			var result capsulePromoteResult
+			var err error
+			if sourceArtifact != "" {
+				result, err = runHostedArtifactPromotion(cmd.Context(), opts, sourceArtifact, sourceRoot)
+			} else {
+				result, err = runCapsulePromote(cmd.Context(), opts)
+			}
 			if err != nil {
 				return err
 			}
@@ -58,6 +72,8 @@ func queueCapsulePromotionExecutorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetBase, "target-base-sha", "", "exact integration target base SHA observed by the caller")
 	cmd.Flags().StringVar(&train, "train", "", "immutable integration train identity")
 	cmd.Flags().StringVar(&statusCommand, "status-command", "", "exact hosted `kitsoki queue status ... --json` command")
+	cmd.Flags().StringVar(&sourceArtifact, "source-artifact", "", "immutable registered Capsule source manifest key; resolves only from host object storage")
+	cmd.Flags().StringVar(&sourceRoot, "source-root", "", "host-private temporary materialization parent required with --source-artifact")
 	_ = cmd.MarkFlagRequired("workspace")
 	_ = cmd.MarkFlagRequired("target")
 	_ = cmd.MarkFlagRequired("bucket-url")
@@ -81,6 +97,55 @@ func validateHostedCapsulePromotion(opts capsulePromoteOptions) error {
 		return fmt.Errorf("queue execute-capsule-promotion: --admission-url must be a loopback http(s) URL")
 	}
 	return nil
+}
+
+func runHostedArtifactPromotion(ctx context.Context, opts capsulePromoteOptions, artifactKey, sourceRoot string) (capsulePromoteResult, error) {
+	if strings.TrimSpace(artifactKey) == "" || strings.TrimSpace(sourceRoot) == "" {
+		return capsulePromoteResult{}, fmt.Errorf("queue execute-capsule-promotion: --source-artifact requires --source-root")
+	}
+	config, err := objectstore.ParseBucketURL(opts.RemoteAdmission.BucketURL)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	config.KeyEnv, config.SecretEnv = opts.RemoteAdmission.KeyEnv, opts.RemoteAdmission.SecretEnv
+	objects, err := objectstore.NewSpaces(config, nil)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	manifest, bundle, err := sourceartifact.Resolve(ctx, objects, artifactKey)
+	if err != nil {
+		return capsulePromoteResult{}, fmt.Errorf("queue execute-capsule-promotion: resolve immutable source artifact: %w", err)
+	}
+	if manifest.Identity.WorkspaceID != opts.WorkspaceID {
+		return capsulePromoteResult{}, fmt.Errorf("queue execute-capsule-promotion: source artifact workspace identity mismatch")
+	}
+	if err := os.MkdirAll(sourceRoot, 0o700); err != nil {
+		return capsulePromoteResult{}, err
+	}
+	checkout, err := sourceartifact.Materialize(ctx, sourceRoot, manifest, bundle)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	defer os.RemoveAll(filepath.Dir(checkout))
+	instance := control.Instance{ID: manifest.Identity.WorkspaceID, Generation: manifest.Identity.WorkspaceGen, DefinitionDigest: manifest.Identity.DefinitionDigest, Head: manifest.Identity.Head, Branch: manifest.Identity.Branch, Path: checkout, State: control.StateReady}
+	report, err := capsulePromoteDoctorCheck(ctx, opts.ProjectRoot, opts.Pipeline, instance, checkout)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	if !report.Ready {
+		return capsulePromoteResult{Schema: "capsule-promote/v1", Status: PromoteStatusNotReady, ProjectRoot: opts.ProjectRoot, WorkspaceID: instance.ID, Doctor: &report}, nil
+	}
+	stored, _, err := promoteReceiptForAttempt(ctx, opts.ProjectRoot, instance, instance.Branch, opts, func(ctx context.Context) (record.Stored, error) {
+		return runPromoteCI(ctx, opts.ProjectRoot, instance, opts.Pipeline)
+	})
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	admitted, err := remoteCapsuleAdmission(ctx, opts, instance, checkout, instance.Branch, stored)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	return capsulePromoteResult{Schema: "capsule-promote/v1", Status: "remote_admitted", ProjectRoot: opts.ProjectRoot, WorkspaceID: instance.ID, CandidateSHA: instance.Head, ReceiptID: stored.Receipt.ReceiptID, RemoteAdmission: &admitted}, nil
 }
 
 func loopbackHTTPURL(value string) bool {

@@ -229,6 +229,24 @@ Capsule manager resolves it only beneath that host project's granted managed
 workspace roots, rejecting an absent, symlink-escaped, or controller-local
 path before CI can begin.
 
+If that registered Capsule exists only on the controller, bridge it without a
+controller disk artifact or credential by streaming its committed Git bundle
+to the hosted importer. The importer verifies that the bundle contains the
+declared registered HEAD and writes an immutable identity-bound artifact:
+
+```sh
+# Controller: read-only source export over its existing authenticated transport.
+git -C <managed-capsule-path> bundle create - <registered-head> | \
+  ssh <host> '/opt/kitsoki/bin/kitsoki queue import-capsule-source ...'
+```
+
+The host executor then receives `--source-artifact <manifest-key>` and a
+host-private `--source-root`. It resolves and verifies the artifact, creates a
+temporary checkout solely from that bundle, runs doctor/CI/admission, and
+removes only that temporary checkout. A missing artifact is a hard failure;
+the executor never substitutes `/opt/pog/current`, host `main`, or a remote
+Git fetch.
+
 ## Queue consumption
 
 All queue control surfaces that need this authority accept the exact external

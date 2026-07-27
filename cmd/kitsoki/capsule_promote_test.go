@@ -87,6 +87,20 @@ func TestHostedCapsulePromotionExecutorFlagsKeepCredentialsHostOnly(t *testing.T
 	}
 }
 
+func TestCapsuleSourceImporterRequiresRegisteredIdentityAndHostCredentialsByName(t *testing.T) {
+	cmd := queueImportCapsuleSourceCmd()
+	for _, name := range []string{"project-id", "workspace", "generation", "definition-digest", "branch", "head", "bucket-url", "bucket-key-env", "bucket-secret-env"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("source importer is missing --%s", name)
+		}
+	}
+	for _, name := range []string{"bundle", "source-path", "bucket-key", "bucket-secret"} {
+		if cmd.Flags().Lookup(name) != nil {
+			t.Fatalf("source importer must stream source and use host credential names only, found --%s", name)
+		}
+	}
+}
+
 func TestRemoteCandidateStatusDistinguishesAdmissionFromTerminalDelivery(t *testing.T) {
 	if remoteCandidateTerminal(queue.Queued) {
 		t.Fatal("queued remote admission was falsely reported terminal")
