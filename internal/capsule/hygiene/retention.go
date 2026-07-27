@@ -1109,6 +1109,11 @@ func validateRetentionReceiptBinding(root string, receipt RetentionReceipt) erro
 	if strings.TrimSpace(receipt.RecoveryRef) == "" {
 		return fmt.Errorf("capsule retention: recovery ref is required")
 	}
+	if policy, err := retentionReceiptMinimumAge(root, receipt); err != nil {
+		return err
+	} else if !receipt.IssuedAt.IsZero() && !receipt.EligibleAfter.IsZero() && receipt.EligibleAfter.Before(receipt.IssuedAt.Add(policy)) {
+		return fmt.Errorf("capsule retention: receipt eligibility is shorter than receipt policy")
+	}
 	return nil
 }
 

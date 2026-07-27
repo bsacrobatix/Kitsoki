@@ -253,7 +253,7 @@ func (m *Manager) CloseWithResult(ctx context.Context, h Handle, owner string) (
 	}
 	closedWorkspace := ClosedWorkspace{}
 	switch in.State {
-	case StateMaterializing, StateFailed:
+	case StateMaterializing:
 		if err := m.removeIncompleteWorkspace(in); err != nil {
 			return ClosedWorkspace{}, err
 		}

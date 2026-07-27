@@ -134,8 +134,29 @@ type Instance struct {
 	State            State        `json:"state"`
 	Generation       uint64       `json:"generation"`
 	Lease            Lease        `json:"lease"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	// Failure is durable, typed authority for the very narrow lifecycle
+	// transitions that may follow a reconciled orphan.  It is written only by
+	// the reconciler's compare-and-swap and is never caller supplied.
+	Failure   *FailureEvidence `json:"failure,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
+}
+
+// FailureEvidence binds a failed record to the exact proof which produced the
+// failure. It intentionally lives with the instance so closing cannot turn an
+// arbitrary failed workspace into a short-retention deletion authority.
+type FailureEvidence struct {
+	Schema           string    `json:"schema"`
+	Kind             string    `json:"kind"`
+	Action           string    `json:"action"`
+	WorkspaceID      string    `json:"workspace_id"`
+	SourceGeneration uint64    `json:"source_generation"`
+	Path             string    `json:"path"`
+	Head             string    `json:"head"`
+	Branch           string    `json:"branch"`
+	Owner            string    `json:"owner"`
+	Evidence         []string  `json:"evidence"`
+	RecordedAt       time.Time `json:"recorded_at"`
 }
 
 // Handle is the sole workspace authority exposed outside the manager.

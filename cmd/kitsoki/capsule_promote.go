@@ -370,7 +370,22 @@ func runPromoteCI(ctx context.Context, project string, instance control.Instance
 	if err != nil {
 		return record.Stored{}, err
 	}
-	var launcher ci.Launcher = storylauncher.Launcher{StoryPath: filepath.Join(instance.Path, p.Story), ProjectRoot: instance.Path, AgentLaunchPolicy: host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{instance.Path}}}
+	// Hosted artifact promotion tears down instance.Path after CI. Keep the
+	// project-check evidence under the controller-owned project state instead
+	// of the disposable materialization, while leaving ordinary local Capsule
+	// runs unchanged.
+	var launcher ci.Launcher = storylauncher.Launcher{
+		StoryPath: filepath.Join(instance.Path, p.Story), ProjectRoot: instance.Path,
+		AgentLaunchPolicy: host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{instance.Path}},
+		ConfigureHosts: func(reg *host.Registry) error {
+			if ok := reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(nil, host.CapsuleCIEvidenceDestination{
+				Root: filepath.Join(project, ".capsules", "ci", "evidence"), ReferencePrefix: "file:.capsules/ci/evidence",
+			})); !ok {
+				return fmt.Errorf("capsule promote: project check host is not registered")
+			}
+			return nil
+		},
+	}
 	executors := ci.NewConfiguredExecutors(cfg)
 	executors.ProjectRoot = instance.Path
 	executors.PoolStateRoot = project

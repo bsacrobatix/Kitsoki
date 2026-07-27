@@ -483,6 +483,15 @@ func capsuleWorkspaceClose(ctx context.Context, manager *control.Manager, in con
 			Safe:       true,
 		},
 	}
+	if failure := closed.Failure; failure != nil {
+		receipt.SourceGeneration = failure.SourceGeneration
+		receipt.Branch = failure.Branch
+		receipt.Owner = failure.Owner
+		receipt.Failure = &hygiene.RetentionFailure{Schema: failure.Schema, Kind: failure.Kind, Action: failure.Action, WorkspaceID: failure.WorkspaceID, SourceGeneration: failure.SourceGeneration, Path: failure.Path, Head: failure.Head, Branch: failure.Branch, Owner: failure.Owner, Evidence: append([]string(nil), failure.Evidence...), RecordedAt: failure.RecordedAt}
+		if failure.Kind == "owner_reconcile" {
+			receipt.EligibleAfter = issuedAt.Add(hygiene.OwnerReconcileRetentionAge)
+		}
+	}
 	receiptPath, receiptErr := hygiene.WriteRetentionReceipt(manager.Grant.ProjectRoot, receipt)
 	if receiptErr != nil {
 		result.RetentionError = receiptErr.Error()

@@ -109,6 +109,11 @@ func ApplyOwnerReconcilePlan(ctx context.Context, opts OwnerReconcileOptions) (O
 				return control.ErrStale
 			}
 			in.State = control.StateFailed
+			in.Failure = &control.FailureEvidence{
+				Schema: ownerReconcileFailureSchema, Kind: ownerReconcileFailureKind, Action: ownerReconcileFailureAction,
+				WorkspaceID: in.ID, SourceGeneration: candidate.Generation, Path: in.Path, Head: in.Head,
+				Branch: in.Branch, Owner: in.Lease.Owner, Evidence: append([]string(nil), candidate.Evidence...), RecordedAt: optsNow(opts).UTC(),
+			}
 			return nil
 		})
 		if err != nil {
@@ -121,6 +126,13 @@ func ApplyOwnerReconcilePlan(ctx context.Context, opts OwnerReconcileOptions) (O
 		result.Reconciled = append(result.Reconciled, candidate)
 	}
 	return result, nil
+}
+
+func optsNow(opts OwnerReconcileOptions) time.Time {
+	if opts.Now != nil {
+		return opts.Now()
+	}
+	return time.Now()
 }
 
 func inspectOwnerReconcileCandidate(ctx context.Context, project string, in control.Instance, minAge time.Duration, now time.Time, opts OwnerReconcileOptions) OwnerReconcileCandidate {
