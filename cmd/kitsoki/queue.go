@@ -18,7 +18,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd(), queueSweepCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd(), queueSweepCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -36,18 +36,19 @@ func queueCmd() *cobra.Command {
 }
 
 func queueApproveCmd() *cobra.Command {
-	var project, actor, reason, manifest, tree, receiptDigest string
+	var project, queueRoot, actor, reason, manifest, tree, receiptDigest string
 	cmd := &cobra.Command{Use: "approve <candidate-id>", Short: "Record a steward approval bound to the current prepared candidate", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(actor) == "" {
 			actor = os.Getenv("USER")
 		}
-		c, err := (queue.Store{ProjectRoot: project}).Approve(queue.ApprovalOp{ID: args[0], Actor: actor, Reason: reason, ManifestDigest: manifest, TreeSHA: tree, ReceiptDigest: receiptDigest})
+		c, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).Approve(queue.ApprovalOp{ID: args[0], Actor: actor, Reason: reason, ManifestDigest: manifest, TreeSHA: tree, ReceiptDigest: receiptDigest})
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(c)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&actor, "actor", "", "acting steward recorded in evidence (defaults to $USER)")
 	cmd.Flags().StringVar(&reason, "reason", "", "steward reason recorded in evidence")
 	cmd.Flags().StringVar(&manifest, "manifest", "", "current immutable wave or release manifest digest")
@@ -65,11 +66,11 @@ func queueApproveCmd() *cobra.Command {
 // classification is surfaced for a human, never auto-mutated. See
 // queue.Store.Sweep's doc for why.
 func queueSweepCmd() *cobra.Command {
-	var project, actor, reason string
+	var project, queueRoot, actor, reason string
 	var staleAfter time.Duration
 	var apply bool
 	cmd := &cobra.Command{Use: "sweep", Short: "Bulk-triage parked candidates: classify superseded/stale/environment-degraded, --apply to reject the superseded ones", RunE: func(cmd *cobra.Command, _ []string) error {
-		store := queue.Store{ProjectRoot: project}
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
 		plan, err := store.Sweep(time.Time{}, staleAfter)
 		if err != nil {
 			return err
@@ -90,6 +91,7 @@ func queueSweepCmd() *cobra.Command {
 		}{Plan: plan, Acted: acted})
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&actor, "actor", "", "acting operator recorded in evidence for --apply (defaults to $USER)")
 	cmd.Flags().StringVar(&reason, "reason", "", "override the per-entry sweep reason recorded in evidence for --apply")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", queue.DefaultSweepStaleAfter, "how long a parked candidate sits untouched before it is classified stale")
@@ -101,24 +103,25 @@ func queueSweepCmd() *cobra.Command {
 // audited: the acting user and reason land in the candidate's durable
 // evidence.
 func queueOpCmd(verb, short string, run func(queue.Store, queue.Op) (queue.Candidate, error)) *cobra.Command {
-	var project, actor, reason string
+	var project, queueRoot, actor, reason string
 	cmd := &cobra.Command{Use: verb + " <candidate-id>", Short: short, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(actor) == "" {
 			actor = os.Getenv("USER")
 		}
-		c, err := run(queue.Store{ProjectRoot: project}, queue.Op{ID: args[0], Actor: actor, Reason: reason})
+		c, err := run(queue.Store{ProjectRoot: project, QueueRoot: queueRoot}, queue.Op{ID: args[0], Actor: actor, Reason: reason})
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(c)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&actor, "actor", "", "acting operator recorded in evidence (defaults to $USER)")
 	cmd.Flags().StringVar(&reason, "reason", "", "human reason recorded in evidence")
 	return cmd
 }
 func queueSubmitCmd() *cobra.Command {
-	var project, branch, sha, receiptPath, backend, policy, manifest, runtimeInstance, runtimeReceipt, target, targetBase, targetPolicy string
+	var project, queueRoot, branch, sha, receiptPath, backend, policy, manifest, runtimeInstance, runtimeReceipt, target, targetBase, targetPolicy string
 	var paths []string
 	var requiredReceipts []string
 	cmd := &cobra.Command{Use: "submit", Short: "Admit a receipt-bound candidate", RunE: func(cmd *cobra.Command, _ []string) error {
@@ -130,13 +133,14 @@ func queueSubmitCmd() *cobra.Command {
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return fmt.Errorf("queue: parse receipt: %w", err)
 		}
-		c, err := (queue.Store{ProjectRoot: project}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, TargetRef: target, TargetBaseSHAAtAdmission: targetBase, TargetPolicy: queue.TargetPolicy(targetPolicy), FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
+		c, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, TargetRef: target, TargetBaseSHAAtAdmission: targetBase, TargetPolicy: queue.TargetPolicy(targetPolicy), FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(c)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&branch, "branch", "", "candidate branch")
 	cmd.Flags().StringVar(&sha, "sha", "", "full candidate git SHA")
 	cmd.Flags().StringVar(&receiptPath, "receipt", "", "capsule CI receipt JSON")
@@ -157,7 +161,7 @@ func queueSubmitCmd() *cobra.Command {
 }
 
 func queueSubmitExternalCmd() *cobra.Command {
-	var project, resultPath, bundlePath, receiptPath, targetBase, targetPolicy, policy, runtimeInstance, runtimeReceipt string
+	var project, queueRoot, resultPath, bundlePath, receiptPath, targetBase, targetPolicy, policy, runtimeInstance, runtimeReceipt string
 	var paths, requiredReceipts []string
 	cmd := &cobra.Command{
 		Use:   "submit-external",
@@ -175,7 +179,7 @@ func queueSubmitExternalCmd() *cobra.Command {
 			if err := json.Unmarshal(raw, &r); err != nil {
 				return fmt.Errorf("queue: parse receipt: %w", err)
 			}
-			candidate, anchor, err := (queue.Store{ProjectRoot: project}).AdmitExternalBundle(cmd.Context(), queue.ExternalBundleSubmission{
+			candidate, anchor, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).AdmitExternalBundle(cmd.Context(), queue.ExternalBundleSubmission{
 				Result:     result,
 				BundlePath: bundlePath,
 				Submit: queue.Submit{
@@ -198,6 +202,7 @@ func queueSubmitExternalCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&resultPath, "result", "", "strict capsule-external-worker-result/v1 JSON file")
 	cmd.Flags().StringVar(&bundlePath, "bundle", "", "already-downloaded local Git bundle")
 	cmd.Flags().StringVar(&receiptPath, "receipt", "", "promotion-eligible Capsule CI receipt JSON")
@@ -240,10 +245,10 @@ func readQueueExternalResult(path string) (queue.ExternalWorkerResult, error) {
 	return result, nil
 }
 func queueStatusCmd() *cobra.Command {
-	var project string
+	var project, queueRoot string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "status", Aliases: []string{"list"}, Short: "Show durable merge-queue candidates", RunE: func(cmd *cobra.Command, _ []string) error {
-		state, err := (queue.Store{ProjectRoot: project}).List()
+		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).List()
 		if err != nil {
 			return err
 		}
@@ -262,6 +267,7 @@ func queueStatusCmd() *cobra.Command {
 		return nil
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the durable queue record as JSON")
 	return cmd
 }
@@ -297,7 +303,7 @@ func queueSummaryLine(s queue.StatusSummary) string {
 // worker is the durable owner of preparation leases and protected finalization.
 // `process` remains available for scripts that want one compatibility drain.
 func queueWorkerCmd() *cobra.Command {
-	var project, gate, target, resolver, repair, workerID, executorName, executorPipeline string
+	var project, queueRoot, gate, target, resolver, repair, workerID, executorName, executorPipeline string
 	var once bool
 	var concurrency int
 	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration time.Duration
@@ -309,7 +315,7 @@ func queueWorkerCmd() *cobra.Command {
 		if strings.TrimSpace(gate) == "" && strings.TrimSpace(executorName) == "" {
 			return fmt.Errorf("queue worker: exactly one of --gate or --executor is required")
 		}
-		deps := queueProcessDeps(project, gate, target, resolver, repair, workerID)
+		deps := queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, workerID)
 		if strings.TrimSpace(executorName) != "" {
 			pipeline := executorPipeline
 			if strings.TrimSpace(pipeline) == "" {
@@ -324,7 +330,7 @@ func queueWorkerCmd() *cobra.Command {
 		if n < 1 {
 			n = 1
 		}
-		store := queue.Store{ProjectRoot: project}
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
 		if n > 1 {
 			// n goroutines in this one process share the same durable
 			// state.json and its file lock. That contention is brief (the
@@ -368,13 +374,14 @@ func queueWorkerCmd() *cobra.Command {
 		if !once {
 			return nil
 		}
-		state, err := (queue.Store{ProjectRoot: project}).List()
+		state, err := store.List()
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each prepared tree")
 	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
@@ -441,15 +448,17 @@ func first(values ...string) string {
 // process uses the managed staging-capsule lifecycle and requires an explicit
 // deterministic gate. It has no raw-main fallback.
 func queueProcessCmd() *cobra.Command {
-	var project, gate, target, resolver, repair string
+	var project, queueRoot, gate, target, resolver, repair string
 	cmd := &cobra.Command{Use: "process", Aliases: []string{"drain"}, Short: "Process candidates through a configured protected integration", RunE: func(cmd *cobra.Command, _ []string) error {
-		state, err := (queue.Store{ProjectRoot: project}).Process(cmd.Context(), queueProcessDeps(project, gate, target, resolver, repair, ""))
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
+		state, err := store.Process(cmd.Context(), queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, ""))
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each speculative tree")
 	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
@@ -462,6 +471,10 @@ func queueProcessCmd() *cobra.Command {
 // explicit destination switches both preparation and finalization to the same
 // protected ref, so the final compare-and-swap cannot land somewhere else.
 func queueProcessDeps(project, gate, target, resolver, repair, workerID string) queue.ProcessDeps {
+	return queueProcessDepsWithRoot(project, "", gate, target, resolver, repair, workerID)
+}
+
+func queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, workerID string) queue.ProcessDeps {
 	if strings.TrimSpace(target) == "" {
 		target = "staging/local"
 	}
@@ -470,10 +483,11 @@ func queueProcessDeps(project, gate, target, resolver, repair, workerID string) 
 		WorkerID:    workerID,
 		GateVersion: gate,
 		TargetRef:   target,
-		GateMemo:    queue.FileGateMemo{ProjectRoot: project},
+		GateMemo:    queue.FileGateMemo{ProjectRoot: project, QueueRoot: queueRoot},
 	}
 	deps.Integration = queue.ProtectedIntegration{
 		ProjectRoot:     project,
+		QueueRoot:       queueRoot,
 		TargetRef:       target,
 		ResolverCommand: resolver,
 	}
@@ -487,15 +501,16 @@ func queueProcessDeps(project, gate, target, resolver, repair, workerID string) 
 // queueMigrateCmd is the only v1 upgrade path. It requires an explicit
 // operator-selected target before the queue state is rewritten as v2.
 func queueMigrateCmd() *cobra.Command {
-	var project, target, base, policy string
+	var project, queueRoot, target, base, policy string
 	cmd := &cobra.Command{Use: "migrate", Short: "Explicitly migrate a legacy merge queue to target-bound v2", RunE: func(cmd *cobra.Command, _ []string) error {
-		state, err := (queue.Store{ProjectRoot: project, LegacyTargetRef: target, LegacyTargetBaseSHAAtAdmission: base, LegacyTargetPolicy: queue.TargetPolicy(policy)}).List()
+		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LegacyTargetRef: target, LegacyTargetBaseSHAAtAdmission: base, LegacyTargetPolicy: queue.TargetPolicy(policy)}).List()
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&target, "target", "", "target ref to bind every legacy candidate to")
 	cmd.Flags().StringVar(&base, "target-base-sha", "", "target SHA observed at legacy migration")
 	cmd.Flags().StringVar(&policy, "target-policy", string(queue.WaveAutoPolicy), "target policy: wave-auto or steward-approved")

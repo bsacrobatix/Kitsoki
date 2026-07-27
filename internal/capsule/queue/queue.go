@@ -337,7 +337,13 @@ type FinalizeResult struct {
 
 type Store struct {
 	ProjectRoot string
-	LockWait    time.Duration
+	// QueueRoot, when non-empty, is the exact durable queue authority
+	// directory. The default remains <ProjectRoot>/.capsules/queue for
+	// backwards compatibility. Keeping this separate lets an authenticated
+	// admission service own state and private candidate objects on a
+	// controller volume without writing the protected project checkout.
+	QueueRoot string
+	LockWait  time.Duration
 	// LegacyTargetRef is the required explicit binding used to migrate v1 state.
 	LegacyTargetRef                string
 	LegacyTargetBaseSHAAtAdmission string
@@ -526,12 +532,22 @@ func (s Store) withLock(fn func(string) (State, error)) (State, error) {
 	return fn(path)
 }
 func (s Store) paths() (string, string, error) {
-	root, err := filepath.Abs(s.ProjectRoot)
+	dir, err := s.queueRoot()
 	if err != nil {
 		return "", "", err
 	}
-	dir := filepath.Join(root, ".capsules", "queue")
 	return dir, filepath.Join(dir, "state.json"), nil
+}
+
+func (s Store) queueRoot() (string, error) {
+	if strings.TrimSpace(s.QueueRoot) != "" {
+		return filepath.Abs(s.QueueRoot)
+	}
+	root, err := filepath.Abs(s.ProjectRoot)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".capsules", "queue"), nil
 }
 
 func validate(in Submit) error {

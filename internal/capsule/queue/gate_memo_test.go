@@ -57,6 +57,23 @@ func TestFileGateMemoStoresOnlyPassingResultsAndRoundTrips(t *testing.T) {
 	}
 }
 
+func TestFileGateMemoUsesExternalQueueAuthority(t *testing.T) {
+	project := t.TempDir()
+	queueRoot := filepath.Join(t.TempDir(), "queue")
+	memo := FileGateMemo{ProjectRoot: project, QueueRoot: queueRoot}
+	tree := strings.Repeat("d", 40)
+	config := fingerprint("external-authority")
+	if err := memo.Store(tree, "external/v1", config, GateResult{Passed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := memo.Lookup(tree, "external/v1", config); !ok {
+		t.Fatal("external queue authority memo did not round trip")
+	}
+	if _, err := os.Stat(filepath.Join(project, ".capsules", "queue", "gate-memo")); !os.IsNotExist(err) {
+		t.Fatalf("external queue memo wrote project-local state: %v", err)
+	}
+}
+
 // TestGateMemoSkipsARepeatGateRunOnTheIdenticalTree is the worker-level
 // proof: a Gate that fails on any call after the first proves the second
 // prepare pass over the identical tree never actually invoked it.

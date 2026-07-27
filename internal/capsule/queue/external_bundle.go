@@ -82,19 +82,18 @@ func (a ExternalBundleAdmitter) Admit(ctx context.Context, in ExternalBundleSubm
 	if err := validateExternalSubmission(in, a.maxBundleBytes()); err != nil {
 		return Candidate{}, ExternalBundleAnchor{}, err
 	}
-	root, err := filepath.Abs(a.Store.ProjectRoot)
+	queueDir, err := a.Store.queueRoot()
 	if err != nil {
 		return Candidate{}, ExternalBundleAnchor{}, err
 	}
-	queueDir := filepath.Join(root, ".capsules", "queue")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
+	if err := os.MkdirAll(queueDir, 0o700); err != nil {
 		return Candidate{}, ExternalBundleAnchor{}, err
 	}
 	unlock, err := lock(filepath.Join(queueDir, "external-objects.lock"), a.Store.LockWait)
 	if err != nil {
 		return Candidate{}, ExternalBundleAnchor{}, err
 	}
-	anchor, err := a.importLocked(ctx, root, queueDir, in)
+	anchor, err := a.importLocked(ctx, queueDir, in)
 	unlock()
 	if err != nil {
 		return Candidate{}, ExternalBundleAnchor{}, err
@@ -109,7 +108,7 @@ func (a ExternalBundleAdmitter) Admit(ctx context.Context, in ExternalBundleSubm
 	return candidate, anchor, nil
 }
 
-func (a ExternalBundleAdmitter) importLocked(ctx context.Context, root, queueDir string, in ExternalBundleSubmission) (ExternalBundleAnchor, error) {
+func (a ExternalBundleAdmitter) importLocked(ctx context.Context, queueDir string, in ExternalBundleSubmission) (ExternalBundleAnchor, error) {
 	id, err := externalAnchorID(in.Result)
 	if err != nil {
 		return ExternalBundleAnchor{}, err
@@ -121,7 +120,7 @@ func (a ExternalBundleAdmitter) importLocked(ctx context.Context, root, queueDir
 		if existing.Result != in.Result {
 			return ExternalBundleAnchor{}, fmt.Errorf("queue: external bundle anchor %s result mismatch", id)
 		}
-		if err := verifyExternalAnchor(ctx, root, existing); err != nil {
+		if err := a.Store.verifyExternalAnchor(ctx, existing); err != nil {
 			return ExternalBundleAnchor{}, err
 		}
 		return existing, nil
@@ -171,11 +170,15 @@ func (a ExternalBundleAdmitter) importLocked(ctx context.Context, root, queueDir
 		return ExternalBundleAnchor{}, err
 	}
 
+	objectRepository := "external-objects.git"
+	if strings.TrimSpace(a.Store.QueueRoot) == "" {
+		objectRepository = filepath.ToSlash(filepath.Join(".capsules", "queue", "external-objects.git"))
+	}
 	anchor := ExternalBundleAnchor{
 		Schema:           ExternalBundleAnchorSchema,
 		ID:               id,
 		Result:           in.Result,
-		ObjectRepository: filepath.ToSlash(filepath.Join(".capsules", "queue", "external-objects.git")),
+		ObjectRepository: objectRepository,
 		Ref:              finalRef,
 		CreatedAt:        time.Now().UTC(),
 	}
@@ -251,6 +254,17 @@ func validateExternalWorkerResult(r ExternalWorkerResult, maxBytes int64) error 
 		return fmt.Errorf("queue: external worker result bundle_key is invalid")
 	}
 	return nil
+}
+
+// ValidateExternalWorkerResult validates the transport-independent identity
+// before a caller fetches a potentially large remote bundle. Admission still
+// repeats the same validation after materialization; this exported preflight
+// is an optimization and a fail-closed API boundary, not a trust shortcut.
+func ValidateExternalWorkerResult(r ExternalWorkerResult, maxBytes int64) error {
+	if maxBytes <= 0 || maxBytes > DefaultMaxExternalBundle {
+		maxBytes = DefaultMaxExternalBundle
+	}
+	return validateExternalWorkerResult(r, maxBytes)
 }
 
 func validExternalText(value string) bool {
@@ -443,11 +457,11 @@ func (s Store) externalAnchor(ctx context.Context, id string) (ExternalBundleAnc
 	if !strings.HasPrefix(id, "external-") || len(id) != len("external-")+32 || strings.Trim(id[len("external-"):], "0123456789abcdef") != "" {
 		return ExternalBundleAnchor{}, fmt.Errorf("queue: invalid external bundle anchor id")
 	}
-	root, err := filepath.Abs(s.ProjectRoot)
+	queueDir, err := s.queueRoot()
 	if err != nil {
 		return ExternalBundleAnchor{}, err
 	}
-	path := filepath.Join(root, ".capsules", "queue", "external-anchors", id+".json")
+	path := filepath.Join(queueDir, "external-anchors", id+".json")
 	anchor, found, err := readExternalBundleAnchor(path)
 	if err != nil {
 		return ExternalBundleAnchor{}, err
@@ -455,23 +469,49 @@ func (s Store) externalAnchor(ctx context.Context, id string) (ExternalBundleAnc
 	if !found || anchor.ID != id {
 		return ExternalBundleAnchor{}, fmt.Errorf("queue: external bundle anchor %s is unavailable", id)
 	}
-	if err := verifyExternalAnchor(ctx, root, anchor); err != nil {
+	if err := s.verifyExternalAnchor(ctx, anchor); err != nil {
 		return ExternalBundleAnchor{}, err
 	}
 	return anchor, nil
 }
 
-func verifyExternalAnchor(ctx context.Context, root string, anchor ExternalBundleAnchor) error {
-	repository := filepath.Join(root, filepath.FromSlash(anchor.ObjectRepository))
-	wantRepository := filepath.Join(root, ".capsules", "queue", "external-objects.git")
-	if filepath.Clean(repository) != filepath.Clean(wantRepository) {
-		return fmt.Errorf("queue: external bundle anchor object repository escapes queue authority")
+// ExternalAnchor returns and re-verifies one immutable queue-private worker
+// result anchor. It is the read side used by remote admission replay.
+func (s Store) ExternalAnchor(ctx context.Context, id string) (ExternalBundleAnchor, error) {
+	return s.externalAnchor(ctx, id)
+}
+
+func (s Store) verifyExternalAnchor(ctx context.Context, anchor ExternalBundleAnchor) error {
+	repository, err := s.externalRepository(anchor)
+	if err != nil {
+		return err
 	}
 	got, err := gitOutput(ctx, repository, "rev-parse", "--verify", anchor.Ref+"^{commit}")
 	if err != nil || strings.TrimSpace(got) != anchor.Result.CandidateSHA {
 		return fmt.Errorf("queue: external bundle anchor ref does not resolve to the exact candidate")
 	}
 	return verifyExternalLineage(ctx, repository, anchor.Ref, anchor.Result)
+}
+
+func (s Store) externalRepository(anchor ExternalBundleAnchor) (string, error) {
+	queueDir, err := s.queueRoot()
+	if err != nil {
+		return "", err
+	}
+	wantRepository := filepath.Join(queueDir, "external-objects.git")
+	repository := filepath.Join(queueDir, filepath.FromSlash(anchor.ObjectRepository))
+	legacy := filepath.ToSlash(filepath.Join(".capsules", "queue", "external-objects.git"))
+	if anchor.ObjectRepository == legacy && strings.TrimSpace(s.QueueRoot) == "" {
+		root, rootErr := filepath.Abs(s.ProjectRoot)
+		if rootErr != nil {
+			return "", rootErr
+		}
+		repository = filepath.Join(root, filepath.FromSlash(anchor.ObjectRepository))
+	}
+	if filepath.Clean(repository) != filepath.Clean(wantRepository) {
+		return "", fmt.Errorf("queue: external bundle anchor object repository escapes queue authority")
+	}
+	return repository, nil
 }
 
 func (s Store) materializeExternalCandidate(ctx context.Context, workspace string, candidate Candidate) error {
@@ -482,7 +522,10 @@ func (s Store) materializeExternalCandidate(ctx context.Context, workspace strin
 	if err != nil {
 		return err
 	}
-	repository := filepath.Join(mustAbs(s.ProjectRoot), filepath.FromSlash(anchor.ObjectRepository))
+	repository, err := s.externalRepository(anchor)
+	if err != nil {
+		return err
+	}
 	if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", "--no-write-fetch-head", repository, anchor.Ref); err != nil {
 		return fmt.Errorf("queue: materialize external candidate in managed workspace: %w", err)
 	}

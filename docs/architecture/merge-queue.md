@@ -56,6 +56,50 @@ only into the managed speculative workspace; the existing receipt gate,
 target binding, deterministic gate, and protected compare-and-swap finalizer
 remain unchanged.
 
+### Authenticated remote admission
+
+`kitsoki queue serve-admission` is the network edge for a disposable worker
+that cannot and must not call the controller-local `submit-external` command.
+The exact hosted configuration, filesystem layout, wire request, and worker
+retry matrix are in the
+[remote queue-admission runbook](../runbooks/queue-admission-service.md).
+It accepts `POST /v1/queue/admissions` with:
+
+- schema `capsule-queue-remote-admission-request/v1`;
+- one sealed `pog/integration-train-worker-admission-handoff/v1`;
+- the exact Capsule CI receipt bytes as `receipt_base64`; and
+- target/finalization policy bound into the admission fingerprint.
+
+The handoff names the worker bundle by its exact object-store key, digest, and
+size. The service reads it through `internal/objectstore` (Spaces in
+production, the in-memory fake in tests), repeats receipt/result/handoff
+digest validation, streams the bundle into bounded private temporary storage,
+and then invokes the same Git head/base/lineage verifier as local external
+admission. Object credentials and URLs never enter the request or queue state.
+
+The service requires a bearer token. Authentication runs before its bounded
+concurrency admission: bad or missing credentials are always HTTP `401`
+(`unauthorized`), while an authenticated request that exceeds capacity is
+HTTP `429` (`rate_limited`) with `Retry-After`. Plaintext listeners are
+loopback-only, intended for an SSH tunnel; a non-loopback listener requires
+`--tls-cert` and `--tls-key`.
+
+`--root` is a service-owned durable authority outside the protected project.
+Receipts, replay intents, immutable responses, queue state, and
+`external-objects.git` all live below it. Run queue readers/workers against
+the exact `<root>/queue` with `--queue-root`; preparation is the first phase
+allowed to fetch the anchored candidate into a disposable project workspace.
+Admission itself leaves the project's refs, worktree, and Git object database
+unchanged.
+
+Each execution ID is durably bound to one normalized submission digest before
+the remote bundle is fetched. Exact replay returns the original admission,
+anchor, and candidate IDs. Any changed handoff, receipt, policy, or path under
+that execution is rejected as a substitution. Pending intent, queue import,
+record publication, and completion are restart-replayable, so a crash may
+leave private unreachable objects but can never publish a partial candidate
+or silently reinterpret a replay.
+
 ## Divergence: disjoint continues, conflicts get resolved
 
 When a candidate has diverged from the protected target, the reconciler
@@ -112,7 +156,8 @@ the typed `queue.ErrBusy` result within the configured lock wait.
 ## Surfaces
 
 - **CLI**: `kitsoki queue kick|park|resume|emergency|override|reject <id>
-  [--actor --reason --project]`, plus `submit`, `submit-external`, `status`, `worker`
+  [--actor --reason --project]`, plus `submit`, `submit-external`,
+  `serve-admission`, `status`, `worker`
   (`--retry-delay`, `--max-retry-delay`, `--max-attempts`).
 - **JSON-RPC** (runstatus server): `queue.status`, `queue.kick`, `queue.park`,
   `queue.resume`, `queue.emergency`, `queue.override`, `queue.reject` with

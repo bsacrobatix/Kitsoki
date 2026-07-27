@@ -60,6 +60,52 @@ func TestExternalBundleAdmissionKeepsControllerObjectFreeUntilNormalQueueLifecyc
 	}
 }
 
+func TestExternalBundleAdmissionAndPreparationUseSeparateQueueAuthority(t *testing.T) {
+	controller, bundlePath, result, submit := externalBundleFixture(t)
+	queueRoot := filepath.Join(t.TempDir(), "queue-authority")
+	store := Store{ProjectRoot: controller, QueueRoot: queueRoot}
+	projectQueue := filepath.Join(controller, ".capsules", "queue")
+	if _, err := os.Stat(projectQueue); !os.IsNotExist(err) {
+		t.Fatalf("project-local queue unexpectedly exists before admission: %v", err)
+	}
+
+	candidate, anchor, err := store.AdmitExternalBundle(context.Background(), ExternalBundleSubmission{
+		Result: result, BundlePath: bundlePath, Submit: submit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if anchor.ObjectRepository != "external-objects.git" {
+		t.Fatalf("external authority anchor repository = %q", anchor.ObjectRepository)
+	}
+	if _, err := os.Stat(projectQueue); !os.IsNotExist(err) {
+		t.Fatalf("external admission wrote project-local queue state: %v", err)
+	}
+	if _, err := gitOutput(context.Background(), controller, "cat-file", "-e", result.CandidateSHA+"^{commit}"); err == nil {
+		t.Fatal("external authority admission wrote protected project objects")
+	}
+	privateRepo := filepath.Join(queueRoot, "external-objects.git")
+	if got := git(t, privateRepo, "rev-parse", anchor.Ref); got != result.CandidateSHA {
+		t.Fatalf("external authority ref = %s, want %s", got, result.CandidateSHA)
+	}
+
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: controller, QueueRoot: queueRoot, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: controller, TargetRef: "main", SkipWIPPreservation: true},
+		GateVersion: "external-authority-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Candidates) != 1 || state.Candidates[0].ID != candidate.ID || state.Candidates[0].phase() != Landed {
+		t.Fatalf("external authority queue did not land candidate: %#v", state.Candidates)
+	}
+	if got := git(t, controller, "rev-parse", "main"); got != result.CandidateSHA {
+		t.Fatalf("protected main = %s, want %s", got, result.CandidateSHA)
+	}
+}
+
 func TestExternalBundleAdmissionRejectsTamperWrongHeadAndWrongBase(t *testing.T) {
 	t.Run("tamper", func(t *testing.T) {
 		controller, bundlePath, result, submit := externalBundleFixture(t)

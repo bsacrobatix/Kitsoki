@@ -35,6 +35,7 @@ type GateMemo interface {
 // that collision, exactly as GateVersion already assumes elsewhere.
 type FileGateMemo struct {
 	ProjectRoot string
+	QueueRoot   string
 }
 
 type gateMemoEntry struct {
@@ -89,6 +90,14 @@ func (m FileGateMemo) path(treeSHA, gateVersion, runtimeConfigDigest string) (st
 	if err != nil {
 		return "", false
 	}
+	dir := filepath.Join(root, ".capsules", "queue", "gate-memo")
+	if strings.TrimSpace(m.QueueRoot) != "" {
+		queueRoot, queueErr := filepath.Abs(m.QueueRoot)
+		if queueErr != nil {
+			return "", false
+		}
+		dir = filepath.Join(queueRoot, "gate-memo")
+	}
 	key := strings.TrimPrefix(fingerprint(treeSHA, gateVersion, runtimeConfigDigest), "sha256:")
-	return filepath.Join(root, ".capsules", "queue", "gate-memo", key+".json"), true
+	return filepath.Join(dir, key+".json"), true
 }

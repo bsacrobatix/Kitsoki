@@ -22,6 +22,7 @@ import (
 // an explicit staging-capsule operation.
 type StagingIntegration struct {
 	ProjectRoot string
+	QueueRoot   string
 	GateCommand string
 	Runner      CommandRunner
 }
@@ -37,6 +38,7 @@ type StagingIntegration struct {
 // retry_wait with the continuation available for a later queue pass.
 type ProtectedIntegration struct {
 	ProjectRoot     string
+	QueueRoot       string
 	TargetRef       string
 	ResolverCommand string
 	Runner          CommandRunner
@@ -85,7 +87,7 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", createBase, "--target", target); err != nil {
 		return Speculation{}, Environmental(err)
 	}
-	if err := (Store{ProjectRoot: root}).materializeExternalCandidate(ctx, workspace, c); err != nil {
+	if err := (Store{ProjectRoot: root, QueueRoot: p.QueueRoot}).materializeExternalCandidate(ctx, workspace, c); err != nil {
 		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 	}
 	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
@@ -641,7 +643,7 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 		// the lenient env-retry budget, matching ProtectedIntegration.
 		return Speculation{}, Environmental(err)
 	}
-	if err := (Store{ProjectRoot: root}).materializeExternalCandidate(ctx, workspace, c); err != nil {
+	if err := (Store{ProjectRoot: root, QueueRoot: s.QueueRoot}).materializeExternalCandidate(ctx, workspace, c); err != nil {
 		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 	}
 	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
