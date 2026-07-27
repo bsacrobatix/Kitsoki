@@ -269,3 +269,33 @@ queue directory:
 The same `--queue-root` is available on submit, external submit, process,
 migrate, sweep, approval, and operator verbs. Do not copy or mirror
 `state.json` into the project checkout: the external authority is canonical.
+
+### Hosted `integration/current` drain worker
+
+The hosted deployment installs
+`kitsoki-pog-integration-current-worker.service` but leaves it disabled. It is
+the only supported consumer for an `integration/current` candidate: its target,
+external queue root, vm-pool executor, and concurrency are all literal in the
+unit. It conflicts with the normal main-target worker, so do not run both.
+
+After a verified hosted deploy, a drain owner switches consumers only when the
+external queue status shows no active main-target lease:
+
+```sh
+# Stop the normal consumer before starting the mutually-exclusive train owner.
+systemctl stop kitsoki-queue-worker.service
+systemctl enable --now kitsoki-pog-integration-current-worker.service
+
+# Observe only the hosted canonical authority.
+/opt/kitsoki-hosted-pog/current/kitsoki queue status \
+  --project /opt/pog/current \
+  --queue-root /var/lib/kitsoki-queue-admission/pog/queue --json
+
+# After every train candidate is terminal, restore normal delivery.
+systemctl disable --now kitsoki-pog-integration-current-worker.service
+systemctl start kitsoki-queue-worker.service
+```
+
+The hosted installer refuses to deploy while this unit is enabled or active.
+That prevents a release switch from replacing the engine below an in-flight
+integration train; finish or park the train and restore the main worker first.

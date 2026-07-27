@@ -1,0 +1,54 @@
+# Installed disabled. Starting this worker is an explicit integration drain
+# window and systemd stops the main-target worker through this unit's conflict.
+[Unit]
+Description=Hosted POG integration/current Kitsoki queue worker
+Documentation=file:///opt/kitsoki-hosted-pog/current/docs/runbooks/queue-admission-service.md
+Requires=kitsoki-queue-admission.service
+After=network-online.target kitsoki-queue-admission.service
+Conflicts=kitsoki-queue-worker.service
+Before=kitsoki-queue-worker.service
+
+[Service]
+Type=simple
+User=pog
+Group=pog
+UMask=0077
+Environment=HOME=/var/lib/pog
+Environment=XDG_CACHE_HOME=/var/lib/pog/.cache
+Environment=KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current
+Environment=POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust
+EnvironmentFile=/etc/kitsoki/queue-worker.env
+ExecStartPre=/usr/bin/test -x /opt/kitsoki-hosted-pog/current/kitsoki
+ExecStartPre=/usr/bin/test -d /opt/pog/current
+ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue worker --project /opt/pog/current --queue-root /var/lib/kitsoki-queue-admission/pog/queue --target integration/current --executor vm-pool --executor-pipeline change --concurrency 1 --retry-delay 5m --max-retry-delay 30m --max-attempts 5
+Restart=always
+RestartSec=5
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kitsoki-pog-integration-current-worker
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+StateDirectory=pog
+StateDirectoryMode=0750
+LogsDirectory=pog
+LogsDirectoryMode=0750
+PrivateTmp=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

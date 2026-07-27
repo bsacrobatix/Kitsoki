@@ -26,6 +26,7 @@ for required in \
 	"$assets/kitsoki-queue-admission.service" \
 	"$assets/kitsoki-queue-worker-admission.conf" \
 	"$assets/kitsoki-queue-worker-hosted-engine.conf" \
+	"$assets/kitsoki-pog-integration-current-worker.service" \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
 	"$capsule_state_linker" \
@@ -187,6 +188,21 @@ grep -Fq -- '--executor-pipeline change' "$assets/kitsoki-queue-worker-hosted-en
 grep -q 'Environment=KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' "$assets/kitsoki-queue-worker-hosted-engine.conf"
 ! grep -q 'Environment=KITSOKI_SOURCE_DIR=/opt/kitsoki-src' "$assets/kitsoki-queue-worker-hosted-engine.conf"
 grep -q 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' "$assets/kitsoki-queue-worker-hosted-engine.conf"
+grep -Fqx 'Conflicts=kitsoki-queue-worker.service' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fqx 'Before=kitsoki-queue-worker.service' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fq -- '--queue-root /var/lib/kitsoki-queue-admission/pog/queue' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fq -- '--target integration/current' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fq -- '--concurrency 1' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fq -- '--executor vm-pool' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fq -- '--executor-pipeline change' "$assets/kitsoki-pog-integration-current-worker.service"
+! grep -Fq -- '--gate ' "$assets/kitsoki-pog-integration-current-worker.service"
+grep -Fq 'kitsoki-pog-integration-current-worker.service' "$assets/install.sh"
+grep -Fq 'refusing hosted deploy while integration/current worker is active or enabled' "$assets/install.sh"
+grep -Fq 'systemctl disable --now kitsoki-pog-integration-current-worker.service' "$assets/install.sh"
+grep -Fq 'Hosted `integration/current` drain worker' "$root/docs/runbooks/queue-admission-service.md"
+grep -Fq 'systemctl stop kitsoki-queue-worker.service' "$root/docs/runbooks/queue-admission-service.md"
+grep -Fq 'systemctl enable --now kitsoki-pog-integration-current-worker.service' "$root/docs/runbooks/queue-admission-service.md"
+grep -Fq 'systemctl start kitsoki-queue-worker.service' "$root/docs/runbooks/queue-admission-service.md"
 grep -Fq 'queue_admission_root=/var/lib/kitsoki-queue-admission/pog' "$assets/install.sh"
 grep -Fq 'install -d -o pog -g pog -m 0700 "$queue_admission_root"' "$assets/install.sh"
 grep -Fq 'EnvironmentFile=/etc/kitsoki/queue-admission.env' "$assets/kitsoki-queue-admission.service"

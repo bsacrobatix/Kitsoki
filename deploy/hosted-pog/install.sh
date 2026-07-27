@@ -61,7 +61,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer kitsoki-queue-admission.service kitsoki-queue-worker-admission.conf hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer kitsoki-queue-admission.service kitsoki-queue-worker-admission.conf kitsoki-pog-integration-current-worker.service hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -463,6 +463,7 @@ previous_queue_worker_engine="$stage/kitsoki-queue-worker.hosted-engine.conf.pre
 previous_queue_worker_admission="$stage/kitsoki-queue-worker.admission.conf.previous"
 previous_queue_admission_service="$stage/kitsoki-queue-admission.service.previous"
 previous_queue_admission_env="$stage/queue-admission.env.previous"
+previous_integration_worker="$stage/kitsoki-pog-integration-current-worker.service.previous"
 previous_colony_portfolio="$stage/pog-colony-runner.portfolio-authority.conf.previous"
 previous_colony_env="$stage/pog-colony-runner.env.previous"
 had_previous_kitsoki_service=0
@@ -473,6 +474,7 @@ had_previous_queue_worker_engine=0
 had_previous_queue_worker_admission=0
 had_previous_queue_admission_service=0
 had_previous_queue_admission_env=0
+had_previous_integration_worker=0
 had_previous_colony_portfolio=0
 had_previous_colony_env=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
@@ -506,6 +508,10 @@ fi
 if [ -f "$queue_admission_env" ]; then
 	cp "$queue_admission_env" "$previous_queue_admission_env"
 	had_previous_queue_admission_env=1
+fi
+if [ -f /etc/systemd/system/kitsoki-pog-integration-current-worker.service ]; then
+	cp /etc/systemd/system/kitsoki-pog-integration-current-worker.service "$previous_integration_worker"
+	had_previous_integration_worker=1
 fi
 if [ -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf ]; then
 	cp /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf "$previous_colony_portfolio"
@@ -611,6 +617,11 @@ rollback() {
 			else
 				rm -f "$queue_admission_env"
 			fi
+			if [ "$had_previous_integration_worker" -eq 1 ]; then
+				install -m 0644 "$previous_integration_worker" /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+			else
+				rm -f /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+			fi
 			if [ "$had_previous_colony_portfolio" -eq 1 ]; then
 				install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 				install -m 0644 "$previous_colony_portfolio" /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
@@ -661,6 +672,9 @@ trap rollback EXIT
 
 systemctl is-active --quiet pog-colony-runner.service && colony_was_active=1 || true
 systemctl is-active --quiet kitsoki-queue-worker.service && queue_worker_was_active=1 || true
+if systemctl is-active --quiet kitsoki-pog-integration-current-worker.service || systemctl is-enabled --quiet kitsoki-pog-integration-current-worker.service; then
+	die "refusing hosted deploy while integration/current worker is active or enabled; drain it and restore kitsoki-queue-worker first"
+fi
 systemctl is-active --quiet kitsoki-queue-admission.service && queue_admission_was_active=1 || true
 systemctl is-enabled --quiet kitsoki-queue-admission.service && queue_admission_was_enabled=1 || true
 systemctl is-active --quiet pog-worker-finalizer.timer && finalizer_timer_was_active=1 || true
@@ -763,6 +777,10 @@ if systemctl cat kitsoki-queue-worker.service >/dev/null 2>&1; then
 	install -m 0644 "$stage/kitsoki-queue-worker-admission.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
 	install -m 0644 "$stage/kitsoki-queue-worker-hosted-engine.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 fi
+# The integration worker is inactive by default and mutually exclusive with
+# the main worker. Operators enable it only for a deliberate train drain.
+install -m 0644 "$stage/kitsoki-pog-integration-current-worker.service" /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+systemctl disable --now kitsoki-pog-integration-current-worker.service >/dev/null 2>&1 || true
 install -m 0644 "$rendered_queue_admission_service" /etc/systemd/system/kitsoki-queue-admission.service
 install -m 0600 "$queue_admission_stage_env" "$queue_admission_env"
 services_changed=1

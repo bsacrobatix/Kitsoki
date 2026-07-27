@@ -133,7 +133,7 @@ expected_products="$2"
 expected_member_roots="$3"
 expected_portfolio_members="$4"
 node_bin=/opt/kitsoki-hosted-pog/node/current/bin/node
-systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal pog-worker-finalizer.timer kitsoki-queue-admission.service
+systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal pog-worker-finalizer.timer kitsoki-queue-admission.service kitsoki-queue-worker.service
 systemctl is-enabled --quiet pog-worker-finalizer.timer
 test "$(systemctl show --property Result --value pog-worker-finalizer.service)" = success
 test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/me)" = 401
@@ -149,6 +149,7 @@ active_pog_release="$(readlink -f /opt/pog/current)"
 test -x "$hosted_engine"
 test -x "$hosted_source/scripts/dev-workspace.sh"
 test -f /etc/systemd/system/kitsoki-queue-admission.service
+test -f /etc/systemd/system/kitsoki-pog-integration-current-worker.service
 test "$(stat -c '%U:%G %a' "$hosted_admission_root")" = 'pog:pog 700'
 test "$(stat -c '%U:%G %a' /etc/kitsoki/queue-admission.env)" = 'root:root 600'
 grep -Fq 'EnvironmentFile=/etc/kitsoki/queue-admission.env' /etc/systemd/system/kitsoki-queue-admission.service
@@ -156,6 +157,13 @@ grep -Fq -- '--listen 127.0.0.1:7444' /etc/systemd/system/kitsoki-queue-admissio
 grep -Fq -- "--root $hosted_admission_root" /etc/systemd/system/kitsoki-queue-admission.service
 grep -Fq -- "--project $active_pog_release" /etc/systemd/system/kitsoki-queue-admission.service
 grep -Fq 'Requires=kitsoki-queue-admission.service' /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
+grep -Fqx 'Conflicts=kitsoki-queue-worker.service' /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+grep -Fqx 'Before=kitsoki-queue-worker.service' /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+grep -Fq -- '--queue-root /var/lib/kitsoki-queue-admission/pog/queue' /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+grep -Fq -- '--target integration/current' /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+grep -Fq -- '--concurrency 1' /etc/systemd/system/kitsoki-pog-integration-current-worker.service
+! systemctl is-enabled --quiet kitsoki-pog-integration-current-worker.service
+! systemctl is-active --quiet kitsoki-pog-integration-current-worker.service
 test -z "$(ss -ltnH 'sport = :7444' | awk '$4 != "127.0.0.1:7444" { print }')"
 test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7444/v1/queue/admissions)" = 401
 # The hosted queue-worker drop-in replaces the old `/usr/local/bin/kitsoki`
@@ -361,7 +369,7 @@ for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
 	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
 done
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-admission.service,kitsoki-queue-worker-admission.conf,kitsoki-queue-worker-hosted-engine.conf,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-colony-runner-portfolio.conf,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,prune-releases.sh,state-content-digest.mjs} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-admission.service,kitsoki-queue-worker-admission.conf,kitsoki-queue-worker-hosted-engine.conf,kitsoki-pog-integration-current-worker.service,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-colony-runner-portfolio.conf,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,prune-releases.sh,state-content-digest.mjs} "$local_stage/"
 # POG's compatibility bridge still delegates lifecycle verbs to the checked-in
 # helper. Ship that exact-revision helper beside the immutable hosted binary;
 # the orchestrator must never require a mutable source checkout merely to close
