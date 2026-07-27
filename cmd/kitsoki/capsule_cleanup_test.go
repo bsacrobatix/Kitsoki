@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -46,5 +47,27 @@ func TestCapsuleCleanupWriteSurfacesTypedActivityDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "cleanup diagnostic [warning/lsof_irrelevant_tracefs_unavailable] lsof: workspace process inventory remained conclusive") {
 		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestCapsuleCleanupOwnerReconcileDryRunWritesTypedJSONToRootOutput(t *testing.T) {
+	project := t.TempDir()
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"capsule", "cleanup", "reconcile-owners", "--project", project, "--json"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) == "" {
+		t.Fatal("dry-run emitted no stdout")
+	}
+	var plan hygiene.OwnerReconcilePlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("stdout is not typed JSON: %v: %q", err, out.String())
+	}
+	if plan.Schema != hygiene.OwnerReconcileSchema || !plan.DryRun {
+		t.Fatalf("plan=%#v", plan)
 	}
 }
