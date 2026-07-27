@@ -142,7 +142,7 @@ type Instance struct {
 	UpdatedAt time.Time        `json:"updated_at"`
 }
 
-// FailureEvidence binds a failed record to the exact proof which produced the
+// FailureEvidence binds a failed record to the exact proof that produced the
 // failure. It intentionally lives with the instance so closing cannot turn an
 // arbitrary failed workspace into a short-retention deletion authority.
 type FailureEvidence struct {
