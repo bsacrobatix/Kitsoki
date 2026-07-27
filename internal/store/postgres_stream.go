@@ -48,6 +48,15 @@ const (
 	// file comment). Arbitrary but fixed; spells "kStream1" in ASCII.
 	pgStreamAppendLockKey int64 = 0x6B_53_74_72_65_61_6D_31
 
+	// EventStreamAppendLockKey is pgStreamAppendLockKey, exported so a
+	// non-live writer that must preserve the same no-skip ordering
+	// invariant — currently kitsoki/internal/dbmigrate, backfilling
+	// historical SQLite events into a Postgres events table — can take the
+	// identical pg_advisory_xact_lock before its own inserts. Any other use
+	// must uphold the same contract: hold the lock for the whole
+	// transaction that assigns stream_pos values.
+	EventStreamAppendLockKey = pgStreamAppendLockKey
+
 	// pgStreamPollDefault is the periodic re-check interval WaitForEvents
 	// falls back to when a NOTIFY is lost (or the listen conn breaks). It
 	// bounds staleness, not correctness.
