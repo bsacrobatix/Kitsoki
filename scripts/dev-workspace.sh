@@ -1433,7 +1433,28 @@ cmd_merge() {
     die "merge: rebased workspace tree differs from the expected preserved tree; original retained at $workspace_recovery_ref"
   fi
   if [ -n "$gate" ]; then
-    (cd "$path" && sh -c "$gate")
+    # A caller may be detached before a broad gate finishes.  Do not make its
+    # only failure evidence a terminal stream: retain an exact, owner-only
+    # transcript under the source project's Capsule state before returning the
+    # failing status.  Success leaves no extra artifact; a failed gate is the
+    # only condition that needs durable operator diagnosis.
+    local gate_status gate_evidence_dir gate_evidence
+    gate_evidence_dir="$repo/.capsules/gate-evidence"
+    mkdir -p "$gate_evidence_dir" || die "merge: could not create gate evidence directory"
+    chmod 700 "$gate_evidence_dir" 2>/dev/null || true
+    gate_evidence="$(mktemp "$gate_evidence_dir/$(safe_ref_fragment "$branch").$(date -u +%Y%m%dT%H%M%SZ).XXXXXX.log")" ||
+      die "merge: could not allocate gate evidence"
+    set +e
+    (cd "$path" && sh -c "$gate") >"$gate_evidence" 2>&1
+    gate_status=$?
+    set -e
+    if [ "$gate_status" -ne 0 ]; then
+      chmod 400 "$gate_evidence" 2>/dev/null || true
+      printf 'merge: validation gate failed (exit %s); retained evidence: %s\n' "$gate_status" "$gate_evidence" >&2
+      cat "$gate_evidence" >&2
+      return "$gate_status"
+    fi
+    rm -f "$gate_evidence"
   fi
   verify_clean_readable_checkout "$path" HEAD "merge: workspace after gate"
   [ "$(git -C "$path" rev-parse --verify HEAD)" = "$workspace_result" ] ||

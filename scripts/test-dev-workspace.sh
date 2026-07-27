@@ -87,6 +87,26 @@ printf 'staged first use\n' >"$first_use_workspace/first-use.txt"
 "$dev_workspace" merge --repo "$first_use_repo" --root "$first_use_root" "$first_use_workspace" --gate true --teardown >/dev/null
 [ "$(git -C "$first_use_repo" show staging/local:first-use.txt)" = "staged first use" ] || fail "first default merge did not establish staging/local"
 
+# A nonzero gate must leave a private, project-owned transcript even if its
+# caller is detached and loses terminal output. It must not advance staging.
+failure_json="$("$dev_workspace" create --repo "$first_use_repo" --root "$first_use_root" --id retained-gate-failure --branch agent/retained-gate-failure --json)"
+failure_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$failure_json")"
+printf 'must not stage\n' >"$failure_workspace/not-staged.txt"
+"$dev_workspace" commit --repo "$first_use_repo" --root "$first_use_root" "$failure_workspace" --message 'test: retained gate failure' >/dev/null
+failure_target="$(git -C "$first_use_repo" rev-parse staging/local)"
+set +e
+"$dev_workspace" merge --repo "$first_use_repo" --root "$first_use_root" "$failure_workspace" \
+  --gate 'printf "gate stdout\\n"; printf "gate stderr\\n" >&2; exit 23' >"$tmp/retained-gate-failure.out" 2>&1
+failure_status=$?
+set -e
+[ "$failure_status" -eq 23 ] || fail "failing gate status=$failure_status, want 23"
+[ "$(git -C "$first_use_repo" rev-parse staging/local)" = "$failure_target" ] || fail "failing gate moved staging"
+failure_evidence="$(find "$first_use_repo/.capsules/gate-evidence" -type f -name '*retained-gate-failure*.log' -print | sort | tail -1)"
+[ -n "$failure_evidence" ] || fail "failing gate did not retain evidence"
+grep -Fq 'gate stdout' "$failure_evidence" || fail "gate evidence lost stdout"
+grep -Fq 'gate stderr' "$failure_evidence" || fail "gate evidence lost stderr"
+grep -Fq 'retained evidence:' "$tmp/retained-gate-failure.out" || fail "gate failure did not name retained evidence"
+
 source_repo="$tmp/source"
 mkdir -p "$source_repo"
 git -C "$source_repo" init --quiet --initial-branch=main
