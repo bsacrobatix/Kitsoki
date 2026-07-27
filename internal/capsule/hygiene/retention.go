@@ -21,10 +21,15 @@ const (
 	RetentionReceiptSchema = "capsule-workspace-retention/v1"
 	PurgeReceiptSchema     = "capsule-workspace-purge/v1"
 	RetentionClearSchema   = "capsule-workspace-retention-clear/v1"
-	purgeIntentSchema      = "capsule-workspace-purge-intent/v1"
-	defaultPurgeMaxBytes   = int64(8 << 30)
-	defaultPurgeMinFree    = int64(16 << 20)
-	purgeFreeSlack         = int64(1 << 20)
+	// OwnerReconcileRetentionAge is deliberately available only to an
+	// owner-reconcile failure receipt. It is not a caller-selected purge
+	// option: the receipt itself must carry the complete, immutable failure
+	// proof below.
+	OwnerReconcileRetentionAge = 5 * time.Minute
+	purgeIntentSchema          = "capsule-workspace-purge-intent/v1"
+	defaultPurgeMaxBytes       = int64(8 << 30)
+	defaultPurgeMinFree        = int64(16 << 20)
+	purgeFreeSlack             = int64(1 << 20)
 )
 
 // RetentionProbe records an independent, durable close-time liveness fact.
@@ -36,20 +41,49 @@ type RetentionProbe struct {
 	Safe       bool      `json:"safe"`
 }
 
+// RetentionFailure is the immutable failure authority carried forward when a
+// strict owner reconciler proved a stranded workspace has no live owner. The
+// close receipt binds this source identity to the resulting quarantine; a
+// plain failed state, or a hand-authored "owner_reconcile" label, is never
+// enough to shorten retention.
+type RetentionFailure struct {
+	Schema           string    `json:"schema"`
+	Kind             string    `json:"kind"`
+	Action           string    `json:"action"`
+	WorkspaceID      string    `json:"workspace_id"`
+	SourceGeneration uint64    `json:"source_generation"`
+	Path             string    `json:"path"`
+	Head             string    `json:"head"`
+	Branch           string    `json:"branch"`
+	Owner            string    `json:"owner"`
+	Evidence         []string  `json:"evidence"`
+	RecordedAt       time.Time `json:"recorded_at"`
+}
+
+const (
+	ownerReconcileFailureSchema = "capsule-workspace-failure/v1"
+	ownerReconcileFailureKind   = "owner_reconcile"
+	ownerReconcileFailureAction = "mark_failed_cleanup_eligible"
+)
+
 // RetentionReceipt is produced by the dispatch finalizer/reaper before close.
 // It binds purge to one exact closed quarantine and recovery ref.
 type RetentionReceipt struct {
-	Schema           string         `json:"schema"`
-	Project          string         `json:"project"`
-	ProjectStateRoot string         `json:"project_state_root,omitempty"`
-	WorkspaceID      string         `json:"workspace_id"`
-	WorkspacePath    string         `json:"workspace_path"`
-	Head             string         `json:"head"`
-	RecoveryRef      string         `json:"recovery_ref"`
-	IssuedAt         time.Time      `json:"issued_at"`
-	EligibleAfter    time.Time      `json:"eligible_after"`
-	ProcessSnapshot  RetentionProbe `json:"process_snapshot"`
-	ActivityProbe    RetentionProbe `json:"activity_probe"`
+	Schema           string            `json:"schema"`
+	Project          string            `json:"project"`
+	ProjectStateRoot string            `json:"project_state_root,omitempty"`
+	WorkspaceID      string            `json:"workspace_id"`
+	WorkspacePath    string            `json:"workspace_path"`
+	Head             string            `json:"head"`
+	RecoveryRef      string            `json:"recovery_ref"`
+	Branch           string            `json:"branch,omitempty"`
+	Owner            string            `json:"owner,omitempty"`
+	SourceGeneration uint64            `json:"source_generation,omitempty"`
+	Failure          *RetentionFailure `json:"failure,omitempty"`
+	IssuedAt         time.Time         `json:"issued_at"`
+	EligibleAfter    time.Time         `json:"eligible_after"`
+	ProcessSnapshot  RetentionProbe    `json:"process_snapshot"`
+	ActivityProbe    RetentionProbe    `json:"activity_probe"`
 }
 
 // ProbeWorkspaceActivity exposes the same fail-closed lsof inventory used by
@@ -217,9 +251,13 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	minAge := opts.MinAge
-	if minAge == 0 {
-		minAge = defaultWorkspaceAge
+	// Eligibility is a receipt policy, not a purge-call preference. In
+	// particular, a caller cannot lower a normal close from 24 hours merely by
+	// supplying a small MinAge. The one short path is proven by the immutable
+	// owner-reconcile failure object embedded in the receipt.
+	minAge, err := retentionReceiptMinimumAge(root, opts.Receipt)
+	if err != nil {
+		return PurgeResult{}, err
 	}
 	keep := opts.KeepWorkspaces
 	if keep == 0 {
@@ -576,10 +614,10 @@ func migrateReceiptlessClosedQuarantines(ctx context.Context, root string, opts 
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	minAge := opts.MinAge
-	if minAge == 0 {
-		minAge = defaultWorkspaceAge
-	}
+	// Historical receiptless quarantines are ordinary close recovery, never an
+	// owner-reconcile acceleration. Keep their original 24-hour policy even if
+	// an operator supplied a smaller cleanup interval.
+	minAge := DefaultWorkspaceRetentionAge
 	activityReader := opts.ReadWorkspaceActivity
 	if activityReader == nil {
 		activityReader = ProbeWorkspaceActivity
@@ -925,6 +963,13 @@ func validateRetentionReceipt(root string, receipt RetentionReceipt, now time.Ti
 	if err := validateRetentionReceiptBinding(root, receipt); err != nil {
 		return err
 	}
+	policyAge, err := retentionReceiptMinimumAge(root, receipt)
+	if err != nil {
+		return err
+	}
+	if minAge != policyAge {
+		return fmt.Errorf("capsule retention: purge minimum age does not match receipt policy")
+	}
 	if receipt.IssuedAt.IsZero() || receipt.EligibleAfter.IsZero() ||
 		receipt.ProcessSnapshot.CapturedAt.IsZero() || receipt.ActivityProbe.CapturedAt.IsZero() {
 		return fmt.Errorf("capsule retention: receipt timestamps are incomplete")
@@ -946,6 +991,92 @@ func validateRetentionReceipt(root string, receipt RetentionReceipt, now time.Ti
 	if receipt.IssuedAt.Sub(receipt.ProcessSnapshot.CapturedAt) > 5*time.Minute ||
 		receipt.IssuedAt.Sub(receipt.ActivityProbe.CapturedAt) > 5*time.Minute {
 		return fmt.Errorf("capsule retention: close-time probes are stale")
+	}
+	return nil
+}
+
+// retentionReceiptMinimumAge returns the only retention interval a receipt is
+// allowed to use. Ordinary close receipts, including arbitrary failed
+// workspaces, retain the normal 24-hour guard. An owner-reconcile receipt is
+// allowed to use the five-minute cooling window only after every source fact
+// binds to this exact closed quarantine.
+func retentionReceiptMinimumAge(root string, receipt RetentionReceipt) (time.Duration, error) {
+	if receipt.Failure == nil {
+		return DefaultWorkspaceRetentionAge, nil
+	}
+	failure := *receipt.Failure
+	if failure.Kind != ownerReconcileFailureKind {
+		return DefaultWorkspaceRetentionAge, nil
+	}
+	if failure.Schema != ownerReconcileFailureSchema || failure.Action != ownerReconcileFailureAction {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure authority is malformed")
+	}
+	if failure.WorkspaceID == "" || filepath.Base(failure.WorkspaceID) != failure.WorkspaceID || strings.HasPrefix(failure.WorkspaceID, "closed-") {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure workspace identity is invalid")
+	}
+	if failure.SourceGeneration == 0 || receipt.SourceGeneration != failure.SourceGeneration {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure generation does not bind the close receipt")
+	}
+	if strings.TrimSpace(receipt.Branch) == "" || strings.TrimSpace(receipt.Owner) == "" ||
+		failure.Branch != receipt.Branch || failure.Owner != receipt.Owner {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure branch or owner does not bind the close receipt")
+	}
+	if !isObjectID(failure.Head) || failure.Head != receipt.Head {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure head does not bind the close receipt")
+	}
+	if !strings.HasPrefix(receipt.WorkspaceID, "closed-"+failure.WorkspaceID+"-") {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure workspace does not bind the closed quarantine")
+	}
+	if failure.RecordedAt.IsZero() || receipt.IssuedAt.IsZero() || failure.RecordedAt.After(receipt.IssuedAt) {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure timestamp does not predate close")
+	}
+	path, err := canonicalPath(failure.Path)
+	if err != nil || !pathContains(filepath.Join(root, ".capsules", "workspaces"), path) || filepath.Base(path) != failure.WorkspaceID {
+		return 0, fmt.Errorf("capsule retention: owner-reconcile failure path does not bind the managed source workspace")
+	}
+	if err := validateOwnerReconcileEvidence(failure.Evidence); err != nil {
+		return 0, err
+	}
+	return OwnerReconcileRetentionAge, nil
+}
+
+func validateOwnerReconcileEvidence(evidence []string) error {
+	required := map[string]bool{
+		"managed_path":             false,
+		"manifest_identity":        false,
+		"open-file_inactive":       false,
+		"process-command_inactive": false,
+	}
+	identity := false
+	lease := false
+	for _, item := range evidence {
+		switch item {
+		case "managed_path", "manifest_identity", "open-file_inactive", "process-command_inactive":
+			if required[item] {
+				return fmt.Errorf("capsule retention: owner-reconcile failure evidence is duplicated")
+			}
+			required[item] = true
+		case "owner_marker", "legacy_git_identity":
+			if identity {
+				return fmt.Errorf("capsule retention: owner-reconcile failure identity evidence is ambiguous")
+			}
+			identity = true
+		case "lease_has_no_live_expiry", "lease_expired":
+			if lease {
+				return fmt.Errorf("capsule retention: owner-reconcile failure lease evidence is ambiguous")
+			}
+			lease = true
+		default:
+			return fmt.Errorf("capsule retention: owner-reconcile failure evidence %q is not recognized", item)
+		}
+	}
+	for item, present := range required {
+		if !present {
+			return fmt.Errorf("capsule retention: owner-reconcile failure evidence %q is required", item)
+		}
+	}
+	if !identity || !lease {
+		return fmt.Errorf("capsule retention: owner-reconcile failure requires one identity and one lease proof")
 	}
 	return nil
 }

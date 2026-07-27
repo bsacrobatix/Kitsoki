@@ -439,7 +439,7 @@ func TestClearRetainedWorkspacesMigratesReceiptlessClosedQuarantineBeforePurge(t
 		t.Fatalf("receipt migration created archive payloads: %v", err)
 	}
 
-	options.Now = func() time.Time { return now.Add(6 * time.Minute) }
+	options.Now = func() time.Time { return now.Add(24*time.Hour + time.Minute) }
 	second, err := ClearRetainedWorkspaces(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
@@ -452,6 +452,93 @@ func TestClearRetainedWorkspacesMigratesReceiptlessClosedQuarantineBeforePurge(t
 	}
 	if got := strings.TrimSpace(runHygieneCommand(t, root, "git", "rev-parse", recoveryRef+"^{commit}")); got != head {
 		t.Fatalf("purge changed recovery ref: got %s want %s", got, head)
+	}
+}
+
+func TestOwnerReconcileFailureReceiptIsTheOnlyShortRetentionAuthority(t *testing.T) {
+	now := retentionFixtureNow()
+	makeReceipt := func(t *testing.T) (string, RetentionReceipt) {
+		t.Helper()
+		root := t.TempDir()
+		initLegacyProject(t, root)
+		workspaceID := "orphaned-worker"
+		quarantineID := "closed-" + workspaceID + "-20260727T000000Z-1-0"
+		workspace := writeLegacyWorkspace(t, root, quarantineID, now.Add(-48*time.Hour), false, false)
+		// The original managed source path remains as an evidence-only marker in
+		// this fixture. Production reconciliation records it before close.
+		sourcePath := filepath.Join(root, ".capsules", "workspaces", workspaceID)
+		if err := os.MkdirAll(sourcePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
+		recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+		runHygieneGit(t, root, "update-ref", recoveryRef, head)
+		branch := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "branch", "--show-current"))
+		issued := now.Add(-OwnerReconcileRetentionAge)
+		return root, RetentionReceipt{
+			Schema:           RetentionReceiptSchema,
+			Project:          root,
+			WorkspaceID:      quarantineID,
+			WorkspacePath:    filepath.ToSlash(filepath.Join(".capsules", "workspaces", quarantineID)),
+			Head:             head,
+			RecoveryRef:      recoveryRef,
+			Branch:           branch,
+			Owner:            "reaper",
+			SourceGeneration: 7,
+			IssuedAt:         issued,
+			EligibleAfter:    issued.Add(OwnerReconcileRetentionAge),
+			ProcessSnapshot:  RetentionProbe{Kind: "process-table", CapturedAt: issued.Add(-time.Minute), Safe: true},
+			ActivityProbe:    RetentionProbe{Kind: "open-file-scan", CapturedAt: issued.Add(-2 * time.Minute), Safe: true},
+			Failure: &RetentionFailure{
+				Schema:           ownerReconcileFailureSchema,
+				Kind:             ownerReconcileFailureKind,
+				Action:           ownerReconcileFailureAction,
+				WorkspaceID:      workspaceID,
+				SourceGeneration: 7,
+				Path:             sourcePath,
+				Head:             head,
+				Branch:           branch,
+				Owner:            "reaper",
+				Evidence:         []string{"managed_path", "manifest_identity", "legacy_git_identity", "open-file_inactive", "process-command_inactive", "lease_expired"},
+				RecordedAt:       issued.Add(-time.Minute),
+			},
+		}
+	}
+
+	t.Run("strict owner reconcile permits the five minute cooloff", func(t *testing.T) {
+		root, receipt := makeReceipt(t)
+		result, err := PurgeClosedWorkspace(context.Background(), PurgeOptions{
+			ProjectRoot: root, Receipt: receipt, KeepWorkspaces: -1, CurrentPath: root,
+			Now: func() time.Time { return now }, ReadWorkspaceActivity: inactiveRetentionActivity,
+			ReadDiskUsage: stableRetentionDiskUsage,
+			CloseWorkspace: func(_ context.Context, project string, candidate Candidate) error {
+				return os.RemoveAll(filepath.Join(project, filepath.FromSlash(candidate.Path)))
+			},
+		})
+		if err != nil || !result.OK {
+			t.Fatalf("owner-reconcile purge result=%+v err=%v", result, err)
+		}
+	})
+
+	for _, mutation := range []struct {
+		name   string
+		mutate func(*RetentionReceipt)
+	}{
+		{name: "plain failed receipt cannot accelerate", mutate: func(r *RetentionReceipt) { r.Failure = nil }},
+		{name: "wrong action cannot accelerate", mutate: func(r *RetentionReceipt) { r.Failure.Action = "mark_failed" }},
+		{name: "missing liveness proof cannot accelerate", mutate: func(r *RetentionReceipt) { r.Failure.Evidence = r.Failure.Evidence[:5] }},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			root, receipt := makeReceipt(t)
+			mutation.mutate(&receipt)
+			_, err := PurgeClosedWorkspace(context.Background(), PurgeOptions{
+				ProjectRoot: root, Receipt: receipt, KeepWorkspaces: -1, CurrentPath: root,
+				Now: func() time.Time { return now }, ReadWorkspaceActivity: inactiveRetentionActivity, ReadDiskUsage: stableRetentionDiskUsage,
+			})
+			if err == nil {
+				t.Fatal("arbitrary failed receipt shortened retention")
+			}
+		})
 	}
 }
 
