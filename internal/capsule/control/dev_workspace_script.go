@@ -173,7 +173,10 @@ func (p DevWorkspaceScriptProvider) Create(ctx context.Context, def Definition, 
 			return MaterializedWorkspace{}, fmt.Errorf("dev workspace script: configured base %q is unavailable in this checkout; run from the protected project checkout or refresh its local branch: %w", base, err)
 		}
 	}
-	args := []string{"create", "--repo", root, "--root", filepath.Dir(in.Path), "--id", in.ID, "--branch", branch, "--base", base, "--target", development.Target}
+	// The compatibility workspace writes the durable lease owner into its
+	// ignored owner marker. This makes a future owner reconciler able to prove
+	// that a stale record still names the same materialized identity.
+	args := []string{"create", "--repo", root, "--root", filepath.Dir(in.Path), "--id", in.ID, "--branch", branch, "--base", base, "--target", development.Target, "--session-id", in.Lease.Owner}
 	if development.Bootstrap {
 		args = append(args, "--bootstrap")
 	}

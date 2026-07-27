@@ -11,7 +11,7 @@ import (
 
 func capsuleCleanupCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "cleanup", Short: "Plan and apply local Capsule disk hygiene"}
-	cmd.AddCommand(capsuleCleanupPlanCmd(), capsuleCleanupApplyCmd(), capsuleCleanupClearCmd())
+	cmd.AddCommand(capsuleCleanupPlanCmd(), capsuleCleanupApplyCmd(), capsuleCleanupClearCmd(), capsuleCleanupOwnerReconcileCmd())
 	return cmd
 }
 
