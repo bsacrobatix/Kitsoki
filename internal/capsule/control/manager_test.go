@@ -220,6 +220,8 @@ func TestManagerCloseRemovesIncompleteFailedWorkspaceWithoutProviderSentinel(t *
 }
 
 func TestManagerCloseRoutesOnlyEvidenceBoundFailedWorkspaceThroughProvider(t *testing.T) {
+	// This is the only failed-state route permitted to retain a workspace for
+	// receipt-bound quarantine instead of incomplete-materialization removal.
 	root := t.TempDir()
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	path := filepath.Join(workspaceRoot, "reconciled")
