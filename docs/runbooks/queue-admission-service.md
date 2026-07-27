@@ -145,6 +145,26 @@ Authentication is evaluated before capacity. An invalid credential is always
 `401`, even while the authenticated admission limit is exhausted; it is never
 reported as `429`.
 
+### Native Capsule remote promotion
+
+`kitsoki capsule promote --remote-admission-url ...` admits a sealed managed
+Capsule through this service, but admission is not delivery. It returns the
+durable admission, anchor, candidate, and current candidate phase. Its
+`status.terminal` is true only for `landed` or `rejected`; `queued`,
+`retry_wait`, and `needs_input` are deliberately not success.
+
+Remote promotion requires `--remote-status-command` to be the exact command
+for this authority host, for example:
+
+```sh
+ssh "$ORCH_HOST" '/opt/kitsoki/bin/kitsoki queue status --project /opt/pog/source --queue-root /var/lib/kitsoki-queue-admission/pog/queue --json'
+```
+
+The client prints that command beside the immutable candidate ID and never
+executes or polls it locally. This keeps the orchestrator read-only and makes
+the canonical hosted queue, rather than a local mirror, the authority for
+terminal delivery state.
+
 ## Queue consumption
 
 All queue control surfaces that need this authority accept the exact external

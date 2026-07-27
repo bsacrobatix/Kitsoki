@@ -35,9 +35,20 @@ func TestCapsulePromoteExposesExplicitEmergencySkipTestsFlag(t *testing.T) {
 
 func TestCapsulePromoteRemoteAdmissionFlagsAreExplicit(t *testing.T) {
 	cmd := capsulePromoteCmd()
-	for _, name := range []string{"remote-admission-url", "remote-admission-token-env", "remote-bucket-url", "remote-target-base-sha", "remote-train"} {
+	for _, name := range []string{"remote-admission-url", "remote-admission-token-env", "remote-bucket-url", "remote-target-base-sha", "remote-train", "remote-status-command"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("capsule promote is missing --%s", name)
+		}
+	}
+}
+
+func TestRemoteCandidateStatusDistinguishesAdmissionFromTerminalDelivery(t *testing.T) {
+	if remoteCandidateTerminal(queue.Queued) {
+		t.Fatal("queued remote admission was falsely reported terminal")
+	}
+	for _, status := range []queue.Status{queue.Landed, queue.Rejected} {
+		if !remoteCandidateTerminal(status) {
+			t.Fatalf("terminal status %q was not reported terminal", status)
 		}
 	}
 }

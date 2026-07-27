@@ -63,7 +63,7 @@ type capsulePromoteResult struct {
 
 func capsulePromoteCmd() *cobra.Command {
 	var project, workspace, pipeline, target, gate, message, resolver, repair string
-	var remoteURL, remoteTokenEnv, remoteBucketURL, remoteKeyEnv, remoteSecretEnv, remoteTargetBaseSHA, remoteTrain string
+	var remoteURL, remoteTokenEnv, remoteBucketURL, remoteKeyEnv, remoteSecretEnv, remoteTargetBaseSHA, remoteTrain, remoteStatusCommand string
 	var current, wait, jsonOut, skipTests bool
 	cmd := &cobra.Command{
 		Use:   "promote",
@@ -89,7 +89,7 @@ func capsulePromoteCmd() *cobra.Command {
 				RepairCommand:   repair,
 				SkipTests:       skipTests,
 				Wait:            wait,
-				RemoteAdmission: remoteAdmissionOptions{URL: remoteURL, TokenEnv: remoteTokenEnv, BucketURL: remoteBucketURL, KeyEnv: remoteKeyEnv, SecretEnv: remoteSecretEnv, TargetBaseSHA: remoteTargetBaseSHA, TrainID: remoteTrain},
+				RemoteAdmission: remoteAdmissionOptions{URL: remoteURL, TokenEnv: remoteTokenEnv, BucketURL: remoteBucketURL, KeyEnv: remoteKeyEnv, SecretEnv: remoteSecretEnv, TargetBaseSHA: remoteTargetBaseSHA, TrainID: remoteTrain, StatusCommand: remoteStatusCommand},
 			})
 			if err != nil {
 				return err
@@ -116,6 +116,7 @@ func capsulePromoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&remoteSecretEnv, "remote-bucket-secret-env", "KITSOKI_WORKER_OUTPUTS_SECRET_KEY", "environment variable holding the bucket secret")
 	cmd.Flags().StringVar(&remoteTargetBaseSHA, "remote-target-base-sha", "", "exact integration target base SHA bound into remote admission")
 	cmd.Flags().StringVar(&remoteTrain, "remote-train", "", "immutable integration train identity required for remote admission")
+	cmd.Flags().StringVar(&remoteStatusCommand, "remote-status-command", "", "exact hosted queue-status command; printed with the durable remote candidate identity and never executed locally")
 	return cmd
 }
 

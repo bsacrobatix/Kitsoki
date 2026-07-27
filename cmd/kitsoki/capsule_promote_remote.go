@@ -35,6 +35,7 @@ type remoteAdmissionOptions struct {
 	SecretEnv     string
 	TargetBaseSHA string
 	TrainID       string
+	StatusCommand string
 }
 
 type remoteAdmissionResult struct {
@@ -43,6 +44,17 @@ type remoteAdmissionResult struct {
 	BundleKey   string                   `json:"bundle_key"`
 	HandoffKey  string                   `json:"handoff_key"`
 	Response    admissionserver.Response `json:"response"`
+	Status      remoteCandidateStatus    `json:"status"`
+}
+
+// remoteCandidateStatus is a snapshot, not a poll. The external admission
+// record is durable, while this explicit operator command is the supported
+// way to observe later worker state on the queue authority host.
+type remoteCandidateStatus struct {
+	CandidateID   string       `json:"candidate_id"`
+	Phase         queue.Status `json:"phase"`
+	Terminal      bool         `json:"terminal"`
+	StatusCommand string       `json:"status_command"`
 }
 
 type remoteAdmissionHTTPError struct {
@@ -121,7 +133,7 @@ func remoteCapsuleAdmission(ctx context.Context, opts capsulePromoteOptions, ins
 	if err != nil {
 		return remoteAdmissionResult{}, err
 	}
-	return remoteAdmissionResult{Schema: remoteAdmissionExecutionSchema, ExecutionID: executionID, BundleKey: result.BundleKey, HandoffKey: handoff.HandoffKey, Response: response}, nil
+	return remoteAdmissionResult{Schema: remoteAdmissionExecutionSchema, ExecutionID: executionID, BundleKey: result.BundleKey, HandoffKey: handoff.HandoffKey, Response: response, Status: remoteCandidateStatus{CandidateID: response.Candidate.ID, Phase: response.Candidate.Status, Terminal: remoteCandidateTerminal(response.Candidate.Status), StatusCommand: remote.StatusCommand}}, nil
 }
 
 // validateRemoteAdmissionOptions runs before CI dispatch. Missing credentials
@@ -139,6 +151,10 @@ func validateRemoteAdmissionOptions(opts capsulePromoteOptions) error {
 	}
 	if strings.TrimSpace(remote.TrainID) == "" || strings.ContainsAny(remote.TrainID, " /\\\t\n") {
 		return fmt.Errorf("capsule promote: --remote-train must be a safe non-empty train id")
+	}
+	if strings.TrimSpace(remote.StatusCommand) == "" || strings.ContainsAny(remote.StatusCommand, "\r\n") ||
+		!strings.Contains(remote.StatusCommand, "queue status") || !strings.Contains(remote.StatusCommand, "--json") {
+		return fmt.Errorf("capsule promote: --remote-status-command must be the exact hosted `kitsoki queue status ... --json` command")
 	}
 	if strings.TrimSpace(remote.BucketURL) == "" {
 		return fmt.Errorf("capsule promote: --remote-bucket-url is required for remote admission")
@@ -285,4 +301,8 @@ func fullGitSHA(value string) bool {
 		}
 	}
 	return true
+}
+
+func remoteCandidateTerminal(status queue.Status) bool {
+	return status == queue.Landed || status == queue.Rejected
 }
