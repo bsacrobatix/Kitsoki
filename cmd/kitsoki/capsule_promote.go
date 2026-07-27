@@ -18,6 +18,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/headroom"
 	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/capsule/receipt"
 	"kitsoki/internal/capsule/reconcile"
@@ -306,7 +307,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		repairer = queue.ShellRepairer{Command: opts.RepairCommand}
 	}
 	state, err := qstore.Process(ctx, queue.ProcessDeps{
-		Integration: queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand},
+		Integration: queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
 		Gate:        queue.ShellGate{Command: opts.GateCommand},
 		Repairer:    repairer,
 		Finalizer:   queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},

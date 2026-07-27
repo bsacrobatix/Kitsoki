@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"kitsoki/internal/capsule/headroom"
 	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
@@ -127,6 +128,10 @@ type Reconciler struct {
 	Gates     GateVerifier
 	Events    EventSink
 	Now       func() time.Time
+	// Headroom guards local continuation artifact and checkout materialization.
+	// Queue constructors install headroom.Default(); a zero value is only for
+	// in-process fixture reconcilers.
+	Headroom headroom.Guard
 }
 type PlanRequest struct {
 	Workspace            string

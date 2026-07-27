@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kitsoki/internal/capsule/headroom"
 )
 
 // This file closes three coverage gaps identified in staging.go/queue.go:
@@ -457,6 +459,23 @@ func TestStagingIntegrationSpeculateWorkspaceCreateFailureIsEnvironmental(t *tes
 	var envErr EnvError
 	if !errors.As(err, &envErr) {
 		t.Fatalf("StagingIntegration.Speculate workspace-create failure not classified environmental: %v", err)
+	}
+}
+
+func TestStagingIntegrationSpeculateFailsClosedBeforeWorkspaceCreateWhenHeadroomIsLow(t *testing.T) {
+	root := protectedQueueRepo(t)
+	s := StagingIntegration{
+		ProjectRoot: root, GateCommand: "true",
+		Headroom: headroom.Guard{Enabled: true, FreeBytes: func(string) (int64, error) { return headroom.MinimumFloorBytes - 1, nil }},
+	}
+	_, err := s.Speculate(context.Background(), Candidate{ID: "headroom", SHA: strings.Repeat("0", 40)}, nil)
+	var refusal *headroom.Error
+	var envErr EnvError
+	if !errors.As(err, &refusal) || !errors.As(err, &envErr) {
+		t.Fatalf("err=%v, want typed environmental headroom refusal", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, ".capsules", "workspaces", "queue-headroom")); !os.IsNotExist(statErr) {
+		t.Fatalf("headroom refusal created speculative workspace: %v", statErr)
 	}
 }
 

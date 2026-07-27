@@ -72,6 +72,9 @@ func (r Reconciler) MaterializeConflictArtifact(ctx context.Context, p Plan, pro
 	if err != nil {
 		return ConflictArtifact{}, "", err
 	}
+	if err := r.Headroom.Ensure(root); err != nil {
+		return ConflictArtifact{}, "", err
+	}
 	// p.Expected.Target was observed from root moments ago and may be newer
 	// than anything reachable in p.Workspace — a reused speculation workspace
 	// only has whatever was reachable at its own clone/last-fetch time, and
@@ -157,6 +160,9 @@ func (r Reconciler) MaterializeIntegrationInstance(ctx context.Context, p Plan, 
 		}
 		return existing, artifactPath, nil
 	} else if !os.IsNotExist(err) {
+		return IntegrationInstance{}, "", err
+	}
+	if err := r.Headroom.Ensure(root); err != nil {
 		return IntegrationInstance{}, "", err
 	}
 	instancePath := filepath.Join(syncDir, p.Continuation.Token+".integration")

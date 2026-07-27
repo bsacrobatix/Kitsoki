@@ -3,12 +3,14 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"kitsoki/internal/capsule/headroom"
 	"kitsoki/internal/capsuletest"
 )
 
@@ -49,6 +51,27 @@ func TestPlanClassifiesDivergedCapsule(t *testing.T) {
 	}
 	if len(events) != 2 || events[1].Kind != "capsule.sync.conflicted" || events[1].ContinuationToken != p.Continuation.Token {
 		t.Fatalf("conflicted events %#v", events)
+	}
+}
+
+func TestContinuationMaterializationFailsClosedOnLowHeadroom(t *testing.T) {
+	dir := capsuletest.Open(t, "diverged-remote")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".kitsoki-capsule\ncapsule-manifest.json\npeers/\n.capsules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "update-index", "--assume-unchanged", "peers/origin.git/refs/heads/main")
+	r := Reconciler{VCS: Git{}, Headroom: headroom.Guard{Enabled: true, FreeBytes: func(string) (int64, error) { return headroom.MinimumFloorBytes - 1, nil }}}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "origin/main", Operation: Refresh, Generation: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = r.MaterializeConflictArtifact(context.Background(), p, dir)
+	var refusal *headroom.Error
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err=%v, want typed headroom refusal", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".capsules", "sync", p.Continuation.Token+".conflict.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("headroom refusal wrote continuation artifact: %v", statErr)
 	}
 }
 

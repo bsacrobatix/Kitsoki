@@ -2,11 +2,14 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kitsoki/internal/capsule/headroom"
 )
 
 type defs map[string]Definition
@@ -18,6 +21,27 @@ func (d defs) Get(_ context.Context, id string) (Definition, error) {
 	}
 	return v, nil
 }
+
+func TestManagerCreateFailsClosedBeforeWorkspaceWriteWhenHeadroomIsLow(t *testing.T) {
+	root := t.TempDir()
+	p := &provider{name: "synthetic"}
+	m := &Manager{
+		Definitions: defs{"clean": {ID: "clean", Schema: DefinitionSchema, Source: Source{Kind: SourceSynthetic, SyntheticSpec: "x"}, Digest: "sha256:x"}},
+		Instances:   storeForHeadroomTest(), Providers: map[string]WorkspaceProvider{"synthetic": p},
+		Grant:    ScopeGrant{ProjectRoot: root, WorkspaceRoots: []string{filepath.Join(root, ".capsules")}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}},
+		Headroom: headroom.Guard{Enabled: true, FreeBytes: func(string) (int64, error) { return headroom.MinimumFloorBytes - 1, nil }},
+	}
+	_, err := m.Create(context.Background(), CreateRequest{ID: "refused", DefinitionID: "clean", Owner: "agent"})
+	var refusal *headroom.Error
+	if !errors.As(err, &refusal) || p.calls != 0 {
+		t.Fatalf("err=%v provider calls=%d", err, p.calls)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, ".capsules")); !os.IsNotExist(statErr) {
+		t.Fatalf("headroom refusal wrote workspace root: %v", statErr)
+	}
+}
+
+func storeForHeadroomTest() *MemoryInstanceStore          { return NewMemoryInstanceStore() }
 func (d defs) List(context.Context) ([]Definition, error) { return nil, nil }
 
 type provider struct {

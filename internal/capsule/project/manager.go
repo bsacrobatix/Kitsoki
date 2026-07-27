@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/headroom"
 )
 
 // ScopeOptions is the immutable authority requested by a project front door.
@@ -102,6 +103,7 @@ func OpenScoped(root string, scope ScopeOptions) (*control.Manager, error) {
 		Definitions: definitions,
 		Instances:   control.FileInstanceStore{Root: roots[0]},
 		Providers:   providers,
+		Headroom:    headroom.Default(),
 		Grant: control.ScopeGrant{
 			Owner:          strings.TrimSpace(scope.Owner),
 			ProjectRoot:    abs,

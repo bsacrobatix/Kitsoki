@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"kitsoki/internal/capsule/headroom"
 	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
 )
@@ -25,6 +26,7 @@ type StagingIntegration struct {
 	QueueRoot   string
 	GateCommand string
 	Runner      CommandRunner
+	Headroom    headroom.Guard
 }
 
 // ProtectedIntegration prepares the exact tree that will be compare-and-swap
@@ -45,6 +47,7 @@ type ProtectedIntegration struct {
 	// KitsokiBin overrides the binary used to launch the git-ops
 	// conflict_resolver; the running executable is used when empty.
 	KitsokiBin string
+	Headroom   headroom.Guard
 }
 
 func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
@@ -54,6 +57,9 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	root, err := p.root()
 	if err != nil {
 		return Speculation{}, err
+	}
+	if err := p.Headroom.Ensure(root); err != nil {
+		return Speculation{}, Environmental(err)
 	}
 	target := p.targetRef()
 	id := "queue-" + c.ID
@@ -148,11 +154,12 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 		}
 		return spec, nil
 	}
-	artifact, artifactPath, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeConflictArtifact(ctx, plan, root)
+	reconciler := reconcile.Reconciler{VCS: reconcile.Git{}, Headroom: p.Headroom}
+	artifact, artifactPath, err := reconciler.MaterializeConflictArtifact(ctx, plan, root)
 	if err != nil {
 		return spec, Environmental(err)
 	}
-	instance, instanceArtifact, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeIntegrationInstance(ctx, plan, root)
+	instance, instanceArtifact, err := reconciler.MaterializeIntegrationInstance(ctx, plan, root)
 	if err != nil {
 		return spec, Environmental(err)
 	}
@@ -622,6 +629,9 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 	root, err := s.root()
 	if err != nil {
 		return Speculation{}, err
+	}
+	if err := s.Headroom.Ensure(root); err != nil {
+		return Speculation{}, Environmental(err)
 	}
 	id := "queue-" + c.ID
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")

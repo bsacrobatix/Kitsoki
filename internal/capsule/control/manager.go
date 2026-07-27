@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"kitsoki/internal/capsule/headroom"
 )
 
 var instanceIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
@@ -21,6 +23,10 @@ type Manager struct {
 	Grant       ScopeGrant
 	Events      EventSink
 	Now         func() time.Time
+	// Headroom guards every new and resumed local materialization. Project
+	// constructors must install headroom.Default(); leaving it zero is reserved
+	// for in-process unit fixtures with no local-materialization authority.
+	Headroom headroom.Guard
 }
 
 type CreateRequest struct{ ID, DefinitionID, Owner, Provider string }
@@ -67,9 +73,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 			return Handle{}, fmt.Errorf("%w: instance %q is closed", ErrInvalidState, req.ID)
 		}
 		if strings.TrimSpace(existing.Path) == "" {
+			if err := m.ensureHeadroom(); err != nil {
+				return Handle{}, err
+			}
 			return m.rematerialize(ctx, existing, def, provider)
 		}
 		if _, statErr := os.Stat(existing.Path); os.IsNotExist(statErr) {
+			if err := m.ensureHeadroom(); err != nil {
+				return Handle{}, err
+			}
 			return m.rematerialize(ctx, existing, def, provider)
 		} else if statErr != nil {
 			return Handle{}, fmt.Errorf("capsule control: inspect instance %q path: %w", req.ID, statErr)
@@ -80,6 +92,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 	}
 	root, err := m.workspaceRoot(def)
 	if err != nil {
+		return Handle{}, err
+	}
+	if err := m.ensureHeadroom(); err != nil {
 		return Handle{}, err
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -116,6 +131,8 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 	_ = m.emit(ctx, "capsule.workspace.ready", in)
 	return Handle{ID: in.ID, Generation: in.Generation}, nil
 }
+
+func (m *Manager) ensureHeadroom() error { return m.Headroom.Ensure(m.Grant.ProjectRoot) }
 
 func (m *Manager) rematerialize(ctx context.Context, existing Instance, def Definition, provider WorkspaceProvider) (Handle, error) {
 	in, err := m.Instances.CompareAndSwap(ctx, existing.ID, existing.Generation, func(cur *Instance) error {

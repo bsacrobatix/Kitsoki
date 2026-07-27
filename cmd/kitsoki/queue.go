@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"kitsoki/internal/capsule/headroom"
 	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/capsule/receipt"
 )
@@ -490,6 +491,7 @@ func queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair
 		QueueRoot:       queueRoot,
 		TargetRef:       target,
 		ResolverCommand: resolver,
+		Headroom:        headroom.Default(),
 	}
 	deps.Finalizer = queue.ProtectedFinalizer{ProjectRoot: project, TargetRef: target}
 	if strings.TrimSpace(repair) != "" {
