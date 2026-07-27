@@ -35,3 +35,13 @@ func TestEnsurePermitsConfiguredHigherFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEnsureReadsStricterFloorFromEnvironment(t *testing.T) {
+	const floor = 24 << 30
+	t.Setenv(EnvFloorBytes, "25769803776")
+	err := (Guard{Enabled: true, FreeBytes: func(string) (int64, error) { return floor - 1, nil }}).Ensure(t.TempDir())
+	var refusal *Error
+	if !errors.As(err, &refusal) || refusal.FloorBytes != floor {
+		t.Fatalf("error=%v refusal=%#v", err, refusal)
+	}
+}
