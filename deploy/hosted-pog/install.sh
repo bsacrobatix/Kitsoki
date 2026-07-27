@@ -331,6 +331,7 @@ fi
 rendered_config="$stage/hosted-pog.rendered.yaml"
 rendered_caddy="$stage/Caddyfile.rendered"
 rendered_portal_service="$stage/pog-portal.service.rendered"
+rendered_queue_admission_service="$stage/kitsoki-queue-admission.service.rendered"
 rendered_colony_portfolio="$stage/pog-colony-runner-portfolio.conf.rendered"
 sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" -e "s|__GITHUB_CLIENT_ID__|$github_client_id|g" "$stage/hosted-pog.yaml" >"$rendered_config"
 sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/Caddyfile" >"$rendered_caddy"
@@ -339,6 +340,8 @@ sed \
 	-e "s|__POG_MEMBER_ROOTS__|$member_roots|g" \
 	-e "s|__POG_PORTFOLIO_MEMBERS__|$portfolio_members|g" \
 	"$stage/pog-portal.service" >"$rendered_portal_service"
+sed -e "s|__POG_RELEASE_SHA__|$pog_sha|g" \
+	"$stage/kitsoki-queue-admission.service" >"$rendered_queue_admission_service"
 sed \
 	-e "s|__POG_MEMBER_ROOTS__|$member_roots|g" \
 	-e "s|__POG_PORTFOLIO_MEMBERS__|$portfolio_members|g" \
@@ -760,7 +763,7 @@ if systemctl cat kitsoki-queue-worker.service >/dev/null 2>&1; then
 	install -m 0644 "$stage/kitsoki-queue-worker-admission.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
 	install -m 0644 "$stage/kitsoki-queue-worker-hosted-engine.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 fi
-install -m 0644 "$stage/kitsoki-queue-admission.service" /etc/systemd/system/kitsoki-queue-admission.service
+install -m 0644 "$rendered_queue_admission_service" /etc/systemd/system/kitsoki-queue-admission.service
 install -m 0600 "$queue_admission_stage_env" "$queue_admission_env"
 services_changed=1
 systemctl daemon-reload

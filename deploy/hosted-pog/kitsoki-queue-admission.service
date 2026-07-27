@@ -15,8 +15,8 @@ UMask=0077
 Environment=HOME=/var/lib/pog
 EnvironmentFile=/etc/kitsoki/queue-admission.env
 ExecStartPre=/usr/bin/test -x /opt/kitsoki-hosted-pog/current/kitsoki
-ExecStartPre=/usr/bin/test -d /opt/pog/current
-ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue serve-admission --project /opt/pog/current --project-id pog --root /var/lib/kitsoki-queue-admission/pog --listen 127.0.0.1:7444 --bucket-url ${KITSOKI_QUEUE_ADMISSION_BUCKET_URL} --bucket-key-env DO_SPACES_KEY_ID --bucket-secret-env DO_KITSOKI_TEST_API_KEY --max-bundle-bytes 536870912 --max-concurrent 4
+ExecStartPre=/usr/bin/test -d /opt/pog/releases/__POG_RELEASE_SHA__
+ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue serve-admission --project /opt/pog/releases/__POG_RELEASE_SHA__ --project-id pog --root /var/lib/kitsoki-queue-admission/pog --listen 127.0.0.1:7444 --bucket-url ${KITSOKI_QUEUE_ADMISSION_BUCKET_URL} --bucket-key-env DO_SPACES_KEY_ID --bucket-secret-env DO_KITSOKI_TEST_API_KEY --max-bundle-bytes 536870912 --max-concurrent 4
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

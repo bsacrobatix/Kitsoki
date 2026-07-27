@@ -145,6 +145,7 @@ hosted_engine=/opt/kitsoki-hosted-pog/current/kitsoki
 hosted_source=/opt/kitsoki-hosted-pog/current
 hosted_queue_root=/var/lib/kitsoki-queue-admission/pog/queue
 hosted_admission_root=/var/lib/kitsoki-queue-admission/pog
+active_pog_release="$(readlink -f /opt/pog/current)"
 test -x "$hosted_engine"
 test -x "$hosted_source/scripts/dev-workspace.sh"
 test -f /etc/systemd/system/kitsoki-queue-admission.service
@@ -153,6 +154,7 @@ test "$(stat -c '%U:%G %a' /etc/kitsoki/queue-admission.env)" = 'root:root 600'
 grep -Fq 'EnvironmentFile=/etc/kitsoki/queue-admission.env' /etc/systemd/system/kitsoki-queue-admission.service
 grep -Fq -- '--listen 127.0.0.1:7444' /etc/systemd/system/kitsoki-queue-admission.service
 grep -Fq -- "--root $hosted_admission_root" /etc/systemd/system/kitsoki-queue-admission.service
+grep -Fq -- "--project $active_pog_release" /etc/systemd/system/kitsoki-queue-admission.service
 grep -Fq 'Requires=kitsoki-queue-admission.service' /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
 test -z "$(ss -ltnH 'sport = :7444' | awk '$4 != "127.0.0.1:7444" { print }')"
 test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7444/v1/queue/admissions)" = 401

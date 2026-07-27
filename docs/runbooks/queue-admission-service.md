@@ -88,7 +88,10 @@ or create the unit by hand. A protected Kitsoki release installed with
   mints the admission bearer. Per-worker `KITSOKI_WORKER_OUTPUTS_*` aliases
   are deliberately not required on the controller;
 - `kitsoki-queue-admission.service`, running as `pog` with a strict writable
-  allow-list only for `/var/lib/kitsoki-queue-admission/pog`;
+  allow-list only for `/var/lib/kitsoki-queue-admission/pog`. Its `--project`
+  is rendered to the immutable real release directory
+  `/opt/pog/releases/<sha>` rather than `/opt/pog/current`, because admission
+  rejects symlink project roots before it accepts any request;
 - a literal loopback listener at `127.0.0.1:7444`; and
 - the hosted queue-worker dependency, so a missing or invalid admission
   service prevents consumer startup instead of silently falling back to a
