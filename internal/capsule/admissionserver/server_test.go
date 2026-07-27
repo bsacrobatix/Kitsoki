@@ -156,10 +156,19 @@ func TestRemoteAdmissionPersistsOutsideProjectAndExactReplayIsIdempotent(t *test
 	if first.Candidate.ReceiptRef == "" || first.Candidate.RunRecordRef == "" {
 		t.Fatalf("candidate omitted external evidence references: %#v", first.Candidate)
 	}
+	serviceRoot, err := filepath.EvalSymlinks(fixture.serviceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range []string{first.Candidate.ReceiptRef, first.Candidate.RunRecordRef} {
-		if !strings.HasPrefix(path, fixture.serviceRoot+string(filepath.Separator)) {
-			t.Fatalf("external evidence escaped service authority: %s", path)
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil || !strings.HasPrefix(resolved, serviceRoot+string(filepath.Separator)) {
+			t.Fatalf("external evidence escaped service authority: path=%s resolved=%s err=%v", path, resolved, err)
 		}
+	}
+	state, err := server.store.List()
+	if err != nil || len(state.Candidates) != 1 || state.Candidates[0].RunRecordRef != first.Candidate.RunRecordRef {
+		t.Fatalf("durable queue lost external run-record reference: state=%#v err=%v", state, err)
 	}
 	if refsAfter := git(t, fixture.controller, "for-each-ref", "--format=%(refname) %(objectname)"); refsAfter != refsBefore {
 		t.Fatalf("protected project refs changed during remote admission:\nbefore=%s\nafter=%s", refsBefore, refsAfter)

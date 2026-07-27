@@ -87,9 +87,9 @@ func runRecordMatchesReceipt(record ci.RunRecord, r receipt.Receipt) bool {
 }
 
 func (g PromotionGate) receipt(id string) (receipt.Receipt, error) {
-	if g.ReceiptRef != "" || g.RunRecordRef != "" {
-		if g.ReceiptRef == "" || g.RunRecordRef == "" {
-			return receipt.Receipt{}, fmt.Errorf("capsule sync: external gate evidence references must include both receipt and run record")
+	if g.RunRecordRef != "" {
+		if g.ReceiptRef == "" {
+			return receipt.Receipt{}, fmt.Errorf("capsule sync: external gate run record requires a receipt reference")
 		}
 		raw, err := readEvidenceFile(g.ReceiptRef)
 		if err != nil {
@@ -129,7 +129,7 @@ func (g PromotionGate) receipt(id string) (receipt.Receipt, error) {
 }
 
 func (g PromotionGate) runRecord(id string) (ci.RunRecord, error) {
-	if g.ReceiptRef == "" && g.RunRecordRef == "" {
+	if g.RunRecordRef == "" {
 		return (ci.FileRunStore{ProjectRoot: g.ProjectRoot}).Get(id)
 	}
 	raw, err := readEvidenceFile(g.RunRecordRef)
