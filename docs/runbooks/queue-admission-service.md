@@ -192,6 +192,43 @@ executes or polls it locally. This keeps the orchestrator read-only and makes
 the canonical hosted queue, rather than a local mirror, the authority for
 terminal delivery state.
 
+### Hosted registered-Capsule executor
+
+For a read-only orchestrator, do not run `capsule promote --remote-admission-*`
+there: that client intentionally owns the source bundle and therefore needs
+the admission and object-store credential names.  Instead dispatch the typed
+host command below from the credentialed controller/worker.  It resolves the
+registered managed Capsule on that host, runs its exact Capsule-CI pipeline,
+creates the receipt, run record, sealed Git bundle, and handoff there, and
+then calls the loopback admission service with the host-only environment.
+
+```sh
+/opt/kitsoki/bin/kitsoki queue execute-capsule-promotion \
+  --project /opt/pog/releases/<immutable-pog-sha> \
+  --workspace <registered-capsule-id> \
+  --pipeline change \
+  --target integration/current \
+  --target-base-sha <exact-40-character-integration-head> \
+  --train <immutable-train-id> \
+  --bucket-url https://kitsoki-test.sgp1.digitaloceanspaces.com \
+  --status-command '/opt/kitsoki/bin/kitsoki queue status --project /opt/pog/releases/<immutable-pog-sha> --queue-root /var/lib/kitsoki-queue-admission/pog/queue --json'
+```
+
+The command accepts no bearer or object-store secret values.  Its token and
+bucket options name environment variables only; the enclosing host service or
+worker must supply them from the root-only admission environment.  It rejects
+`main`, `staging/*`, a non-loopback admission endpoint, and a non-full target
+base before it opens the registered Capsule or starts CI.  It is an admission
+producer, not a merge worker: an admitted candidate still requires the one
+mutually-exclusive integration worker described below.  `401` is terminal
+configuration evidence; only `429` retains bounded retry semantics.
+
+The request surface intentionally contains no source path, bundle, receipt, or
+run-record option. `--workspace` is an opaque registered identity. The host's
+Capsule manager resolves it only beneath that host project's granted managed
+workspace roots, rejecting an absent, symlink-escaped, or controller-local
+path before CI can begin.
+
 ## Queue consumption
 
 All queue control surfaces that need this authority accept the exact external

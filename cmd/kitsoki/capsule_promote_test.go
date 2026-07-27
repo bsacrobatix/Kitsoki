@@ -42,6 +42,51 @@ func TestCapsulePromoteRemoteAdmissionFlagsAreExplicit(t *testing.T) {
 	}
 }
 
+func TestHostedCapsulePromotionExecutorRequiresExplicitIntegrationTargetBeforeCredentials(t *testing.T) {
+	opts := capsulePromoteOptions{
+		WorkspaceID: "hosted-capsule-1", TargetRef: "main",
+		RemoteAdmission: remoteAdmissionOptions{
+			URL: "http://127.0.0.1:7444", TargetBaseSHA: strings.Repeat("a", 40),
+		},
+	}
+	err := validateHostedCapsulePromotion(opts)
+	if err == nil || !strings.Contains(err.Error(), "integration/*") {
+		t.Fatalf("hosted executor accepted non-integration target: %v", err)
+	}
+}
+
+func TestHostedCapsulePromotionExecutorRefusesNonLoopbackAdmission(t *testing.T) {
+	opts := capsulePromoteOptions{
+		WorkspaceID: "hosted-capsule-1", TargetRef: "integration/train-1",
+		RemoteAdmission: remoteAdmissionOptions{
+			URL: "https://admission.example.test", TargetBaseSHA: strings.Repeat("a", 40),
+		},
+	}
+	err := validateHostedCapsulePromotion(opts)
+	if err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("hosted executor accepted non-loopback admission endpoint: %v", err)
+	}
+}
+
+func TestHostedCapsulePromotionExecutorFlagsKeepCredentialsHostOnly(t *testing.T) {
+	cmd := queueCapsulePromotionExecutorCmd()
+	for _, name := range []string{"workspace", "target", "admission-url", "admission-token-env", "bucket-key-env", "bucket-secret-env", "target-base-sha", "train", "status-command"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("hosted executor is missing --%s", name)
+		}
+	}
+	for _, name := range []string{"admission-token", "bucket-key", "bucket-secret"} {
+		if cmd.Flags().Lookup(name) != nil {
+			t.Fatalf("hosted executor must receive %s through an environment name, not an argument", name)
+		}
+	}
+	for _, name := range []string{"workspace-path", "source-path", "bundle", "receipt", "run-record"} {
+		if cmd.Flags().Lookup(name) != nil {
+			t.Fatalf("hosted executor must resolve registered identity locally, not accept controller material %q", name)
+		}
+	}
+}
+
 func TestRemoteCandidateStatusDistinguishesAdmissionFromTerminalDelivery(t *testing.T) {
 	if remoteCandidateTerminal(queue.Queued) {
 		t.Fatal("queued remote admission was falsely reported terminal")
