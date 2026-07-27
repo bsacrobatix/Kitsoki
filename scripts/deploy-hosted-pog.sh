@@ -148,6 +148,11 @@ hosted_admission_root=/var/lib/kitsoki-queue-admission/pog
 active_pog_release="$(readlink -f /opt/pog/current)"
 test -x "$hosted_engine"
 test -x "$hosted_source/scripts/dev-workspace.sh"
+active_kitsoki_sha="$(basename "$(readlink -f "$hosted_source")")"
+[[ "$active_kitsoki_sha" =~ ^[0-9a-f]{40}$ ]]
+hosted_engine_version="$("$hosted_engine" version)"
+grep -Fxq "kitsoki $active_kitsoki_sha" <<<"$hosted_engine_version"
+grep -Fxq "revision: $active_kitsoki_sha" <<<"$hosted_engine_version"
 test -f /etc/systemd/system/kitsoki-queue-admission.service
 test -f /etc/systemd/system/kitsoki-pog-integration-current-worker.service
 test "$(stat -c '%U:%G %a' "$hosted_admission_root")" = 'pog:pog 700'
@@ -350,7 +355,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(cd "$ROOT" && GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki)
+# The hosted release is an immutable source-SHA directory, so its executable
+# must identify that same protected source rather than the development default
+# (0.0.1-scaffold).  Stamp both the legacy displayed version and buildinfo,
+# which is what `kitsoki version` and internal receipts respectively expose.
+(cd "$ROOT" && GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build \
+	-ldflags "-X main.version=$KITSOKI_SHA -X kitsoki/internal/buildinfo.Revision=$KITSOKI_SHA -X kitsoki/internal/buildinfo.RevisionShort=${KITSOKI_SHA:0:12}" \
+	-o "$local_stage/kitsoki" ./cmd/kitsoki)
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
 # Bundle each federated portfolio member from its declared source and ref, and
 # record it in members.manifest for install.sh. A declared ref that lacks

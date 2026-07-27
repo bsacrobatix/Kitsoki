@@ -727,6 +727,15 @@ current_changed=1
 ln -s "$kitsoki_release" "$kitsoki_current.next.$$"
 mv -Tf "$kitsoki_current.next.$$" "$kitsoki_current"
 kitsoki_current_changed=1
+# The activated engine is addressed by its protected source SHA. Verify the
+# binary's own stamped identity after the atomic switch before restarting any
+# service that will trust it. A correctly named release directory alone is not
+# evidence that a stale/un-stamped executable was not copied into it.
+activated_kitsoki_version="$("$kitsoki_current/kitsoki" version)"
+grep -Fxq "kitsoki $kitsoki_sha" <<<"$activated_kitsoki_version" \
+	|| die "activated Kitsoki engine version does not identify source revision $kitsoki_sha"
+grep -Fxq "revision: $kitsoki_sha" <<<"$activated_kitsoki_version" \
+	|| die "activated Kitsoki engine revision does not identify source revision $kitsoki_sha"
 ln -s "$node_release" "$node_current.next.$$"
 mv -Tf "$node_current.next.$$" "$node_current"
 node_current_changed=1

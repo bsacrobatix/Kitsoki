@@ -143,7 +143,9 @@ Node archive, and invokes the versioned remote installer. The installer then:
    service use this runtime rather than the VM's ambient Node;
 2. installs immutable POG and Kitsoki releases under `/opt/pog/releases/<sha>`
    and `/opt/kitsoki-hosted-pog/releases/<sha>` without replacing the existing
-   GitHub agent's `/usr/local/bin/kitsoki`;
+   GitHub agent's `/usr/local/bin/kitsoki`; the hosted Linux build stamps the
+   protected full Kitsoki SHA into `kitsoki version`, and activation rejects a
+   binary whose displayed version or revision does not equal that release SHA;
 3. runs `npm ci`, the POG typecheck/client build, and the self-contained
    production-server build before activation; browser links are built
    same-origin and only the systemd runtime receives loopback upstreams;
