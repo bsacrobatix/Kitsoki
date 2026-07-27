@@ -781,8 +781,19 @@ test "$(stat -c '%U:%G %a' "$queue_admission_env")" = 'root:root 600' \
 	|| die "queue-admission environment ownership/mode drifted"
 test -z "$(ss -ltnH 'sport = :7444' | awk '$4 != "127.0.0.1:7444" { print }')" \
 	|| die "queue-admission listener escaped loopback"
-admission_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7444/v1/queue/admissions 2>/dev/null || true)"
-[ "$admission_status" = 401 ] || die "queue-admission authentication probe returned ${admission_status:-none}, expected 401"
+# systemd considers Type=simple started once exec succeeds; the Go listener can
+# still be between process start and bind.  Wait only for the intentional
+# unauthenticated response.  A capacity response is never an acceptable
+# substitute: authentication is evaluated before admission capacity, so 429
+# here would violate the 401-versus-429 contract rather than indicate startup.
+admission_status=""
+for _ in $(seq 1 30); do
+	admission_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7444/v1/queue/admissions 2>/dev/null || true)"
+	[ "$admission_status" = 401 ] && break
+	[ "$admission_status" != 429 ] || die "queue-admission unauthenticated probe returned 429; authentication must precede capacity"
+	sleep 1
+done
+[ "$admission_status" = 401 ] || die "queue-admission authentication probe returned ${admission_status:-none} after readiness wait, expected 401"
 
 hosted_engine=/opt/kitsoki-hosted-pog/current/kitsoki
 test -x "$hosted_engine" || die "hosted Kitsoki engine is not executable: $hosted_engine"

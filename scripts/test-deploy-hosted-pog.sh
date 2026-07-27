@@ -212,6 +212,8 @@ grep -Fq 'queue-admission environment must be root-owned mode 0600' "$assets/ins
 grep -Fq 'queue-worker environment must be root-owned mode 0600' "$assets/install.sh"
 grep -Fq 'hosted queue-admission service did not become active' "$assets/install.sh"
 grep -Fq 'queue-admission authentication probe returned' "$assets/install.sh"
+grep -Fq 'for _ in $(seq 1 30); do' "$assets/install.sh"
+grep -Fq 'unauthenticated probe returned 429; authentication must precede capacity' "$assets/install.sh"
 grep -Fq 'kitsoki-queue-admission.service' "$deploy"
 grep -Fq '127.0.0.1:7444' "$deploy"
 grep -q 'zz-hosted-engine.conf' "$deploy"

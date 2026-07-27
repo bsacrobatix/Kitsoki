@@ -96,7 +96,9 @@ or create the unit by hand. A protected Kitsoki release installed with
 
 `scripts/deploy-hosted-pog.sh --verify` proves the unit is active, the root
 and environment modes/owners are correct, a missing bearer receives `401`,
-and no non-loopback listener owns port 7444. The deployment rollback restores
+and no non-loopback listener owns port 7444. Installation waits for that `401`
+after starting the `Type=simple` service; `429` is a hard contract failure, not
+a startup-ready result. The deployment rollback restores
 the preceding unit and root-only environment; it never copies or rewrites
 queue state.
 
