@@ -143,6 +143,7 @@ test -L /opt/pog/current/.capsules
 test "$(readlink -f /opt/pog/current/.capsules)" = "$(readlink -f /var/lib/pog/capsules)"
 hosted_engine=/opt/kitsoki-hosted-pog/current/kitsoki
 hosted_source=/opt/kitsoki-hosted-pog/current
+hosted_queue_root=/var/lib/kitsoki-queue-admission/pog/queue
 test -x "$hosted_engine"
 test -x "$hosted_source/scripts/dev-workspace.sh"
 # The hosted queue-worker drop-in replaces the old `/usr/local/bin/kitsoki`
@@ -166,12 +167,21 @@ test -f /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 grep -Fq "Environment=POG_KITSOKI_BIN=$hosted_engine" /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq "ExecStart=$hosted_engine queue worker" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq -- "--queue-root $hosted_queue_root" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq -- '--executor vm-pool' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq -- '--executor-pipeline change' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+! grep -Fq -- '--gate ' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq "Environment=KITSOKI_SOURCE_DIR=$hosted_source" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 test -f /opt/pog/members/gears-rust/pog/catalog.yaml
 queue_pid="$(systemctl show --property MainPID --value kitsoki-queue-worker.service)"
 if [ "$queue_pid" -gt 0 ]; then
-  test "$(readlink -f "/proc/$queue_pid/exe")" = "$(readlink -f "$hosted_engine")"
+	test "$(readlink -f "/proc/$queue_pid/exe")" = "$(readlink -f "$hosted_engine")"
+	queue_exec_start="$(systemctl show --property ExecStart --value kitsoki-queue-worker.service)"
+	grep -Fq -- "--queue-root $hosted_queue_root" <<<"$queue_exec_start"
+	grep -Fq -- '--executor vm-pool' <<<"$queue_exec_start"
+	grep -Fq -- '--executor-pipeline change' <<<"$queue_exec_start"
+	! grep -Fq -- '--gate ' <<<"$queue_exec_start"
 fi
 health="$(curl -fsS http://127.0.0.1:7777/api/portal-health)"
 active_pog_sha="$(basename "$(readlink -f /opt/pog/current)")"

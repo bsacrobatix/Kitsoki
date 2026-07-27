@@ -30,6 +30,10 @@ state_release_root="/opt/kitsoki-hosted-pog/state-releases"
 runtime_release_root="/var/lib/pog/runtime-releases"
 runtime_current="/var/lib/pog/runtime"
 capsule_state_root=/var/lib/pog/capsules
+# Remote worker bundles are admitted into this external queue authority.  It
+# stays outside /opt/pog/current so admission never writes the protected
+# checkout; the hosted queue worker consumes its queue/ child explicitly.
+queue_admission_root=/var/lib/kitsoki-queue-admission/pog
 tmp_release=""
 tmp_kitsoki_release=""
 tmp_node_release=""
@@ -92,6 +96,7 @@ install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root" "$node_r
 install -d -o pog -g pog -m 0750 /var/lib/pog /var/cache/pog /var/lib/kitsoki-pog /var/cache/kitsoki-pog
 install -d -o pog -g pog -m 0750 "$runtime_release_root"
 install -d -o pog -g pog -m 0750 "$capsule_state_root"
+install -d -o pog -g pog -m 0700 "$queue_admission_root"
 install -d -m 0755 /usr/local/libexec
 install -m 0755 "$stage/link-capsule-state.sh" /usr/local/libexec/kitsoki-hosted-pog-link-capsule-state
 install -m 0644 "$stage/pog-capsule-state.service" /etc/systemd/system/pog-capsule-state.service
