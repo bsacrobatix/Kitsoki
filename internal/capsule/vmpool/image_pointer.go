@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -52,7 +53,7 @@ func loadWorkerImagePointer(path string, ownerUID uint32) (ImagePointer, error) 
 	if !filepath.IsAbs(path) {
 		return ImagePointer{}, fmt.Errorf("vmpool: worker image pointer path must be absolute: %q", path)
 	}
-	path = filepath.Clean(path)
+	path = canonicalWorkerImagePointerPath(path, runtime.GOOS)
 	f, size, err := openTrustedImagePointer(path, ownerUID)
 	if err != nil {
 		return ImagePointer{}, err
@@ -87,6 +88,31 @@ func loadWorkerImagePointer(path string, ownerUID uint32) (ImagePointer, error) 
 		return ImagePointer{}, fmt.Errorf("vmpool: validate worker image pointer %s: %w", path, err)
 	}
 	return pointer, nil
+}
+
+// canonicalWorkerImagePointerPath translates only the Darwin-owned /etc
+// compatibility alias.  On macOS, /etc is a symlink to /private/etc; walking
+// the configured spelling would correctly trip the no-symlink parent guard,
+// even though the deployment-controlled pointer itself is under the canonical
+// root-owned directory.  Translate that one OS alias before the trust walk so
+// every directory that is actually opened is still checked and no caller
+// supplied symlink is followed.
+//
+// This deliberately does not use EvalSymlinks: that would turn an arbitrary
+// caller-controlled symlink into an accepted path.  All other symlink parents
+// remain rejected by validateImagePointerParents.
+func canonicalWorkerImagePointerPath(path, goos string) string {
+	path = filepath.Clean(path)
+	if goos != "darwin" {
+		return path
+	}
+	if path == "/etc" {
+		return "/private/etc"
+	}
+	if strings.HasPrefix(path, "/etc/") {
+		return "/private/etc/" + strings.TrimPrefix(path, "/etc/")
+	}
+	return path
 }
 
 func (p ImagePointer) validate() error {

@@ -51,6 +51,30 @@ func currentOwnerImagePointerLoader(path string) (ImagePointer, error) {
 	return loadWorkerImagePointer(path, uint32(os.Getuid()))
 }
 
+func TestCanonicalWorkerImagePointerPathAllowsOnlyDarwinEtcAlias(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		path string
+		goos string
+		want string
+	}{
+		{name: "darwin etc file", path: "/etc/kitsoki/worker-image.json", goos: "darwin", want: "/private/etc/kitsoki/worker-image.json"},
+		{name: "darwin etc root", path: "/etc", goos: "darwin", want: "/private/etc"},
+		{name: "darwin near match stays literal", path: "/etcetera/kitsoki/worker-image.json", goos: "darwin", want: "/etcetera/kitsoki/worker-image.json"},
+		{name: "darwin path traversal cannot borrow etc alias", path: "/etc/../tmp/linked/worker-image.json", goos: "darwin", want: "/tmp/linked/worker-image.json"},
+		{name: "darwin caller symlink candidate stays literal", path: "/tmp/linked/worker-image.json", goos: "darwin", want: "/tmp/linked/worker-image.json"},
+		{name: "linux etc stays literal", path: "/etc/kitsoki/worker-image.json", goos: "linux", want: "/etc/kitsoki/worker-image.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := canonicalWorkerImagePointerPath(tc.path, tc.goos); got != tc.want {
+				t.Fatalf("canonicalWorkerImagePointerPath(%q, %q) = %q, want %q", tc.path, tc.goos, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadWorkerImagePointerStrictValidSnapshot(t *testing.T) {
 	path := filepath.Join(trustedTempDir(t), "worker-image.json")
 	want := validImagePointer(17, "192837465")

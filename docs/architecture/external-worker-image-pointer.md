@@ -36,8 +36,11 @@ The pointer schema is:
 The deployment controller must write a new regular file, fsync it, rename it
 over the pointer, and fsync `/etc/kitsoki`. The file and every parent directory
 must be root-owned and not group- or world-writable; symlinks are rejected.
-Kitsoki opens the leaf with `O_NOFOLLOW`, validates one bounded JSON value with
-no unknown fields, and uses that one open inode as the lease snapshot.
+On macOS only, the operating-system `/etc` compatibility alias is normalized to
+`/private/etc` before that validation, so the documented pointer spelling works
+without accepting caller-controlled symlink paths. Kitsoki opens the leaf with
+`O_NOFOLLOW`, validates one bounded JSON value with no unknown fields, and uses
+that one open inode as the lease snapshot.
 
 `Pool.Acquire` resolves the pointer for every new worker. It writes the exact
 generation, environment, source SHA, image ID, and digest into durable vmpool
