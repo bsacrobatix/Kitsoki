@@ -61,7 +61,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer kitsoki-queue-admission.service kitsoki-queue-worker-admission.conf hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -345,6 +345,55 @@ sed \
 	"$stage/pog-colony-runner-portfolio.conf" >"$rendered_colony_portfolio"
 caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 
+# Remote Capsule promotion needs an admission listener on this controller, but
+# neither its bearer nor object-store credentials may enter a unit file, git
+# bundle, or deploy command line. Reuse an already-installed admission env
+# verbatim. On first hosted deployment, derive the worker-output credentials
+# from the root-owned queue-worker env and mint only the separate bearer.
+# The staged result is copied at mode 0600 after rollback snapshots exist.
+queue_worker_env=/etc/kitsoki/queue-worker.env
+queue_admission_env=/etc/kitsoki/queue-admission.env
+queue_admission_stage_env="$stage/queue-admission.env"
+env_value() {
+	local file="$1" name="$2" matches value
+	[ -f "$file" ] && [ ! -L "$file" ] || die "credential source is not a regular file: $file"
+	matches="$(grep -Ec "^${name}=[^[:space:]].*$" "$file" || true)"
+	[ "$matches" = 1 ] || die "credential source must contain exactly one nonempty $name"
+	value="$(sed -n "s/^${name}=//p" "$file")"
+	case "$value" in *$'\n'*|*$'\r'*) die "credential source has unsafe $name" ;; esac
+	printf '%s' "$value"
+}
+prepare_queue_admission_env() {
+	if [ -e "$queue_admission_env" ]; then
+		[ ! -L "$queue_admission_env" ] || die "queue-admission environment must not be a symlink"
+		[ "$(stat -c '%U:%G %a' "$queue_admission_env")" = 'root:root 600' ] \
+			|| die "queue-admission environment must be root-owned mode 0600"
+		for required in KITSOKI_QUEUE_ADMISSION_TOKEN KITSOKI_WORKER_OUTPUTS_URL KITSOKI_WORKER_OUTPUTS_ACCESS_KEY KITSOKI_WORKER_OUTPUTS_SECRET_KEY; do
+			env_value "$queue_admission_env" "$required" >/dev/null
+		done
+		cp "$queue_admission_env" "$queue_admission_stage_env"
+		chmod 0600 "$queue_admission_stage_env"
+		return
+	fi
+	[ -e "$queue_worker_env" ] || die "first admission install requires $queue_worker_env with worker-output credentials"
+	[ ! -L "$queue_worker_env" ] || die "queue-worker environment must not be a symlink"
+	[ "$(stat -c '%U:%G %a' "$queue_worker_env")" = 'root:root 600' ] \
+		|| die "queue-worker environment must be root-owned mode 0600 before deriving admission credentials"
+	access_key="$(env_value "$queue_worker_env" KITSOKI_WORKER_OUTPUTS_ACCESS_KEY)"
+	secret_key="$(env_value "$queue_worker_env" KITSOKI_WORKER_OUTPUTS_SECRET_KEY)"
+	bucket_url="$(env_value "$queue_worker_env" KITSOKI_WORKER_OUTPUTS_URL)"
+	token="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+	[[ "$token" =~ ^[0-9a-f]{64}$ ]] || die "could not mint queue-admission bearer"
+	{
+		printf 'KITSOKI_QUEUE_ADMISSION_TOKEN=%s\n' "$token"
+		printf 'KITSOKI_WORKER_OUTPUTS_URL=%s\n' "$bucket_url"
+		printf 'KITSOKI_WORKER_OUTPUTS_ACCESS_KEY=%s\n' "$access_key"
+		printf 'KITSOKI_WORKER_OUTPUTS_SECRET_KEY=%s\n' "$secret_key"
+	} >"$queue_admission_stage_env"
+	chmod 0600 "$queue_admission_stage_env"
+}
+prepare_queue_admission_env
+
 previous_current=""
 if [ -L "$current" ]; then
 	previous_current="$(readlink -f "$current")"
@@ -400,6 +449,9 @@ previous_portal_service="$stage/pog-portal.service.previous"
 previous_finalizer_service="$stage/pog-worker-finalizer.service.previous"
 previous_finalizer_timer="$stage/pog-worker-finalizer.timer.previous"
 previous_queue_worker_engine="$stage/kitsoki-queue-worker.hosted-engine.conf.previous"
+previous_queue_worker_admission="$stage/kitsoki-queue-worker.admission.conf.previous"
+previous_queue_admission_service="$stage/kitsoki-queue-admission.service.previous"
+previous_queue_admission_env="$stage/queue-admission.env.previous"
 previous_colony_portfolio="$stage/pog-colony-runner.portfolio-authority.conf.previous"
 previous_colony_env="$stage/pog-colony-runner.env.previous"
 had_previous_kitsoki_service=0
@@ -407,6 +459,9 @@ had_previous_portal_service=0
 had_previous_finalizer_service=0
 had_previous_finalizer_timer=0
 had_previous_queue_worker_engine=0
+had_previous_queue_worker_admission=0
+had_previous_queue_admission_service=0
+had_previous_queue_admission_env=0
 had_previous_colony_portfolio=0
 had_previous_colony_env=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
@@ -429,6 +484,18 @@ if [ -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 	cp /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf "$previous_queue_worker_engine"
 	had_previous_queue_worker_engine=1
 fi
+if [ -f /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf ]; then
+	cp /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf "$previous_queue_worker_admission"
+	had_previous_queue_worker_admission=1
+fi
+if [ -f /etc/systemd/system/kitsoki-queue-admission.service ]; then
+	cp /etc/systemd/system/kitsoki-queue-admission.service "$previous_queue_admission_service"
+	had_previous_queue_admission_service=1
+fi
+if [ -f "$queue_admission_env" ]; then
+	cp "$queue_admission_env" "$previous_queue_admission_env"
+	had_previous_queue_admission_env=1
+fi
 if [ -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf ]; then
 	cp /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf "$previous_colony_portfolio"
 	had_previous_colony_portfolio=1
@@ -447,6 +514,8 @@ portfolio_link_changed=0
 release_artifacts_changed=0
 colony_was_active=0
 queue_worker_was_active=0
+queue_admission_was_active=0
+queue_admission_was_enabled=0
 finalizer_timer_was_active=0
 finalizer_timer_was_enabled=0
 
@@ -488,6 +557,7 @@ rollback() {
 			esac
 		fi
 		if [ "$services_changed" -eq 1 ]; then
+			systemctl stop kitsoki-queue-admission.service >/dev/null 2>&1 || true
 			if [ "$had_previous_kitsoki_service" -eq 1 ]; then
 				install -m 0644 "$previous_kitsoki_service" /etc/systemd/system/kitsoki-pog.service
 			else
@@ -514,6 +584,22 @@ rollback() {
 			else
 				rm -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 			fi
+			if [ "$had_previous_queue_worker_admission" -eq 1 ]; then
+				install -d -m 0755 /etc/systemd/system/kitsoki-queue-worker.service.d
+				install -m 0644 "$previous_queue_worker_admission" /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
+			else
+				rm -f /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
+			fi
+			if [ "$had_previous_queue_admission_service" -eq 1 ]; then
+				install -m 0644 "$previous_queue_admission_service" /etc/systemd/system/kitsoki-queue-admission.service
+			else
+				rm -f /etc/systemd/system/kitsoki-queue-admission.service
+			fi
+			if [ "$had_previous_queue_admission_env" -eq 1 ]; then
+				install -m 0600 "$previous_queue_admission_env" "$queue_admission_env"
+			else
+				rm -f "$queue_admission_env"
+			fi
 			if [ "$had_previous_colony_portfolio" -eq 1 ]; then
 				install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 				install -m 0644 "$previous_colony_portfolio" /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
@@ -537,6 +623,14 @@ rollback() {
 		else
 			systemctl stop pog-portal.service kitsoki-pog.service >/dev/null 2>&1 || true
 		fi
+		if [ "$queue_admission_was_enabled" -eq 1 ] && [ "$had_previous_queue_admission_service" -eq 1 ]; then
+			systemctl enable kitsoki-queue-admission.service >/dev/null 2>&1 || true
+		else
+			systemctl disable kitsoki-queue-admission.service >/dev/null 2>&1 || true
+		fi
+		if [ "$queue_admission_was_active" -eq 1 ] && [ "$had_previous_queue_admission_service" -eq 1 ]; then
+			systemctl restart kitsoki-queue-admission.service >/dev/null 2>&1 || true
+		fi
 		[ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service >/dev/null 2>&1 || true
 		[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service >/dev/null 2>&1 || true
 		if [ "$finalizer_timer_was_enabled" -eq 1 ]; then
@@ -556,10 +650,12 @@ trap rollback EXIT
 
 systemctl is-active --quiet pog-colony-runner.service && colony_was_active=1 || true
 systemctl is-active --quiet kitsoki-queue-worker.service && queue_worker_was_active=1 || true
+systemctl is-active --quiet kitsoki-queue-admission.service && queue_admission_was_active=1 || true
+systemctl is-enabled --quiet kitsoki-queue-admission.service && queue_admission_was_enabled=1 || true
 systemctl is-active --quiet pog-worker-finalizer.timer && finalizer_timer_was_active=1 || true
 systemctl is-enabled --quiet pog-worker-finalizer.timer && finalizer_timer_was_enabled=1 || true
 systemctl stop pog-worker-finalizer.timer pog-worker-finalizer.service >/dev/null 2>&1 || true
-systemctl stop pog-portal.service pog-colony-runner.service kitsoki-queue-worker.service >/dev/null 2>&1 || true
+systemctl stop pog-portal.service pog-colony-runner.service kitsoki-queue-worker.service kitsoki-queue-admission.service >/dev/null 2>&1 || true
 
 # Releases predating the versioned runtime wrote immutable worker ship records
 # into their own .artifacts tree. Import those exact scoreboard inputs after
@@ -653,13 +749,32 @@ if systemctl cat kitsoki-queue-worker.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/kitsoki-queue-worker.service.d
 	printf '[Unit]\nRequires=pog-capsule-state.service\nAfter=pog-capsule-state.service\n' \
 		>/etc/systemd/system/kitsoki-queue-worker.service.d/capsule-state.conf
+	install -m 0644 "$stage/kitsoki-queue-worker-admission.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/10-queue-admission.conf
 	install -m 0644 "$stage/kitsoki-queue-worker-hosted-engine.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 fi
+install -m 0644 "$stage/kitsoki-queue-admission.service" /etc/systemd/system/kitsoki-queue-admission.service
+install -m 0600 "$queue_admission_stage_env" "$queue_admission_env"
 services_changed=1
 systemctl daemon-reload
-systemctl enable pog-capsule-state.service kitsoki-pog.service pog-portal.service >/dev/null
+systemctl enable pog-capsule-state.service kitsoki-pog.service pog-portal.service kitsoki-queue-admission.service >/dev/null
 systemctl restart pog-capsule-state.service
 systemctl restart kitsoki-pog.service
+
+# A missing/invalid root-only admission env must fail activation before the
+# queue worker can consume this authority. POST without a bearer is a harmless
+# liveness/authentication probe; the server intentionally returns 401 before
+# examining request capacity or body.
+systemctl restart kitsoki-queue-admission.service
+systemctl is-active --quiet kitsoki-queue-admission.service \
+	|| die "hosted queue-admission service did not become active"
+test "$(stat -c '%U:%G %a' "$queue_admission_root")" = 'pog:pog 700' \
+	|| die "queue-admission authority ownership/mode drifted"
+test "$(stat -c '%U:%G %a' "$queue_admission_env")" = 'root:root 600' \
+	|| die "queue-admission environment ownership/mode drifted"
+test -z "$(ss -ltnH 'sport = :7444' | awk '$4 != "127.0.0.1:7444" { print }')" \
+	|| die "queue-admission listener escaped loopback"
+admission_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7444/v1/queue/admissions 2>/dev/null || true)"
+[ "$admission_status" = 401 ] || die "queue-admission authentication probe returned ${admission_status:-none}, expected 401"
 
 hosted_engine=/opt/kitsoki-hosted-pog/current/kitsoki
 test -x "$hosted_engine" || die "hosted Kitsoki engine is not executable: $hosted_engine"

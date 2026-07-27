@@ -23,6 +23,8 @@ for required in \
 	"$assets/pog-colony-runner-portfolio.conf" \
 	"$assets/pog-worker-finalizer.service" \
 	"$assets/pog-worker-finalizer.timer" \
+	"$assets/kitsoki-queue-admission.service" \
+	"$assets/kitsoki-queue-worker-admission.conf" \
 	"$assets/kitsoki-queue-worker-hosted-engine.conf" \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
@@ -187,6 +189,24 @@ grep -q 'Environment=KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' "$asset
 grep -q 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' "$assets/kitsoki-queue-worker-hosted-engine.conf"
 grep -Fq 'queue_admission_root=/var/lib/kitsoki-queue-admission/pog' "$assets/install.sh"
 grep -Fq 'install -d -o pog -g pog -m 0700 "$queue_admission_root"' "$assets/install.sh"
+grep -Fq 'EnvironmentFile=/etc/kitsoki/queue-admission.env' "$assets/kitsoki-queue-admission.service"
+grep -Fq -- '--listen 127.0.0.1:7444' "$assets/kitsoki-queue-admission.service"
+grep -Fq -- '--root /var/lib/kitsoki-queue-admission/pog' "$assets/kitsoki-queue-admission.service"
+grep -Fqx 'User=pog' "$assets/kitsoki-queue-admission.service"
+grep -Fqx 'ReadWritePaths=/var/lib/kitsoki-queue-admission/pog' "$assets/kitsoki-queue-admission.service"
+! grep -Eq 'KITSOKI_QUEUE_ADMISSION_TOKEN=.+[^}]' "$assets/kitsoki-queue-admission.service"
+grep -Fqx 'Requires=kitsoki-queue-admission.service' "$assets/kitsoki-queue-worker-admission.conf"
+grep -Fqx 'After=kitsoki-queue-admission.service' "$assets/kitsoki-queue-worker-admission.conf"
+grep -Fq 'prepare_queue_admission_env' "$assets/install.sh"
+grep -Fq 'KITSOKI_QUEUE_ADMISSION_TOKEN' "$assets/install.sh"
+grep -Fq 'KITSOKI_WORKER_OUTPUTS_URL' "$assets/install.sh"
+grep -Fq 'first admission install requires $queue_worker_env' "$assets/install.sh"
+grep -Fq 'queue-admission environment must be root-owned mode 0600' "$assets/install.sh"
+grep -Fq 'queue-worker environment must be root-owned mode 0600' "$assets/install.sh"
+grep -Fq 'kitsoki-queue-admission.service did not become active' "$assets/install.sh"
+grep -Fq 'queue-admission authentication probe returned' "$assets/install.sh"
+grep -Fq 'kitsoki-queue-admission.service' "$deploy"
+grep -Fq '127.0.0.1:7444' "$deploy"
 grep -q 'zz-hosted-engine.conf' "$deploy"
 grep -q '/opt/pog/members/gears-rust/pog/catalog.yaml' "$deploy"
 grep -q 'queue_pid=' "$deploy"

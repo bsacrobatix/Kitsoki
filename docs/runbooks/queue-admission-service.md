@@ -74,9 +74,29 @@ For a worker-direct network endpoint, bind a routable address only with TLS:
 The default bucket credential variable names can be changed with
 `--bucket-key-env` and `--bucket-secret-env`. `--max-bundle-bytes` is capped
 at 512 MiB. `--max-concurrent` defaults to four authenticated admissions.
-This runbook does not install or start a system service; the host's service
-definition should invoke the exact pinned Kitsoki binary and the command
-above.
+
+### Hosted POG controller
+
+For the supported hosted POG controller, do not copy an unlanded POG installer
+or create the unit by hand. A protected Kitsoki release installed with
+`scripts/deploy-hosted-pog.sh --yes` owns all of the following atomically:
+
+- `/etc/kitsoki/queue-admission.env`, root-owned and mode `0600`; it reuses an
+  existing valid environment, or on the first install derives the worker-output
+  credentials from the root-owned queue-worker environment and mints the
+  admission bearer;
+- `kitsoki-queue-admission.service`, running as `pog` with a strict writable
+  allow-list only for `/var/lib/kitsoki-queue-admission/pog`;
+- a literal loopback listener at `127.0.0.1:7444`; and
+- the hosted queue-worker dependency, so a missing or invalid admission
+  service prevents consumer startup instead of silently falling back to a
+  project-local queue.
+
+`scripts/deploy-hosted-pog.sh --verify` proves the unit is active, the root
+and environment modes/owners are correct, a missing bearer receives `401`,
+and no non-loopback listener owns port 7444. The deployment rollback restores
+the preceding unit and root-only environment; it never copies or rewrites
+queue state.
 
 ## Worker request
 

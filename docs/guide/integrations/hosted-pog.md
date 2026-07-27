@@ -159,17 +159,23 @@ Node archive, and invokes the versioned remote installer. The installer then:
 7. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
    verified releases;
 8. installs and restarts Kitsoki auth/RPC on 7778 and the built POG production
-   service on 7777;
+   service on 7777; it also installs the loopback-only remote admission
+   service on 7444, creates or validates its root-only credential environment,
+   and requires that service before the hosted queue worker can consume the
+   external queue authority;
 9. verifies revision-bound production health, the exact catalog, reviewed
    feedback ownership, the production command line, and absence of a 5183
    listener before changing Caddy;
 10. validates the candidate Caddyfile before installing it;
 11. reloads Caddy and verifies anonymous denial across POG, feedback, health,
-   runs, and evidence while checking agent health over loopback.
+   runs, and evidence while checking agent health over loopback; the admission
+   check proves an unauthenticated local POST returns `401` and that the
+   listener has not escaped `127.0.0.1:7444`.
 
 If activation fails after a symlink changes, the installer restores the
-previous POG, Kitsoki, Node, and runtime targets, both prior systemd units, and
-the Caddyfile before returning non-zero. This matters for the one-time
+previous POG, Kitsoki, Node, and runtime targets, prior systemd units,
+the root-only admission environment, and the Caddyfile before returning
+non-zero. This matters for the one-time
 5183-to-7777 cutover: a failed first activation can still restart the previous
 Vite-backed release while it rolls back. Failed release/state directories
 remain available for diagnosis; they are never treated as active.

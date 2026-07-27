@@ -1,0 +1,42 @@
+# Credentials and object-store endpoint live only in the root-owned
+# EnvironmentFile. This unit deliberately has no public listener: remote
+# Capsule promotion reaches it through an SSH tunnel to the controller.
+[Unit]
+Description=Hosted POG remote Kitsoki queue-admission service
+Documentation=file:///opt/kitsoki-hosted-pog/current/docs/runbooks/queue-admission-service.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pog
+Group=pog
+UMask=0077
+Environment=HOME=/var/lib/pog
+EnvironmentFile=/etc/kitsoki/queue-admission.env
+ExecStartPre=/usr/bin/test -x /opt/kitsoki-hosted-pog/current/kitsoki
+ExecStartPre=/usr/bin/test -d /opt/pog/current
+ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue serve-admission --project /opt/pog/current --project-id pog --root /var/lib/kitsoki-queue-admission/pog --listen 127.0.0.1:7444 --bucket-url ${KITSOKI_WORKER_OUTPUTS_URL} --max-bundle-bytes 536870912 --max-concurrent 4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kitsoki-queue-admission/pog
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
