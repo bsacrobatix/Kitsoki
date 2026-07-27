@@ -19,6 +19,7 @@ import (
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/capsule/receipt"
+	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
 	"kitsoki/internal/objectstore"
 )
@@ -268,6 +269,36 @@ func TestCapsulePromoteReceiptReuseFailsClosedOnRunSubstitution(t *testing.T) {
 	}
 }
 
+func TestHostedArtifactPromotionRetriesInsteadOfReusingIneligibleExactReceipt(t *testing.T) {
+	// The hosted source-artifact executor materializes an immutable Capsule and
+	// then uses promoteReceiptForAttempt. An old, exact CI result whose verdict
+	// is no longer promotion-eligible is stale reuse, not authorization to
+	// promote and not a reason to skip fresh host CI.
+	root := t.TempDir()
+	sha := strings.Repeat("d", 40)
+	instance := control.Instance{ID: "hosted-artifact", Generation: 9, Head: sha}
+	opts := capsulePromoteOptions{Pipeline: "change", TargetRef: "integration/train-1", GateCommand: "node scripts/kitsoki-ci.mjs"}
+	old := promoteReuseStoredWithEligibility(t, root, instance, opts.Pipeline, "ineligible-host-run", false)
+	if err := persistPromoteReceiptReuse(root, instance, "agent/hosted-artifact", opts, old); err != nil {
+		t.Fatal(err)
+	}
+	fresh := promoteReuseStoredWithEligibility(t, root, instance, opts.Pipeline, "fresh-host-run", true)
+	runs := 0
+	got, reused, err := promoteReceiptForAttempt(context.Background(), root, instance, "agent/hosted-artifact", opts, func(context.Context) (record.Stored, error) {
+		runs++
+		return fresh, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused || runs != 1 || got.Receipt.ReceiptID != fresh.Receipt.ReceiptID || got.Receipt.ReceiptID == old.Receipt.ReceiptID {
+		t.Fatalf("hosted artifact retry reused ineligible receipt: reused=%t runs=%d got=%s old=%s fresh=%s", reused, runs, got.Receipt.ReceiptID, old.Receipt.ReceiptID, fresh.Receipt.ReceiptID)
+	}
+	if err := (record.PromotionGate{ProjectRoot: root}).Verify(context.Background(), got.Receipt.ReceiptID, reconcile.Plan{Candidate: sha}); err != nil {
+		t.Fatalf("fresh exact CI result was not promotion eligible: %v", err)
+	}
+}
+
 func TestCapsulePromoteReceiptReuseDoesNotCrossQueueGate(t *testing.T) {
 	root := t.TempDir()
 	sha := strings.Repeat("c", 40)
@@ -293,6 +324,10 @@ func TestCapsulePromoteReceiptReuseDoesNotCrossQueueGate(t *testing.T) {
 }
 
 func promoteReuseStored(t *testing.T, root string, instance control.Instance, pipeline, jobID string) record.Stored {
+	return promoteReuseStoredWithEligibility(t, root, instance, pipeline, jobID, true)
+}
+
+func promoteReuseStoredWithEligibility(t *testing.T, root string, instance control.Instance, pipeline, jobID string, promotionEligible bool) record.Stored {
 	t.Helper()
 	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
 	if err != nil {
@@ -302,7 +337,11 @@ func promoteReuseStored(t *testing.T, root string, instance control.Instance, pi
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: pipeline, Outcome: "passed", Checks: []ci.Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: envelope.SourceDigest, StoryDigest: envelope.StoryDigest, EnvironmentDigest: envelope.Environment.Digest, EnvelopeDigest: envelope.Digest}
+	outcome, checkOutcome := "passed", "passed"
+	if !promotionEligible {
+		outcome, checkOutcome = "failed", "failed"
+	}
+	verdict := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: pipeline, Outcome: outcome, Checks: []ci.Check{{ID: "test", Kind: "deterministic", Outcome: checkOutcome, Evidence: []string{"artifact:test"}}}, PromotionEligible: promotionEligible, SourceDigest: envelope.SourceDigest, StoryDigest: envelope.StoryDigest, EnvironmentDigest: envelope.Environment.Digest, EnvelopeDigest: envelope.Digest}
 	run := ci.RunResult{Job: artifactjob.Job{ID: artifactjob.JobID(jobID)}, Envelope: envelope, Verdict: verdict, Execution: executor.Result{VerdictArtifact: "artifact:verdict"}}
 	stored, err := record.Persist(root, run)
 	if err != nil {

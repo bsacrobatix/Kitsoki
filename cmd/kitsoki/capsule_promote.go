@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -142,6 +143,12 @@ type capsulePromoteOptions struct {
 // workspace generation, branch, queue target, and deterministic queue gate
 // that the caller asked to promote.
 const promoteReceiptReuseSchema = "capsule-promote-receipt-reuse/v1"
+
+// errPromoteReceiptNotEligible marks a verified, exact prior CI result that
+// cannot authorize this promotion. It is deliberately distinct from malformed
+// or substituted provenance: callers may run fresh CI for this case, but must
+// fail closed for every evidence-integrity error.
+var errPromoteReceiptNotEligible = errors.New("capsule promote: reusable receipt is not promotion eligible")
 
 type promoteReceiptReuse struct {
 	Schema            string `json:"schema"`
@@ -450,6 +457,9 @@ func loadPromoteReceiptReuse(ctx context.Context, root string, instance control.
 		return record.Stored{}, false, nil
 	}
 	stored, err := verifyPromoteReceiptReuse(ctx, root, instance, reuse)
+	if errors.Is(err, errPromoteReceiptNotEligible) {
+		return record.Stored{}, false, nil
+	}
 	if err != nil {
 		return record.Stored{}, false, err
 	}
@@ -484,11 +494,9 @@ func verifyPromoteReceiptReuse(ctx context.Context, root string, instance contro
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return record.Stored{}, fmt.Errorf("capsule promote: parse reusable receipt: %w", err)
 	}
-	// PromotionGate binds receipt content, promotion eligibility, and its
-	// persisted run projection to the exact current candidate. It also applies
-	// the project signature policy if one exists.
-	if err := (record.PromotionGate{ProjectRoot: root}).Verify(ctx, reuse.ReceiptID, reconcile.Plan{Candidate: instance.Head, ReceiptCandidate: instance.Head}); err != nil {
-		return record.Stored{}, fmt.Errorf("capsule promote: reusable receipt provenance: %w", err)
+	verification := receipt.Verify(r, nil, false)
+	if verification.Status != "valid" {
+		return record.Stored{}, fmt.Errorf("capsule promote: reusable receipt provenance: receipt integrity is invalid")
 	}
 	run, err := (ci.FileRunStore{ProjectRoot: root}).Get(reuse.RunID)
 	if err != nil {
@@ -499,11 +507,21 @@ func verifyPromoteReceiptReuse(ctx context.Context, root string, instance contro
 		r.Envelope.Instance.ID != instance.ID || r.Envelope.Instance.Generation != instance.Generation ||
 		r.Envelope.Digest != reuse.EnvelopeDigest || r.Envelope.StoryDigest != reuse.StoryDigest ||
 		r.Envelope.Environment.Digest != reuse.EnvironmentDigest ||
-		r.Verdict.Pipeline != reuse.Pipeline || run.ReceiptID != reuse.ReceiptID ||
-		run.Result.Envelope.Digest != reuse.EnvelopeDigest || run.Result.Verdict.Pipeline != reuse.Pipeline {
+		r.Verdict.Pipeline != reuse.Pipeline || run.JobID != reuse.RunID ||
+		run.ReceiptID != reuse.ReceiptID || run.ReceiptVerification != "valid" ||
+		!reflect.DeepEqual(run.Result.Envelope, r.Envelope) || !reflect.DeepEqual(run.Result.Verdict, r.Verdict) {
 		return record.Stored{}, fmt.Errorf("capsule promote: reusable receipt provenance does not match this workspace, pipeline, envelope, or run")
 	}
-	return record.Stored{Receipt: r, Verification: receipt.Verify(r, nil, false), ReceiptPath: wantPath}, nil
+	if !verification.PromotionEligible {
+		return record.Stored{}, errPromoteReceiptNotEligible
+	}
+	// PromotionGate binds receipt content, promotion eligibility, and its
+	// persisted run projection to the exact current candidate. It also applies
+	// the project signature policy if one exists.
+	if err := (record.PromotionGate{ProjectRoot: root}).Verify(ctx, reuse.ReceiptID, reconcile.Plan{Candidate: instance.Head, ReceiptCandidate: instance.Head}); err != nil {
+		return record.Stored{}, fmt.Errorf("capsule promote: reusable receipt provenance: %w", err)
+	}
+	return record.Stored{Receipt: r, Verification: verification, ReceiptPath: wantPath}, nil
 }
 
 func persistPromoteReceiptReuse(root string, instance control.Instance, branch string, opts capsulePromoteOptions, stored record.Stored) error {
