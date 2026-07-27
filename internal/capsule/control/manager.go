@@ -257,6 +257,18 @@ func (m *Manager) CloseWithResult(ctx context.Context, h Handle, owner string) (
 		if err := m.removeIncompleteWorkspace(in); err != nil {
 			return ClosedWorkspace{}, err
 		}
+	case StateFailed:
+		// A generic failed materialization is still incomplete and can be
+		// removed through the historical narrow path. Only a failure carrying
+		// immutable owner-reconcile proof has authority to enter the provider
+		// close/quarantine lifecycle and later receipt-bound purge.
+		if in.Failure == nil {
+			if err := m.removeIncompleteWorkspace(in); err != nil {
+				return ClosedWorkspace{}, err
+			}
+			break
+		}
+		fallthrough
 	default:
 		provider := m.Providers[in.Provider]
 		if provider == nil {

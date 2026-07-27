@@ -218,3 +218,40 @@ func TestManagerCloseRemovesIncompleteFailedWorkspaceWithoutProviderSentinel(t *
 		t.Fatalf("state=%s", closed.State)
 	}
 }
+
+func TestManagerCloseRoutesOnlyEvidenceBoundFailedWorkspaceThroughProvider(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	path := filepath.Join(workspaceRoot, "reconciled")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryInstanceStore()
+	created, err := store.Create(context.Background(), Instance{
+		ID: "reconciled", DefinitionID: "clean", DefinitionDigest: "sha256:def", Provider: "synthetic", Path: path,
+		State: StateFailed, Generation: 1, Lease: Lease{Owner: "agent"},
+		Failure: &FailureEvidence{Schema: "capsule-workspace-failure/v1", Kind: "owner_reconcile", Action: "mark_failed_cleanup_eligible", WorkspaceID: "reconciled", SourceGeneration: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &provider{name: "synthetic"}
+	m := &Manager{Definitions: defs{"clean": {ID: "clean", Schema: DefinitionSchema, Source: Source{Kind: SourceSynthetic, SyntheticSpec: "x"}, Digest: "sha256:def"}}, Instances: store, Providers: map[string]WorkspaceProvider{"synthetic": p}, Grant: ScopeGrant{ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}}}
+	if err := m.Close(context.Background(), Handle{ID: created.ID, Generation: created.Generation}, "agent"); err != nil {
+		t.Fatal(err)
+	}
+	wantPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.closedPath != wantPath {
+		t.Fatalf("provider close path=%q, want %q", p.closedPath, wantPath)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("evidence-bound workspace was removed before provider close: %v", err)
+	}
+	closed, err := store.Get(context.Background(), "reconciled")
+	if err != nil || closed.State != StateClosed {
+		t.Fatalf("instance=%#v err=%v", closed, err)
+	}
+}
