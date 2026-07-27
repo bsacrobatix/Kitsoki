@@ -64,14 +64,14 @@ func TestDevWorkspaceScriptProviderMapsProtectedLifecycle(t *testing.T) {
 	provider := DevWorkspaceScriptProvider{ProjectRoot: project, Runner: runner}
 	path := filepath.Join(project, ".capsules", "workspaces", "one")
 	definition := Definition{ID: "development", Source: Source{Kind: SourceDevWorkspaceScript, Development: DevelopmentSource{Base: "staging/local", Target: "staging/local", BranchPrefix: "agent/", Bootstrap: true}}}
-	materialized, err := provider.Create(context.Background(), definition, Instance{ID: "one", Path: path})
+	materialized, err := provider.Create(context.Background(), definition, Instance{ID: "one", Path: path, Lease: Lease{Owner: "owner-one"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if materialized.Path != path || materialized.Branch != "agent/one" || materialized.Head == "" {
 		t.Fatalf("materialized %#v", materialized)
 	}
-	if !containsArgs(calls[0], "--bootstrap") || !containsArgs(calls[0], "--target", "staging/local") {
+	if !containsArgs(calls[0], "--bootstrap") || !containsArgs(calls[0], "--target", "staging/local") || !containsArgs(calls[0], "--session-id", "owner-one") {
 		t.Fatalf("create args %q", calls[0])
 	}
 	if err := provider.Integrate(context.Background(), definition, Instance{ID: "one", Path: path}, "go test ./internal/capsule"); err != nil {
