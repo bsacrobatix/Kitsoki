@@ -11,6 +11,7 @@ import (
 	"kitsoki/internal/applicationconversation"
 	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/campaign"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
 	"kitsoki/internal/dbruntime"
@@ -22,6 +23,7 @@ import (
 	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/store"
 	"kitsoki/internal/study"
+	"kitsoki/internal/workqueue"
 )
 
 // Session-store backend selection. SQLite is the default and keeps today's
@@ -151,6 +153,29 @@ func newJobStore(s store.Store, opts ...jobs.JobStoreOption) (*jobs.JobStore, er
 		opts = append(opts, jobs.WithDialect(jobs.DialectPostgres))
 	}
 	return jobs.NewJobStore(s.DB(), opts...)
+}
+
+// newCampaignStore constructs daemon campaign control state on the same
+// backend as sessions and artifact jobs. It is intentionally generic: every
+// campaign action remains a story intent, regardless of the application that
+// declared it.
+func newCampaignStore(s store.Store) (*campaign.SQLStore, error) {
+	if store.IsPostgres(s) {
+		return campaign.NewPostgresStore(s.DB())
+	}
+	return campaign.NewSQLiteStore(s.DB())
+}
+
+// newWorkQueueStore constructs the story-neutral leased work broker on the
+// daemon's authoritative database backend.
+func newWorkQueueStore(
+	s store.Store,
+	opts ...workqueue.Option,
+) (*workqueue.SQLStore, error) {
+	if store.IsPostgres(s) {
+		return workqueue.NewPostgresStore(s.DB(), opts...)
+	}
+	return workqueue.NewSQLiteStore(s.DB(), opts...)
 }
 
 // newJournalWriter constructs the journal writer on s's shared handle in the

@@ -66,7 +66,13 @@ type Capabilities struct {
 	Placements []string `yaml:"placements,omitempty" json:"placements,omitempty"`
 	Isolation  string   `yaml:"isolation,omitempty" json:"isolation,omitempty"`
 	Networks   []string `yaml:"networks,omitempty" json:"networks,omitempty"`
+	// Labels are bounded, opaque server-declared capability labels. They let
+	// generic work queues express requirements without embedding a project or
+	// provider-specific worker type in their runtime.
+	Labels []string `yaml:"labels,omitempty" json:"labels,omitempty"`
 }
+
+const maxCapabilityLabels = 16
 
 // Entry is one canonical worker registry record. It unifies the identity and
 // tunnel shape of daemonfederation.Worker with the credential convention of
@@ -145,8 +151,62 @@ func (c *Config) Validate(configPath string) error {
 		if w.CredentialEnv != "" && !validEnvName(w.CredentialEnv) {
 			return fmt.Errorf("workers[%d]: invalid credential_env", i)
 		}
+		labels := CapabilityLabels(*w)
+		if len(labels) > maxCapabilityLabels {
+			return fmt.Errorf("workers[%d]: capabilities exceed %d labels", i, maxCapabilityLabels)
+		}
+		for _, label := range labels {
+			if !validCapabilityLabel(label) {
+				return fmt.Errorf("workers[%d]: invalid capability label %q", i, label)
+			}
+		}
 	}
 	return nil
+}
+
+// CapabilityLabels returns the complete, normalized server-owned capability
+// set advertised by an entry. Queue workers must derive claim capabilities
+// here rather than accepting them from story input.
+func CapabilityLabels(entry Entry) []string {
+	labels := make([]string, 0, len(entry.Capabilities.Labels)+len(entry.Capabilities.Placements)+len(entry.Capabilities.Networks)+2)
+	labels = append(labels, entry.Capabilities.Labels...)
+	if entry.Placement != "" {
+		labels = append(labels, "placement:"+entry.Placement)
+	}
+	for _, placement := range entry.Capabilities.Placements {
+		labels = append(labels, "placement:"+placement)
+	}
+	if entry.Capabilities.Isolation != "" {
+		labels = append(labels, "isolation:"+entry.Capabilities.Isolation)
+	}
+	for _, network := range entry.Capabilities.Networks {
+		labels = append(labels, "network:"+network)
+	}
+	return normalizedLabels(labels)
+}
+
+func normalizedLabels(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func validCapabilityLabel(value string) bool {
+	if value == "" || len(value) > 128 || strings.ContainsAny(value, `/\\`) || strings.Contains(value, "..") || strings.Contains(value, "://") {
+		return false
+	}
+	return true
 }
 
 func validEnvName(s string) bool {

@@ -15,6 +15,7 @@ const (
 	DefaultTypeID         = "campaign"
 	DefaultMaxDefinitions = 200
 	DefaultMaxBytes       = 256 * 1024
+	DefaultDispatchLease  = time.Hour
 )
 
 // Action is the only executable campaign action. Story paths are resolved by
@@ -64,6 +65,9 @@ type Claim struct {
 	Definition
 	IdempotencyKey string
 	DueAt          time.Time
+	OwnerID        string
+	Fence          int64
+	LeaseExpiresAt time.Time
 }
 
 // Dispatch records one claimed tick and its durable artifact-job reference.

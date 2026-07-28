@@ -28,9 +28,10 @@ are deployment-owned registrations, analogous to application-job templates.
 
 ## State And Receipts
 
-A submission has a stable `work_ref` derived from the application, configured
-queue name, normalized input, and caller-supplied idempotency key. Repeating the
-same submission returns that record; it never creates another unit of work.
+A submission receives a durable `work_ref` under a unique application, queue,
+and caller-supplied idempotency key. The normalized input and configured policy
+are part of the immutable submission identity. Repeating the same submission
+returns that record; reusing its key with different input or policy is rejected.
 
 The durable lifecycle is:
 
@@ -48,8 +49,8 @@ eligible for recovery according to its configured retry policy. A worker may
 never turn an expired or superseded claim into a terminal result.
 
 Every terminal transition writes a typed receipt, including the immutable work
-identity, final status and reason code, attempt history, relevant lease/fence
-facts, artifact handles, and code-bundle evidence. Restart recovery records
+identity, final status and reason code, attempt and fence facts, artifact
+handles, and code-bundle evidence. Restart recovery records
 what can be known: unexpired leased work retains its lease until expiry, and
 expired work becomes eligible for the configured retry path. The service never
 reports that a worker process resumed merely because its database row survived.
@@ -63,6 +64,20 @@ artifact. A bare worker report, session ID, or local checkout path is not
 countable ship evidence. This shared receipt rule is intentionally usable by
 the queue, a product drain, and scoreboard/read-model projections without
 giving any of them independent authority to decide whether lost work shipped.
+The daemon installs a file-backed `workqueue.BundleValidator` from
+`work_queue_bundle_root`. A bundle reference is a relative path below that
+daemon-owned root. The validator rejects traversal, symlinks, special or
+oversized files, and digest mismatches before committing a countable terminal
+receipt. Code-producing configuration and completion fail closed without that
+durable root; a syntactically valid reference or digest is not proof of
+retention.
+
+In SQLite mode, the retained file under that root remains the canonical
+evidence. In PostgreSQL mode, the root is an intake directory: after verifying
+the file, the daemon imports its bytes into `workqueue.bundles` and rewrites
+the terminal receipt to a canonical `workqueue-pg-bundle:` reference. Every
+daemon sharing PostgreSQL can resolve that evidence without sharing a local
+filesystem.
 
 ## Public Story Host
 
@@ -70,6 +85,37 @@ giving any of them independent authority to decide whether lost work shipped.
 configured application. It follows the existing host operation convention:
 
 ```yaml
+# .kitsoki.yaml
+work_queues:
+  pog-operations:
+    triage-feedback:
+      max_input_bytes: 65536
+      max_attempts: 4
+      required_capabilities: [agent, placement:workstation]
+      priority: 10
+      produces_code: true
+
+# .kitsoki.local.yaml
+work_queue_bundle_root: /var/lib/kitsoki/work-queue-bundles
+
+workers:
+  - id: pog-runner
+    label: POG runner
+    placement: workstation
+    enabled: true
+    capabilities:
+      labels: [agent]
+
+work_queue_workers:
+  pog-worker:
+    target_application: pog-operations
+    story_path: /absolute/path/to/POG/stories/pog-worker/app.yaml
+    allowed_queues: [triage-feedback]
+    worker_id: pog-runner
+    max_concurrent: 2
+    lease_seconds: 60
+
+# Story effect
 - invoke: host.work_queue
   with:
     op: enqueue
@@ -90,19 +136,25 @@ configured application. It follows the existing host operation convention:
 ```
 
 `enqueue` accepts only a registered `queue`, a bounded idempotency key,
-and schema-validated JSON input. It returns a stable `work_ref`, normalized
-status, replay indication, and a `kitsoki/work-queue-receipt/v1` receipt.
+and normalized, bounded JSON input. It returns a stable `work_ref`, normalized
+status, replay indication, and a `kitsoki/work-queue-submission/v1` receipt.
 `get` returns the same privacy-safe projection for one application-owned
 reference. `snapshot` returns a strictly bounded, redacted application-scoped
 projection suitable for an operator application. Neither result exposes
 worker credentials, endpoint details, raw payloads, hidden application IDs,
 or internal scheduler identities.
 
-Claim, lease renewal, start, completion, failure, cancellation, and reaping
-are **not** story operations. They are typed internal service calls made by a
-registered worker adapter, authenticated to its worker identity and restricted
-to the queues it advertises. This keeps story code declarative and prevents
-the host from becoming a general remote-execution interface.
+The worker Story Application receives `host.work_queue_worker` only when it has
+an exact `work_queue_workers` binding. That binding fixes its target
+application, allowed queues, worker identity, capacity, lease duration, and
+server-owned registry capabilities. Worker story input can claim from an
+allowed queue and carry the returned work reference and fence through
+heartbeat, completion, or failure; it cannot override any of those authority
+facts.
+
+Cancellation and lease reaping are **not** story operations. They remain typed
+internal service calls. This keeps story code declarative and prevents the host
+from becoming a general remote-execution interface.
 
 ## Adjacent Runtime Services
 

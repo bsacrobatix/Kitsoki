@@ -42,6 +42,7 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/workerregistry"
+	"kitsoki/internal/workqueue"
 )
 
 // DefaultConfigFile is the checked-in, shared config file Load looks for in the
@@ -202,6 +203,19 @@ type WebConfig struct {
 	// ApplicationGraphs binds exact Story Application IDs to server-owned
 	// repository graph paths, bounds, and write policy.
 	ApplicationGraphs map[string]ApplicationGraphConfig `yaml:"application_graphs,omitempty"`
+
+	// WorkQueues binds exact Story Application IDs to server-owned durable work
+	// queue policy. Story calls can enqueue, get, and snapshot only configured
+	// queues; capabilities, retries, priority, and input bounds stay here.
+	WorkQueues map[string]map[string]workqueue.QueueConfig `yaml:"work_queues,omitempty"`
+
+	// WorkQueueBundleRoot is the daemon-owned retained-bundle root used to
+	// validate countable code-work receipts. It belongs in local config.
+	WorkQueueBundleRoot string `yaml:"work_queue_bundle_root,omitempty"`
+
+	// WorkQueueWorkers binds worker Story Applications to one configured queue
+	// owner and one enabled worker-registry entry.
+	WorkQueueWorkers map[string]WorkQueueWorkerBinding `yaml:"work_queue_workers,omitempty"`
 }
 
 type ApplicationMaintenanceConfig struct {
@@ -942,6 +956,12 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveApplicationGraphs(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveWorkQueues(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveWorkQueueWorkers(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveAuth(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -1205,6 +1225,29 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[key] = value
 		}
 		out.ApplicationGraphs = merged
+	}
+	if len(local.WorkQueues) > 0 {
+		merged := make(map[string]map[string]workqueue.QueueConfig, len(base.WorkQueues)+len(local.WorkQueues))
+		for key, value := range base.WorkQueues {
+			merged[key] = value
+		}
+		for key, value := range local.WorkQueues {
+			merged[key] = value
+		}
+		out.WorkQueues = merged
+	}
+	if local.WorkQueueBundleRoot != "" {
+		out.WorkQueueBundleRoot = local.WorkQueueBundleRoot
+	}
+	if len(local.WorkQueueWorkers) > 0 {
+		merged := make(map[string]WorkQueueWorkerBinding, len(base.WorkQueueWorkers)+len(local.WorkQueueWorkers))
+		for key, value := range base.WorkQueueWorkers {
+			merged[key] = value
+		}
+		for key, value := range local.WorkQueueWorkers {
+			merged[key] = value
+		}
+		out.WorkQueueWorkers = merged
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)

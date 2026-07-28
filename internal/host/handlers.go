@@ -626,6 +626,11 @@ func RegisterBuiltins(r *Registry) {
 	// app-scoped controller over a configured project graph and durable store.
 	r.Register("host.campaign", CampaignHandler)
 
+	// Generic durable application work. Stories may enqueue and inspect only;
+	// daemon-owned worker adapters retain claim and lease authority.
+	r.Register("host.work_queue", WorkQueueHandler)
+	r.Register("host.work_queue_worker", WorkQueueWorkerHandler)
+
 	// App-scoped read projections. Builtins fail closed; daemon session
 	// construction replaces them only for an explicitly configured app.
 	r.Register("host.streams", StreamsSnapshotHandler)

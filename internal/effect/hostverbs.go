@@ -340,6 +340,36 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.campaign.watch":    {class: External, deterministic: false},
 	"host.campaign.snapshot": {class: Read, deterministic: true},
 
+	// host.work_queue is application-scoped durable control state. Enqueue is
+	// idempotent and does not execute work; get/snapshot are redacted reads.
+	"host.work_queue": {
+		class: Write, deterministic: true,
+		ops: map[string]opEffect{
+			"enqueue":  {class: Write, deterministic: true},
+			"get":      {class: Read, deterministic: true},
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.work_queue.enqueue":  {class: Write, deterministic: true},
+	"host.work_queue.get":      {class: Read, deterministic: true},
+	"host.work_queue.snapshot": {class: Read, deterministic: true},
+
+	// Worker leases are durable control-state mutation. Claim is intentionally
+	// a write because it allocates a lease even though it returns a payload.
+	"host.work_queue_worker": {
+		class: Write, deterministic: false,
+		ops: map[string]opEffect{
+			"claim":     {class: Write, deterministic: false},
+			"heartbeat": {class: Write, deterministic: false},
+			"complete":  {class: Write, deterministic: false},
+			"fail":      {class: Write, deterministic: false},
+		},
+	},
+	"host.work_queue_worker.claim":     {class: Write, deterministic: false},
+	"host.work_queue_worker.heartbeat": {class: Write, deterministic: false},
+	"host.work_queue_worker.complete":  {class: Write, deterministic: false},
+	"host.work_queue_worker.fail":      {class: Write, deterministic: false},
+
 	// host.flow_evidence runs only server-resolved deterministic Kitsoki flow
 	// suites and writes a durable, idempotent evidence receipt.
 	"host.flow_evidence": {

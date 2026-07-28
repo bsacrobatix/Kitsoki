@@ -10,7 +10,7 @@ import (
 type State string
 
 const (
-	ReceiptSchema        = "kitsoki/workqueue-receipt/v1"
+	ReceiptSchema        = "kitsoki/work-queue-receipt/v1"
 	StateQueued    State = "queued"
 	StateLeased    State = "leased"
 	StateSucceeded State = "succeeded"
@@ -33,11 +33,14 @@ type Job struct {
 	RequiredCapabilities                     []string
 	State                                    State
 	Priority, Attempts, MaxAttempts          int
+	ProducesCode                             bool
 	AvailableAt, CreatedAt, UpdatedAt        time.Time
 	LeaseOwner                               string
 	LeaseExpiresAt                           *time.Time
 	Fence                                    int64
 	Receipt                                  *Receipt
+	// Replayed is a transient enqueue result and is never persisted.
+	Replayed bool
 }
 
 type EnqueueRequest struct {
@@ -45,6 +48,7 @@ type EnqueueRequest struct {
 	Payload                              []byte
 	RequiredCapabilities                 []string
 	Priority, MaxAttempts                int
+	ProducesCode                         bool
 	AvailableAt                          time.Time
 }
 
@@ -58,15 +62,36 @@ type ClaimRequest struct {
 type Lease struct{ Job Job }
 
 type Receipt struct {
-	Schema, Outcome, JobID, BundleRef, BundleDigest string
-	Attempt                                         int
-	Fence                                           int64
+	Schema               string    `json:"schema"`
+	Outcome              string    `json:"outcome"`
+	Reason               string    `json:"reason,omitempty"`
+	JobID                string    `json:"job_id"`
+	ApplicationID        string    `json:"application_id,omitempty"`
+	Queue                string    `json:"queue"`
+	WorkerID             string    `json:"worker_id,omitempty"`
+	Attempt              int       `json:"attempt"`
+	Fence                int64     `json:"fence"`
+	FinishedAt           time.Time `json:"finished_at"`
+	TraceRef             string    `json:"trace_ref,omitempty"`
+	ArtifactHandles      []string  `json:"artifact_handles,omitempty"`
+	BundleRef            string    `json:"bundle_ref,omitempty"`
+	BundleDigest         string    `json:"bundle_digest,omitempty"`
+	BundleKind           string    `json:"bundle_kind,omitempty"`
+	RequiredCapabilities []string  `json:"required_capabilities,omitempty"`
+	Countable            bool      `json:"countable"`
 }
 
 type Failure struct {
 	Retryable bool
 	Message   string
 	Receipt   Receipt
+}
+
+// BundleValidator proves that code evidence is retained by a durable,
+// independently resolvable store and that the receipt digest matches it.
+// Syntax alone is never sufficient to make work countable.
+type BundleValidator interface {
+	ValidateBundle(context.Context, string, string) (string, error)
 }
 
 type ListFilter struct {

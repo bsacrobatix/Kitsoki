@@ -443,6 +443,43 @@ func registerGraphBuiltins(r *Registry) {
 		Input:  fields("max_campaigns", "int", "max_bytes", "int"),
 		Output: fields("snapshot", "object"),
 	})
+	r.Register("host.work_queue", "enqueue", Op{
+		Input: fields(
+			"queue", "string", "idempotency_key", "string", "input", "object",
+		),
+		Output: fields(
+			"work_ref", "string", "status", "string", "replayed", "bool",
+			"receipt", "object",
+		),
+	})
+	r.Register("host.work_queue", "get", Op{
+		Input: fields("work_ref", "string"),
+		Output: fields(
+			"work_ref", "string", "queue", "string", "status", "string",
+			"attempt", "int", "max_attempts", "int", "countable", "bool",
+			"receipt", "object",
+		),
+	})
+	r.Register("host.work_queue", "snapshot", Op{
+		Input:  fields("max_items", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
+	r.Register("host.work_queue_worker", "claim", Op{
+		Input:  fields("queue", "string"),
+		Output: fields("claimed", "bool", "work_ref", "string", "payload", "object", "fence", "int", "attempt", "int"),
+	})
+	r.Register("host.work_queue_worker", "heartbeat", Op{
+		Input:  fields("work_ref", "string", "fence", "int"),
+		Output: fields("work_ref", "string", "status", "string", "fence", "int"),
+	})
+	r.Register("host.work_queue_worker", "complete", Op{
+		Input:  fields("work_ref", "string", "fence", "int", "receipt", "object"),
+		Output: fields("work_ref", "string", "status", "string", "receipt", "object"),
+	})
+	r.Register("host.work_queue_worker", "fail", Op{
+		Input:  fields("work_ref", "string", "fence", "int", "retryable", "bool", "reason", "string", "receipt", "object"),
+		Output: fields("work_ref", "string", "status", "string", "receipt", "object"),
+	})
 	r.Register("host.flow_evidence", "record", Op{
 		Input:  fields("node_id", "string"),
 		Output: fields("evidence_ref", "string", "passed", "bool", "run_count", "int"),

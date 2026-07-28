@@ -3,6 +3,7 @@ package workerregistry
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"kitsoki/internal/daemonfederation"
@@ -175,6 +176,18 @@ func TestLoad_DuplicateIDErrors(t *testing.T) {
 `)
 	if _, err := Load(base, local); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestCapabilityLabelsAreBoundedAndDerived(t *testing.T) {
+	entry := Entry{Placement: "workstation", Capabilities: Capabilities{
+		Labels: []string{"gpu", "gpu"}, Placements: []string{"thin"},
+		Isolation: "sandboxed", Networks: []string{"offline", "offline"},
+	}}
+	got := CapabilityLabels(entry)
+	want := []string{"gpu", "placement:workstation", "placement:thin", "isolation:sandboxed", "network:offline"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels = %#v, want %#v", got, want)
 	}
 }
 

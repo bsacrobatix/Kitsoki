@@ -68,6 +68,7 @@ import (
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
 	"kitsoki/internal/workerregistry"
+	"kitsoki/internal/workqueue"
 )
 
 // entry is one live session as the registry owns it. The server only needs the
@@ -207,6 +208,8 @@ type SessionRegistry struct {
 	campaignSource               campaign.Source
 	campaignScheduler            jobs.Scheduler
 	campaignServices             map[string]*campaign.Service
+	workQueueStore               workqueue.Store
+	workQueueServices            map[string]*workqueue.Service
 	maintenanceJobs              *jobs.JobStore
 	studies                      study.Store
 	federation                   *daemonfederation.Pool
@@ -378,6 +381,54 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	}
 	r.daemonStore = st
 	r.daemonJobs = artifactJobs
+	if len(r.cfg.WorkQueues) > 0 {
+		var queueOptions []workqueue.Option
+		if r.cfg.WorkQueueBundleRoot != "" {
+			var validator workqueue.BundleValidator
+			var validatorErr error
+			if store.IsPostgres(st) {
+				validator, validatorErr = workqueue.NewPostgresBundleValidator(
+					st.DB(), r.cfg.WorkQueueBundleRoot,
+					workqueue.DefaultMaxBundleBytes,
+				)
+			} else {
+				validator, validatorErr = workqueue.NewFileBundleValidator(
+					r.cfg.WorkQueueBundleRoot,
+					workqueue.DefaultMaxBundleBytes,
+				)
+			}
+			if validatorErr != nil {
+				_ = st.Close()
+				return fmt.Errorf(
+					"open daemon story work queue bundle validator: %w",
+					validatorErr,
+				)
+			}
+			queueOptions = append(
+				queueOptions, workqueue.WithBundleValidator(validator),
+			)
+		}
+		queueStore, queueErr := newWorkQueueStore(st, queueOptions...)
+		if queueErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon story work queue: %w", queueErr)
+		}
+		r.workQueueStore = queueStore
+		r.workQueueServices = make(map[string]*workqueue.Service, len(r.cfg.WorkQueues))
+		for applicationID, queues := range r.cfg.WorkQueues {
+			service, serviceErr := workqueue.NewService(
+				queueStore, applicationID, queues,
+			)
+			if serviceErr != nil {
+				_ = st.Close()
+				return fmt.Errorf(
+					"configure daemon story work queue %q: %w",
+					applicationID, serviceErr,
+				)
+			}
+			r.workQueueServices[applicationID] = service
+		}
+	}
 	if len(r.cfg.StoryApplicationJobs) > 0 {
 		applicationJobRecords, applicationJobErr := newApplicationJobStore(st)
 		if applicationJobErr != nil {
@@ -462,7 +513,7 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 		break
 	}
 	if r.cfg.Campaigns != nil {
-		campaignStore, campaignErr := campaign.NewSQLiteStore(st.DB())
+		campaignStore, campaignErr := newCampaignStore(st)
 		if campaignErr != nil {
 			_ = st.Close()
 			return fmt.Errorf("open daemon campaigns: %w", campaignErr)
@@ -472,7 +523,7 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 			_ = st.Close()
 			return fmt.Errorf("resolve daemon campaign catalog: %w", campaignErr)
 		}
-		campaignJobs, campaignErr := jobs.NewJobStore(st.DB())
+		campaignJobs, campaignErr := newJobStore(st)
 		if campaignErr != nil {
 			_ = st.Close()
 			return fmt.Errorf("open daemon campaign scheduler: %w", campaignErr)
@@ -1028,6 +1079,8 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireWorkQueue(rt, def.App.ID)
+	r.wireWorkQueueWorker(rt, def.App.ID, loaded.path)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireApplicationMaintenance(rt, def.App.ID)
 	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
@@ -1290,6 +1343,8 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireWorkQueue(rt, def.App.ID)
+	r.wireWorkQueueWorker(rt, def.App.ID, loaded.path)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireApplicationMaintenance(rt, def.App.ID)
 	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
