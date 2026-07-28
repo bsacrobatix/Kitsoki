@@ -216,10 +216,6 @@ type WebConfig struct {
 	// WorkQueueWorkers binds worker Story Applications to one configured queue
 	// owner and one enabled worker-registry entry.
 	WorkQueueWorkers map[string]WorkQueueWorkerBinding `yaml:"work_queue_workers,omitempty"`
-
-	// WorkQueueExecutors are daemon-owned fixed adapters that dispatch a leased
-	// queue item through one configured Application Job.
-	WorkQueueExecutors map[string]WorkQueueExecutorBinding `yaml:"work_queue_executors,omitempty"`
 }
 
 type ApplicationMaintenanceConfig struct {
@@ -966,9 +962,6 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveWorkQueueWorkers(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
-	if err := cfg.resolveWorkQueueExecutors(); err != nil {
-		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
-	}
 	if err := cfg.resolveAuth(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -1255,16 +1248,6 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[key] = value
 		}
 		out.WorkQueueWorkers = merged
-	}
-	if len(local.WorkQueueExecutors) > 0 {
-		merged := make(map[string]WorkQueueExecutorBinding, len(base.WorkQueueExecutors)+len(local.WorkQueueExecutors))
-		for key, value := range base.WorkQueueExecutors {
-			merged[key] = value
-		}
-		for key, value := range local.WorkQueueExecutors {
-			merged[key] = value
-		}
-		out.WorkQueueExecutors = merged
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)

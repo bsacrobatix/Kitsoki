@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("applicationjob: not found")
 type Store interface {
 	Register(context.Context, Record) (Record, error)
 	BindChild(context.Context, string, DispatchResult) (Record, error)
-	Complete(context.Context, string, []string, string, string, string, string) (Record, error)
+	Complete(context.Context, string, []string, string) (Record, error)
 	Get(context.Context, string) (Record, error)
 }
 
@@ -38,9 +38,6 @@ CREATE TABLE IF NOT EXISTS application_job_mappings (
   target_event           TEXT NOT NULL,
   artifact_outputs_json  TEXT NOT NULL,
   primary_output         TEXT NOT NULL,
-	bundle_ref_output      TEXT NOT NULL DEFAULT '',
-	bundle_digest_output   TEXT NOT NULL DEFAULT '',
-	bundle_kind_output     TEXT NOT NULL DEFAULT '',
   max_input_bytes        INTEGER NOT NULL,
   max_runtime_seconds    INTEGER NOT NULL,
   target_route_id        TEXT NOT NULL DEFAULT '',
@@ -49,9 +46,6 @@ CREATE TABLE IF NOT EXISTS application_job_mappings (
   input_digest           TEXT NOT NULL,
   artifact_handles_json  TEXT NOT NULL DEFAULT '[]',
   primary_handle         TEXT NOT NULL DEFAULT '',
-	bundle_ref             TEXT NOT NULL DEFAULT '',
-	bundle_digest          TEXT NOT NULL DEFAULT '',
-	bundle_kind            TEXT NOT NULL DEFAULT '',
   created_at             INTEGER NOT NULL,
   updated_at             INTEGER NOT NULL
 ) STRICT;
@@ -71,9 +65,6 @@ CREATE TABLE IF NOT EXISTS applicationjob.application_job_mappings (
   target_event           TEXT NOT NULL,
   artifact_outputs_json  TEXT NOT NULL,
   primary_output         TEXT NOT NULL,
-	bundle_ref_output      TEXT NOT NULL DEFAULT '',
-	bundle_digest_output   TEXT NOT NULL DEFAULT '',
-	bundle_kind_output     TEXT NOT NULL DEFAULT '',
   max_input_bytes        BIGINT NOT NULL,
   max_runtime_seconds    BIGINT NOT NULL,
   target_route_id        TEXT NOT NULL DEFAULT '',
@@ -82,9 +73,6 @@ CREATE TABLE IF NOT EXISTS applicationjob.application_job_mappings (
   input_digest           TEXT NOT NULL,
   artifact_handles_json  TEXT NOT NULL DEFAULT '[]',
   primary_handle         TEXT NOT NULL DEFAULT '',
-	bundle_ref             TEXT NOT NULL DEFAULT '',
-	bundle_digest          TEXT NOT NULL DEFAULT '',
-	bundle_kind            TEXT NOT NULL DEFAULT '',
   created_at             BIGINT NOT NULL,
   updated_at             BIGINT NOT NULL
 );
@@ -106,11 +94,6 @@ func NewSQLiteStore(db *sql.DB) (*SQLStore, error) {
 	if _, err := db.Exec(sqliteSchema); err != nil {
 		return nil, fmt.Errorf("applicationjob.NewSQLiteStore: schema migration: %w", err)
 	}
-	for _, column := range []string{"bundle_ref_output", "bundle_digest_output", "bundle_kind_output", "bundle_ref", "bundle_digest", "bundle_kind"} {
-		if _, err := db.Exec("ALTER TABLE application_job_mappings ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
-			return nil, fmt.Errorf("applicationjob.NewSQLiteStore: compatibility migration: %w", err)
-		}
-	}
 	return &SQLStore{db: db, now: time.Now}, nil
 }
 
@@ -120,11 +103,6 @@ func NewPostgresStore(db *sql.DB) (*SQLStore, error) {
 	}
 	if _, err := db.Exec(postgresSchema); err != nil {
 		return nil, fmt.Errorf("applicationjob.NewPostgresStore: schema migration: %w", err)
-	}
-	for _, column := range []string{"bundle_ref_output", "bundle_digest_output", "bundle_kind_output", "bundle_ref", "bundle_digest", "bundle_kind"} {
-		if _, err := db.Exec("ALTER TABLE applicationjob.application_job_mappings ADD COLUMN IF NOT EXISTS " + column + " TEXT NOT NULL DEFAULT ''"); err != nil {
-			return nil, fmt.Errorf("applicationjob.NewPostgresStore: compatibility migration: %w", err)
-		}
 	}
 	return &SQLStore{db: db, dialect: dialectPostgres, now: time.Now}, nil
 }
@@ -148,17 +126,15 @@ func (s *SQLStore) Register(ctx context.Context, record Record) (Record, error) 
 	_, err = s.db.ExecContext(ctx, s.q(`
 		INSERT INTO application_job_mappings
 		  (job_ref, caller_application_id, template_id, target_application_id,
-		   target_event, artifact_outputs_json, primary_output, bundle_ref_output,
-		   bundle_digest_output, bundle_kind_output, max_input_bytes,
+		   target_event, artifact_outputs_json, primary_output, max_input_bytes,
 		   max_runtime_seconds, target_route_id, target_session_id, child_job_id,
-		   input_digest, artifact_handles_json, primary_handle, bundle_ref,
-		   bundle_digest, bundle_kind, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		   input_digest, artifact_handles_json, primary_handle, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		record.JobRef, record.CallerApplicationID, record.TemplateID,
 		record.TargetApplicationID, record.TargetEvent, string(outputs),
-		record.PrimaryOutput, record.BundleRefOutput, record.BundleDigestOutput, record.BundleKindOutput, record.MaxInputBytes, record.MaxRuntimeSeconds,
+		record.PrimaryOutput, record.MaxInputBytes, record.MaxRuntimeSeconds,
 		record.TargetRouteID, record.TargetSessionID, record.ChildJobID, record.InputDigest,
-		"[]", record.PrimaryHandle, record.BundleRef, record.BundleDigest, record.BundleKind, record.CreatedAt.UnixMilli(), record.UpdatedAt.UnixMilli(),
+		"[]", record.PrimaryHandle, record.CreatedAt.UnixMilli(), record.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
 		return Record{}, fmt.Errorf("applicationjob.Register: %w", err)
@@ -187,7 +163,7 @@ func (s *SQLStore) BindChild(ctx context.Context, jobRef string, result Dispatch
 	return s.Get(ctx, jobRef)
 }
 
-func (s *SQLStore) Complete(ctx context.Context, jobRef string, artifacts []string, primary, bundleRef, bundleDigest, bundleKind string) (Record, error) {
+func (s *SQLStore) Complete(ctx context.Context, jobRef string, artifacts []string, primary string) (Record, error) {
 	raw, err := json.Marshal(artifacts)
 	if err != nil {
 		return Record{}, fmt.Errorf("applicationjob.Complete: encode artifacts: %w", err)
@@ -195,8 +171,8 @@ func (s *SQLStore) Complete(ctx context.Context, jobRef string, artifacts []stri
 	now := s.now().UTC()
 	res, err := s.db.ExecContext(ctx, s.q(`
 		UPDATE application_job_mappings
-		SET artifact_handles_json=?, primary_handle=?, bundle_ref=?, bundle_digest=?, bundle_kind=?, updated_at=?
-		WHERE job_ref=?`), string(raw), primary, bundleRef, bundleDigest, bundleKind, now.UnixMilli(), jobRef)
+		SET artifact_handles_json=?, primary_handle=?, updated_at=?
+		WHERE job_ref=?`), string(raw), primary, now.UnixMilli(), jobRef)
 	if err != nil {
 		return Record{}, fmt.Errorf("applicationjob.Complete: %w", err)
 	}
@@ -213,11 +189,9 @@ func (s *SQLStore) Complete(ctx context.Context, jobRef string, artifacts []stri
 func (s *SQLStore) Get(ctx context.Context, jobRef string) (Record, error) {
 	row := s.db.QueryRowContext(ctx, s.q(`
 		SELECT job_ref, caller_application_id, template_id, target_application_id,
-		       target_event, artifact_outputs_json, primary_output, bundle_ref_output,
-		       bundle_digest_output, bundle_kind_output, max_input_bytes,
+		       target_event, artifact_outputs_json, primary_output, max_input_bytes,
 		       max_runtime_seconds, target_route_id, target_session_id, child_job_id,
-		       input_digest, artifact_handles_json, primary_handle, bundle_ref,
-		       bundle_digest, bundle_kind, created_at, updated_at
+		       input_digest, artifact_handles_json, primary_handle, created_at, updated_at
 		FROM application_job_mappings WHERE job_ref=?`), jobRef)
 	var record Record
 	var outputs, artifacts string
@@ -225,10 +199,10 @@ func (s *SQLStore) Get(ctx context.Context, jobRef string) (Record, error) {
 	if err := row.Scan(
 		&record.JobRef, &record.CallerApplicationID, &record.TemplateID,
 		&record.TargetApplicationID, &record.TargetEvent, &outputs,
-		&record.PrimaryOutput, &record.BundleRefOutput, &record.BundleDigestOutput, &record.BundleKindOutput, &record.MaxInputBytes, &record.MaxRuntimeSeconds,
+		&record.PrimaryOutput, &record.MaxInputBytes, &record.MaxRuntimeSeconds,
 		&record.TargetRouteID,
 		&record.TargetSessionID, &record.ChildJobID, &record.InputDigest,
-		&artifacts, &record.PrimaryHandle, &record.BundleRef, &record.BundleDigest, &record.BundleKind,
+		&artifacts, &record.PrimaryHandle,
 		&created, &updated,
 	); errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound

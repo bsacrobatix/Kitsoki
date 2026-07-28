@@ -472,11 +472,6 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				} else if restored > 0 {
 					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: daemon restored %d job(s)\n", restored)
 				}
-				stopQueueExecutors, executorErr := registry.StartWorkQueueExecutors(context.Background())
-				if executorErr != nil {
-					return fmt.Errorf("start work queue executors: %w", executorErr)
-				}
-				defer stopQueueExecutors()
 			}
 			httpSrv := &http.Server{
 				Addr:    addr,

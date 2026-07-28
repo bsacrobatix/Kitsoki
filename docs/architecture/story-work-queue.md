@@ -156,42 +156,6 @@ Cancellation and lease reaping are **not** story operations. They remain typed
 internal service calls. This keeps story code declarative and prevents the host
 from becoming a general remote-execution interface.
 
-### Daemon application-job executor
-
-For the normal production case, prefer `work_queue_executors` over a Story
-that manually calls `host.work_queue_worker`. A binding pins one queue, one
-enabled worker identity, and one preconfigured `story_application_jobs`
-template. The daemon claims work, submits the normalized queue payload to that
-fixed Application Job, heartbeats the fence while it polls the job, and writes
-the terminal job projection as the queue receipt.
-
-```yaml
-work_queue_executors:
-  pog-bugfix:
-    target_application: pog-operations
-    queue: triage-feedback
-    worker_id: pog-runner
-    caller_application: pog-queue-adapter
-    template: pog-bugfix
-    max_concurrent: 2
-    lease_seconds: 60
-    poll_seconds: 5
-```
-
-The template is a normal `story_application_jobs` entry. A code-producing
-queue additionally requires `bundle_ref_output` and `bundle_digest_output` on
-that template. The target event must return those fields with its usual
-opaque artifact outputs; they are retained privately by the application-job
-record and copied into the terminal queue receipt. The queue's configured
-bundle validator remains the final authority: a missing, unsafe, or
-digest-mismatched bundle cannot become countable.
-
-On daemon stop, the executor stops heartbeating and does not claim its child
-process resumed. After lease expiry, a replacement executor claims the item
-with a new fence and replays the stable Application Job identity. It observes
-the application's durable terminal truth before writing a receipt; stale
-workers cannot complete a superseded lease.
-
 ## Adjacent Runtime Services
 
 The queue composes with, but does not absorb, existing services:

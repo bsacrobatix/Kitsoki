@@ -72,16 +72,6 @@ func ValidateTemplate(name string, template Template) error {
 	if _, ok := outputs[template.PrimaryOutput]; !ok {
 		return fmt.Errorf("application job template %q primary_output must name an artifact output", name)
 	}
-	if (template.BundleRefOutput == "") != (template.BundleDigestOutput == "") {
-		return fmt.Errorf("application job template %q bundle_ref_output and bundle_digest_output must be configured together", name)
-	}
-	for _, output := range []string{template.BundleRefOutput, template.BundleDigestOutput, template.BundleKindOutput} {
-		if output != "" {
-			if err := boundedIdentity("bundle output", output); err != nil {
-				return err
-			}
-		}
-	}
 	if template.Bounds.MaxInputBytes <= 0 || template.Bounds.MaxInputBytes > MaxInputBytes {
 		return fmt.Errorf("application job template %q max_input_bytes must be within 1..%d", name, MaxInputBytes)
 	}
@@ -151,9 +141,6 @@ func (s *Service) Submit(
 		TargetEvent:         template.Event,
 		ArtifactOutputs:     append([]string(nil), template.ArtifactOutputs...),
 		PrimaryOutput:       template.PrimaryOutput,
-		BundleRefOutput:     template.BundleRefOutput,
-		BundleDigestOutput:  template.BundleDigestOutput,
-		BundleKindOutput:    template.BundleKindOutput,
 		MaxInputBytes:       template.Bounds.MaxInputBytes,
 		MaxRuntimeSeconds:   template.Bounds.MaxRuntimeSeconds,
 		InputDigest:         inputDigest,
@@ -300,13 +287,13 @@ func (s *Service) refreshLocked(
 		job, _ = s.Jobs.Get(ctx, job.ID)
 		return job, record, nil
 	case "done":
-		artifacts, primary, bundleRef, bundleDigest, bundleKind, outputErr := projectArtifacts(record, child.Output)
+		artifacts, primary, outputErr := projectArtifacts(record, child.Output)
 		if outputErr != nil {
 			s.fail(ctx, record.JobRef, "invalid_artifact_output")
 			job, _ = s.Jobs.Get(ctx, job.ID)
 			return job, record, nil
 		}
-		record, err = s.Records.Complete(ctx, record.JobRef, artifacts, primary, bundleRef, bundleDigest, bundleKind)
+		record, err = s.Records.Complete(ctx, record.JobRef, artifacts, primary)
 		if err != nil {
 			s.fail(ctx, record.JobRef, "artifact_persistence_failed")
 			return artifactjob.Job{}, Record{}, fmt.Errorf("persist application job artifacts")
@@ -427,7 +414,6 @@ func (s *Service) result(
 		Primary:   record.PrimaryHandle, Reason: reason,
 	}
 	result.Receipt = newReceipt(result.JobRef, operation, result.Status, replayed)
-	result.BundleRef, result.BundleDigest, result.BundleKind = record.BundleRef, record.BundleDigest, record.BundleKind
 	return result
 }
 
@@ -449,7 +435,7 @@ func stableJobRef(callerApplicationID, templateID, inputDigest string) string {
 	return "aj_" + hex.EncodeToString(sum[:16])
 }
 
-func projectArtifacts(record Record, output map[string]any) ([]string, string, string, string, string, error) {
+func projectArtifacts(record Record, output map[string]any) ([]string, string, error) {
 	artifacts := make([]string, 0, len(record.ArtifactOutputs))
 	byField := make(map[string]string, len(record.ArtifactOutputs))
 	for _, field := range record.ArtifactOutputs {
@@ -457,44 +443,16 @@ func projectArtifacts(record Record, output map[string]any) ([]string, string, s
 		if !ok || len(handle) > MaxArtifactRefBytes || !handlePattern.MatchString(handle) ||
 			strings.Contains(handle, "..") || strings.Contains(handle, "://") ||
 			strings.ContainsAny(handle, `/\`) {
-			return nil, "", "", "", "", fmt.Errorf("artifact output is not an opaque handle")
+			return nil, "", fmt.Errorf("artifact output is not an opaque handle")
 		}
 		artifacts = append(artifacts, handle)
 		byField[field] = handle
 	}
 	primary := byField[record.PrimaryOutput]
 	if primary == "" {
-		return nil, "", "", "", "", fmt.Errorf("primary artifact output is missing")
+		return nil, "", fmt.Errorf("primary artifact output is missing")
 	}
-	if record.BundleRefOutput == "" {
-		return artifacts, primary, "", "", "", nil
-	}
-	ref, refOK := output[record.BundleRefOutput].(string)
-	digest, digestOK := output[record.BundleDigestOutput].(string)
-	if !refOK || strings.TrimSpace(ref) == "" || !digestOK || !validBundleDigest(digest) {
-		return nil, "", "", "", "", fmt.Errorf("bundle receipt output is invalid")
-	}
-	kind := ""
-	if record.BundleKindOutput != "" {
-		var kindOK bool
-		kind, kindOK = output[record.BundleKindOutput].(string)
-		if !kindOK || strings.TrimSpace(kind) == "" || len(kind) > MaxArtifactRefBytes {
-			return nil, "", "", "", "", fmt.Errorf("bundle kind output is invalid")
-		}
-	}
-	return artifacts, primary, strings.TrimSpace(ref), strings.TrimSpace(digest), strings.TrimSpace(kind), nil
-}
-
-func validBundleDigest(value string) bool {
-	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
-		return false
-	}
-	for _, c := range value[len("sha256:"):] {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
+	return artifacts, primary, nil
 }
 
 func validatePublicInput(raw json.RawMessage, maxBytes int) (json.RawMessage, error) {
