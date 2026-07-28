@@ -3300,3 +3300,25 @@ nodes:
     status: proposed
     title: Crash-safe exact-SHA hosted deployment substrate
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-28T06:58:14Z"
+    id: cs-74d87889039d58e88aa2645035312120
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-project-object-graph
+          fields:
+            summary: mcp-graph must default to proposal-write capability (never a live apply). Its session guide must accurately distinguish proposal writes from a read-only session. For a protected repository, the first successful proposal must create or reuse a managed Capsule on a dedicated branch, commit the catalog change there, and return the branch name, head SHA, and PR-ready evidence. It must not modify the protected source checkout or automatically merge into staging/local. Later reads and writes in the same MCP process must use that branch. Push, PR creation, and protected-main merge remain explicit target-repository governed actions.
+          id: req-mcp-graph-branch-pr-proposals
+          schema: kitsoki/requirement/v0
+          status: proposed
+          title: Default graph proposals persist to a reviewable branch, then hand off to PR
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Route default graph proposals through a reviewable branch and PR handoff
+    visibility: internal
