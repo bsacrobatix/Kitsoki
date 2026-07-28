@@ -47,6 +47,7 @@ func TestSQLiteStorePersistsPrivateMappingAndArtifacts(t *testing.T) {
 		record.JobRef,
 		[]string{"report:one", "bundle:two"},
 		"report:one",
+		"", "", "",
 	)
 	if err != nil {
 		t.Fatal(err)

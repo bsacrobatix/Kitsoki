@@ -22,11 +22,14 @@ type Bounds struct {
 
 // Template is the complete deployment authority for one public template name.
 type Template struct {
-	ApplicationID   string   `yaml:"application_id" json:"application_id"`
-	Event           string   `yaml:"event" json:"event"`
-	ArtifactOutputs []string `yaml:"artifact_outputs" json:"artifact_outputs"`
-	PrimaryOutput   string   `yaml:"primary_output" json:"primary_output"`
-	Bounds          Bounds   `yaml:"bounds" json:"bounds"`
+	ApplicationID      string   `yaml:"application_id" json:"application_id"`
+	Event              string   `yaml:"event" json:"event"`
+	ArtifactOutputs    []string `yaml:"artifact_outputs" json:"artifact_outputs"`
+	PrimaryOutput      string   `yaml:"primary_output" json:"primary_output"`
+	BundleRefOutput    string   `yaml:"bundle_ref_output,omitempty" json:"bundle_ref_output,omitempty"`
+	BundleDigestOutput string   `yaml:"bundle_digest_output,omitempty" json:"bundle_digest_output,omitempty"`
+	BundleKindOutput   string   `yaml:"bundle_kind_output,omitempty" json:"bundle_kind_output,omitempty"`
+	Bounds             Bounds   `yaml:"bounds" json:"bounds"`
 }
 
 // Record is the private mapping from a stable public artifact-job reference to
@@ -39,6 +42,9 @@ type Record struct {
 	TargetEvent         string
 	ArtifactOutputs     []string
 	PrimaryOutput       string
+	BundleRefOutput     string
+	BundleDigestOutput  string
+	BundleKindOutput    string
 	MaxInputBytes       int
 	MaxRuntimeSeconds   int
 	TargetRouteID       string
@@ -47,6 +53,9 @@ type Record struct {
 	InputDigest         string
 	Artifacts           []string
 	PrimaryHandle       string
+	BundleRef           string
+	BundleDigest        string
+	BundleKind          string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -63,12 +72,15 @@ type Receipt struct {
 
 // Result is the complete public application-job projection.
 type Result struct {
-	JobRef    string   `json:"job_ref"`
-	Status    string   `json:"status"`
-	Artifacts []string `json:"artifact_handles,omitempty"`
-	Primary   string   `json:"primary,omitempty"`
-	Reason    string   `json:"reason,omitempty"`
-	Receipt   Receipt  `json:"receipt"`
+	JobRef       string   `json:"job_ref"`
+	Status       string   `json:"status"`
+	Artifacts    []string `json:"artifact_handles,omitempty"`
+	Primary      string   `json:"primary,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	Receipt      Receipt  `json:"receipt"`
+	BundleRef    string   `json:"-"`
+	BundleDigest string   `json:"-"`
+	BundleKind   string   `json:"-"`
 }
 
 // DispatchRequest is private input to the injected Application Event adapter.

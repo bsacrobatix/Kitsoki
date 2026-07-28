@@ -35,6 +35,7 @@ func TestPostgresStorePrivateMappingParity(t *testing.T) {
 		record.JobRef,
 		[]string{"report:complete"},
 		"report:complete",
+		"", "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
