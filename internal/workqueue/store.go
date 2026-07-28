@@ -110,3 +110,22 @@ type Store interface {
 	Get(context.Context, string) (Job, error)
 	List(context.Context, ListFilter) ([]Job, error)
 }
+
+// CapsuleDispatchStore retains the only recoverable link between a leased work
+// item and an independently-running Capsule CI job. It is deliberately an
+// optional extension of Store so existing story workers remain unchanged.
+// Queue executors that launch remote Capsule CI require it: after a daemon
+// restart they poll this durable job identity rather than assuming a former
+// process is still alive or launching an unbounded duplicate.
+type CapsuleDispatchStore interface {
+	GetCapsuleDispatch(context.Context, string) (CapsuleDispatch, error)
+	PutCapsuleDispatch(context.Context, CapsuleDispatch) error
+	DeleteCapsuleDispatch(context.Context, string) error
+}
+
+// CapsuleDispatch is daemon-private recovery state. It contains no queue
+// payload, credentials, source path, or provider configuration.
+type CapsuleDispatch struct {
+	WorkRef, RunRef, ExecutionRef string
+	PayloadDigest                 string
+}

@@ -77,9 +77,9 @@ func newStore(db *sql.DB, d dialect, opts ...Option) (*SQLStore, error) {
 	}
 	stmts := []string{}
 	if d == postgres {
-		stmts = []string{"CREATE SCHEMA IF NOT EXISTS workqueue", `CREATE TABLE IF NOT EXISTS workqueue.jobs (id TEXT PRIMARY KEY, application_id TEXT NOT NULL, queue_name TEXT NOT NULL, idempotency_key TEXT NOT NULL, payload BYTEA NOT NULL, payload_digest TEXT NOT NULL, capabilities JSONB NOT NULL, produces_code INTEGER NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, attempts INTEGER NOT NULL, max_attempts INTEGER NOT NULL, available_at BIGINT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at BIGINT, fence BIGINT NOT NULL DEFAULT 0, receipt JSONB, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, UNIQUE(application_id,queue_name,idempotency_key))`, `CREATE INDEX IF NOT EXISTS workqueue_claim ON workqueue.jobs(application_id,queue_name,state,available_at,priority DESC,created_at)`}
+		stmts = []string{"CREATE SCHEMA IF NOT EXISTS workqueue", `CREATE TABLE IF NOT EXISTS workqueue.jobs (id TEXT PRIMARY KEY, application_id TEXT NOT NULL, queue_name TEXT NOT NULL, idempotency_key TEXT NOT NULL, payload BYTEA NOT NULL, payload_digest TEXT NOT NULL, capabilities JSONB NOT NULL, produces_code INTEGER NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, attempts INTEGER NOT NULL, max_attempts INTEGER NOT NULL, available_at BIGINT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at BIGINT, fence BIGINT NOT NULL DEFAULT 0, receipt JSONB, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, UNIQUE(application_id,queue_name,idempotency_key))`, `CREATE INDEX IF NOT EXISTS workqueue_claim ON workqueue.jobs(application_id,queue_name,state,available_at,priority DESC,created_at)`, `CREATE TABLE IF NOT EXISTS workqueue.capsule_dispatches (work_ref TEXT PRIMARY KEY, run_ref TEXT NOT NULL, execution_ref TEXT NOT NULL DEFAULT '', payload_digest TEXT NOT NULL)`}
 	} else {
-		stmts = []string{`CREATE TABLE IF NOT EXISTS workqueue_jobs (id TEXT PRIMARY KEY, application_id TEXT NOT NULL, queue_name TEXT NOT NULL, idempotency_key TEXT NOT NULL, payload BLOB NOT NULL, payload_digest TEXT NOT NULL, capabilities TEXT NOT NULL, produces_code INTEGER NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, attempts INTEGER NOT NULL, max_attempts INTEGER NOT NULL, available_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER, fence INTEGER NOT NULL DEFAULT 0, receipt TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(application_id,queue_name,idempotency_key)) STRICT`, `CREATE INDEX IF NOT EXISTS workqueue_claim ON workqueue_jobs(application_id,queue_name,state,available_at,priority DESC,created_at)`}
+		stmts = []string{`CREATE TABLE IF NOT EXISTS workqueue_jobs (id TEXT PRIMARY KEY, application_id TEXT NOT NULL, queue_name TEXT NOT NULL, idempotency_key TEXT NOT NULL, payload BLOB NOT NULL, payload_digest TEXT NOT NULL, capabilities TEXT NOT NULL, produces_code INTEGER NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, attempts INTEGER NOT NULL, max_attempts INTEGER NOT NULL, available_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER, fence INTEGER NOT NULL DEFAULT 0, receipt TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(application_id,queue_name,idempotency_key)) STRICT`, `CREATE INDEX IF NOT EXISTS workqueue_claim ON workqueue_jobs(application_id,queue_name,state,available_at,priority DESC,created_at)`, `CREATE TABLE IF NOT EXISTS workqueue_capsule_dispatches (work_ref TEXT PRIMARY KEY, run_ref TEXT NOT NULL, execution_ref TEXT NOT NULL DEFAULT '', payload_digest TEXT NOT NULL) STRICT`}
 	}
 	for _, q := range stmts {
 		if _, err := db.Exec(q); err != nil {
@@ -102,6 +102,28 @@ func newStore(db *sql.DB, d dialect, opts ...Option) (*SQLStore, error) {
 		}
 	}
 	return s, nil
+}
+
+func (s *SQLStore) GetCapsuleDispatch(ctx context.Context, workRef string) (CapsuleDispatch, error) {
+	var d CapsuleDispatch
+	err := s.db.QueryRowContext(ctx, s.q(`SELECT work_ref,run_ref,execution_ref,payload_digest FROM capsule_dispatches WHERE work_ref=?`), workRef).Scan(&d.WorkRef, &d.RunRef, &d.ExecutionRef, &d.PayloadDigest)
+	if err == sql.ErrNoRows {
+		return CapsuleDispatch{}, ErrNotFound
+	}
+	return d, err
+}
+
+func (s *SQLStore) PutCapsuleDispatch(ctx context.Context, d CapsuleDispatch) error {
+	if strings.TrimSpace(d.WorkRef) == "" || strings.TrimSpace(d.RunRef) == "" || strings.TrimSpace(d.PayloadDigest) == "" {
+		return ErrInvalid
+	}
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO capsule_dispatches (work_ref,run_ref,execution_ref,payload_digest) VALUES (?,?,?,?) ON CONFLICT(work_ref) DO UPDATE SET run_ref=excluded.run_ref,execution_ref=excluded.execution_ref,payload_digest=excluded.payload_digest`), d.WorkRef, d.RunRef, d.ExecutionRef, d.PayloadDigest)
+	return err
+}
+
+func (s *SQLStore) DeleteCapsuleDispatch(ctx context.Context, workRef string) error {
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM capsule_dispatches WHERE work_ref=?`), workRef)
+	return err
 }
 
 func (s *SQLStore) Enqueue(ctx context.Context, r EnqueueRequest) (Job, error) {
@@ -492,8 +514,10 @@ func scan(r scanner) (Job, error) {
 }
 func (s *SQLStore) q(q string) string {
 	if s.dialect == sqlite {
+		q = strings.ReplaceAll(q, "capsule_dispatches", "workqueue_capsule_dispatches")
 		return strings.ReplaceAll(q, "jobs", "workqueue_jobs")
 	}
+	q = strings.ReplaceAll(q, "capsule_dispatches", "workqueue.capsule_dispatches")
 	q = strings.ReplaceAll(q, "jobs", "workqueue.jobs")
 	var b strings.Builder
 	n := 0

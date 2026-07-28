@@ -115,6 +115,26 @@ work_queue_workers:
     max_concurrent: 2
     lease_seconds: 60
 
+# Direct daemon-owned Capsule CI executor. This is for an allowlisted
+# pipeline such as a vm-pool bugfix workflow, not an Application Event.
+work_queue_executors:
+  pog-bugfix:
+    target_application: pog-operations
+    queue: triage-feedback
+    project_root: /srv/pog
+    workspace_id: pog-bugfix
+    pipeline: bugfix
+    worker_id: pog-vm-pool
+    worker_policy: bugfix
+    input_schema:
+      issue_ref: {type: string, required: true}
+    bundle_ref_output: bundle_ref
+    bundle_digest_output: bundle_digest
+    bundle_kind_output: bundle_kind
+    max_concurrent: 1
+    lease_seconds: 60
+    poll_seconds: 5
+
 # Story effect
 - invoke: host.work_queue
   with:
@@ -155,6 +175,24 @@ facts.
 Cancellation and lease reaping are **not** story operations. They remain typed
 internal service calls. This keeps story code declarative and prevents the host
 from becoming a general remote-execution interface.
+
+## Capsule CI Executors
+
+`work_queue_executors` binds one queue directly to an allowlisted managed
+Capsule workspace and Capsule-CI pipeline. The daemon validates the bounded
+object payload against `input_schema`, seals it as CI `job_inputs`, pins the
+configured worker placement, and dispatches only through Capsule CI. It does
+not start a Story Application event, run a shell dispatcher, or let the payload
+choose a project, source revision, workspace, pipeline, provider, or output.
+
+The daemon persists the queue work reference to the remote CI run and execution
+identities before polling. After a restart, a newly leased worker reads that
+mapping and asks the durable executor for status; it never assumes an old
+process resumed. A passed pipeline must expose the configured terminal bundle
+outputs in its typed verdict. The executor maps those into the existing fenced
+work-queue receipt, and code work is still countable only after the daemon's
+bundle validator verifies the retained bytes and digest. Missing terminal
+outputs, invalid payloads, and unknown durable status fail closed.
 
 ## Adjacent Runtime Services
 

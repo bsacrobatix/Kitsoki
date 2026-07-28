@@ -360,6 +360,10 @@ type Verdict struct {
 	StoryDigest       string  `json:"story_digest,omitempty"`
 	EnvironmentDigest string  `json:"environment_digest,omitempty"`
 	EnvelopeDigest    string  `json:"envelope_digest,omitempty"`
+	// Outputs is a bounded terminal projection emitted by the sealed story.
+	// Queue bindings name exact keys from daemon configuration; story payloads
+	// cannot choose where retained bundle evidence is read from.
+	Outputs map[string]string `json:"outputs,omitempty"`
 }
 
 func Load(project string) (Config, error) {
@@ -508,6 +512,14 @@ func ValidateVerdict(v Verdict, expected executor.Envelope, contract ResultContr
 		seen[check.ID] = true
 		if check.Outcome == "passed" && len(check.Evidence) == 0 && check.DecisionRef == "" {
 			return fmt.Errorf("capsule ci: passed check %q has no evidence", check.ID)
+		}
+	}
+	if len(v.Outputs) > 16 {
+		return fmt.Errorf("capsule ci: verdict outputs exceed 16 entries")
+	}
+	for key, value := range v.Outputs {
+		if strings.TrimSpace(key) == "" || len(key) > 128 || strings.TrimSpace(value) == "" || len(value) > 4096 {
+			return fmt.Errorf("capsule ci: verdict output is invalid")
 		}
 	}
 	if v.SourceDigest != expected.SourceDigest || v.StoryDigest != expected.StoryDigest || v.EnvironmentDigest != expected.Environment.Digest || v.EnvelopeDigest != expected.Digest {

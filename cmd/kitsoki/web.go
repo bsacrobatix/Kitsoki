@@ -472,6 +472,11 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				} else if restored > 0 {
 					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: daemon restored %d job(s)\n", restored)
 				}
+				stopCapsuleQueueExecutors, capsuleExecutorErr := registry.StartWorkQueueCapsuleExecutors(context.Background())
+				if capsuleExecutorErr != nil {
+					return fmt.Errorf("start work queue capsule executors: %w", capsuleExecutorErr)
+				}
+				defer stopCapsuleQueueExecutors()
 			}
 			httpSrv := &http.Server{
 				Addr:    addr,

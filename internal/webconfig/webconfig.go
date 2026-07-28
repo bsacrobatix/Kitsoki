@@ -216,6 +216,10 @@ type WebConfig struct {
 	// WorkQueueWorkers binds worker Story Applications to one configured queue
 	// owner and one enabled worker-registry entry.
 	WorkQueueWorkers map[string]WorkQueueWorkerBinding `yaml:"work_queue_workers,omitempty"`
+
+	// WorkQueueExecutors binds a queue directly to an allowlisted Capsule CI
+	// pipeline. It is daemon-owned and never wraps a local Story event.
+	WorkQueueExecutors map[string]WorkQueueExecutorBinding `yaml:"work_queue_executors,omitempty"`
 }
 
 type ApplicationMaintenanceConfig struct {
@@ -960,6 +964,9 @@ func Load(path string) (WebConfig, error) {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveWorkQueueWorkers(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveWorkQueueExecutors(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveAuth(); err != nil {
