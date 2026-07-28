@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +107,63 @@ func TestQueueProcessDepsSetsGateMemo(t *testing.T) {
 	memo, ok := deps.GateMemo.(queue.FileGateMemo)
 	require.True(t, ok)
 	require.Equal(t, "/project", memo.ProjectRoot)
+}
+
+func TestQueueMigrateRejectsRefTargetBaseWithoutMutatingState(t *testing.T) {
+	root := queueMigrationGitRepo(t)
+	path, before := writeLegacyQueueState(t, root)
+
+	cmd := queueMigrateCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--project", root, "--target", "main", "--target-base-sha", "staging/local"})
+	err := cmd.Execute()
+	require.ErrorContains(t, err, "--target-base-sha must be a lowercase full Git SHA")
+	after, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	require.Equal(t, before, after)
+}
+
+func TestQueueMigrateAcceptsResolvedFullTargetBaseSHA(t *testing.T) {
+	root := queueMigrationGitRepo(t)
+	_, _ = writeLegacyQueueState(t, root)
+	base := promoteExistingGit(t, root, "rev-parse", "HEAD")
+
+	cmd := queueMigrateCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--project", root, "--target", "main", "--target-base-sha", base})
+	require.NoError(t, cmd.Execute())
+	var state queue.State
+	require.NoError(t, json.Unmarshal(out.Bytes(), &state))
+	require.Equal(t, queue.Schema, state.Schema)
+	require.Len(t, state.Candidates, 1)
+	require.Equal(t, base, state.Candidates[0].TargetBaseSHAAtAdmission)
+}
+
+func queueMigrationGitRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	promoteExistingGit(t, root, "init", "-q", "-b", "main")
+	promoteExistingGit(t, root, "config", "user.name", "Queue Test")
+	promoteExistingGit(t, root, "config", "user.email", "queue@example.invalid")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "base.txt"), []byte("base\n"), 0o644))
+	promoteExistingGit(t, root, "add", "base.txt")
+	promoteExistingGit(t, root, "commit", "-qm", "base")
+	promoteExistingGit(t, root, "branch", "staging/local")
+	return root
+}
+
+func writeLegacyQueueState(t *testing.T, root string) (string, []byte) {
+	t.Helper()
+	dir := filepath.Join(root, ".capsules", "queue")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	raw := []byte(`{"schema":"capsule-merge-queue/v1","candidates":[{"id":"legacy","sha":"dddddddddddddddddddddddddddddddddddddddd","branch":"agent/d","project_id":"project","status":"queued"}]}`)
+	path := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+	return path, raw
 }
 
 type fakeCLIIntegration struct {

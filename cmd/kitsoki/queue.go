@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -505,6 +506,9 @@ func queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair
 func queueMigrateCmd() *cobra.Command {
 	var project, queueRoot, target, base, policy string
 	cmd := &cobra.Command{Use: "migrate", Short: "Explicitly migrate a legacy merge queue to target-bound v2", RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := validateQueueMigrationTargetBase(cmd.Context(), project, base); err != nil {
+			return err
+		}
 		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LegacyTargetRef: target, LegacyTargetBaseSHAAtAdmission: base, LegacyTargetPolicy: queue.TargetPolicy(policy)}).List()
 		if err != nil {
 			return err
@@ -517,5 +521,20 @@ func queueMigrateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&base, "target-base-sha", "", "target SHA observed at legacy migration")
 	cmd.Flags().StringVar(&policy, "target-policy", string(queue.WaveAutoPolicy), "target policy: wave-auto or steward-approved")
 	_ = cmd.MarkFlagRequired("target")
+	_ = cmd.MarkFlagRequired("target-base-sha")
 	return cmd
+}
+
+func validateQueueMigrationTargetBase(ctx context.Context, project, base string) error {
+	if !fullGitSHA(base) {
+		return fmt.Errorf("queue migrate: --target-base-sha must be a lowercase full Git SHA")
+	}
+	root, err := filepath.Abs(project)
+	if err != nil {
+		return err
+	}
+	if _, err := gitTrim(ctx, root, "cat-file", "-e", base+"^{commit}"); err != nil {
+		return fmt.Errorf("queue migrate: --target-base-sha does not resolve to a commit in %s: %w", root, err)
+	}
+	return nil
 }

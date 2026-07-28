@@ -184,11 +184,11 @@ func TestProtectedIntegrationSpeculateRejectsTargetMismatch(t *testing.T) {
 	}
 }
 
-func TestProtectedIntegrationSpeculateRequiresManagedWorkspaceLifecycle(t *testing.T) {
-	root := t.TempDir() // no scripts/dev-workspace.sh here
+func TestProtectedIntegrationSpeculateRequiresCapsuleDefinition(t *testing.T) {
+	root := t.TempDir()
 	p := ProtectedIntegration{ProjectRoot: root, TargetRef: "main"}
 	_, err := p.Speculate(context.Background(), Candidate{ID: "x", TargetRef: "main", SHA: strings.Repeat("a", 40)}, nil)
-	if err == nil || !strings.Contains(err.Error(), "managed workspace lifecycle unavailable") {
+	if err == nil || !strings.Contains(err.Error(), "load capsule definition") {
 		t.Fatalf("err=%v", err)
 	}
 }

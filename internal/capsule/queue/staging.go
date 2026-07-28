@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/headroom"
+	capsuleproject "kitsoki/internal/capsule/project"
 	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
 )
@@ -42,8 +44,10 @@ type ProtectedIntegration struct {
 	ProjectRoot     string
 	QueueRoot       string
 	TargetRef       string
+	DefinitionID    string
 	ResolverCommand string
 	Runner          CommandRunner
+	Manager         *control.Manager
 	// KitsokiBin overrides the binary used to launch the git-ops
 	// conflict_resolver; the running executable is used when empty.
 	KitsokiBin string
@@ -60,6 +64,20 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	}
 	if err := p.Headroom.Ensure(root); err != nil {
 		return Speculation{}, Environmental(err)
+	}
+	def, err := p.definition(ctx, root)
+	if err != nil {
+		return Speculation{}, err
+	}
+	if def.Source.Kind != control.SourceDevWorkspaceScript {
+		return p.speculateNative(ctx, root, def, c, ahead)
+	}
+	return p.speculateScript(ctx, root, c, ahead)
+}
+
+func (p ProtectedIntegration) speculateScript(ctx context.Context, root string, c Candidate, ahead []Candidate) (Speculation, error) {
+	if _, err := os.Stat(filepath.Join(root, "scripts", "dev-workspace.sh")); err != nil {
+		return Speculation{}, fmt.Errorf("queue: managed workspace lifecycle unavailable: %w", err)
 	}
 	target := p.targetRef()
 	id := "queue-" + c.ID
@@ -178,6 +196,142 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	if len(instance.ConflictPaths) == 0 {
 		// Divergent histories whose changes are disjoint merge cleanly; the
 		// train continues without any resolver. Only the commit is missing.
+		if _, err := gitOutput(ctx, instancePath, "rev-parse", "-q", "--verify", "MERGE_HEAD"); err == nil {
+			if _, err := gitOutput(ctx, instancePath, "-c", "user.name=kitsoki-queue", "-c", "user.email=queue@kitsoki.invalid", "commit", "--no-edit"); err != nil {
+				return spec, err
+			}
+			spec.Evidence = append(spec.Evidence, "queue:disjoint-histories-merged-automatically")
+		}
+	} else {
+		evidence, resolveErr := p.resolveConflicts(ctx, root, instancePath, artifact.ContinuationToken, instance.ConflictPaths)
+		spec.Evidence = append(spec.Evidence, evidence...)
+		if resolveErr != nil {
+			return spec, resolveErr
+		}
+	}
+	status, err := gitOutput(ctx, instancePath, "status", "--porcelain")
+	if err != nil {
+		return spec, err
+	}
+	if status != "" {
+		return spec, fmt.Errorf("queue: resolver unavailable or incomplete; continuation %s is retained", artifact.ContinuationToken)
+	}
+	sha, err := gitOutput(ctx, instancePath, "rev-parse", "HEAD")
+	if err != nil {
+		return spec, err
+	}
+	spec.SHA = sha
+	return spec, nil
+}
+
+func (p ProtectedIntegration) speculateNative(ctx context.Context, root string, def control.Definition, c Candidate, ahead []Candidate) (Speculation, error) {
+	target := p.targetRef()
+	id := "queue-" + c.ID
+	branch := "queue/candidate/" + c.ID
+	createBase, stackedOn := c.SHA, ""
+	if c.SourceAnchorID != "" {
+		createBase = target
+	}
+	if stackTree, predID, predWorkspace := stackBaseFor(ahead); stackTree != "" {
+		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", predWorkspace, stackTree); err == nil {
+			createBase, stackedOn = stackTree, predID
+		}
+	}
+	manager, err := p.manager(root)
+	if err != nil {
+		return Speculation{}, err
+	}
+	handle, err := manager.Create(ctx, control.CreateRequest{ID: id, DefinitionID: def.ID, Owner: "queue"})
+	if err != nil {
+		return Speculation{}, Environmental(err)
+	}
+	workspace, err := manager.WorkspacePath(ctx, handle)
+	if err != nil {
+		return Speculation{WorkspaceID: id}, Environmental(err)
+	}
+	_, _ = gitOutput(ctx, workspace, "merge", "--abort")
+	if _, err := gitOutput(ctx, workspace, "reset", "--hard"); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
+	if _, err := gitOutput(ctx, workspace, "clean", "-fd"); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
+	if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", root, createBase); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
+	if _, err := gitOutput(ctx, workspace, "checkout", "-B", branch, "FETCH_HEAD"); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
+	if err := (Store{ProjectRoot: root, QueueRoot: p.QueueRoot}).materializeExternalCandidate(ctx, workspace, c); err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
+	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
+	if err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(fmt.Errorf("queue: refresh preparation local config: %w", err))
+	}
+	var stackEvidence []string
+	if stackedOn != "" {
+		if c.SourceAnchorID == "" {
+			if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", "--no-write-fetch-head", root, c.SHA); err != nil {
+				return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+			}
+		}
+		if err := p.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
+			if _, abortErr := gitOutput(ctx, workspace, "merge", "--abort"); abortErr != nil {
+				return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(fmt.Errorf("queue: abort failed stack merge onto %s: %w", stackedOn, abortErr))
+			}
+			if _, err := gitOutput(ctx, workspace, "checkout", "-B", branch, c.SHA); err != nil {
+				return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+			}
+			stackEvidence = []string{"queue:stack-conflict-with=" + stackedOn + " fell-back-to-unstacked"}
+		} else {
+			stackEvidence = []string{"queue:stacked-on=" + stackedOn}
+		}
+	} else if c.SourceAnchorID != "" {
+		if _, err := gitOutput(ctx, workspace, "checkout", "-B", branch, c.SHA); err != nil {
+			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+		}
+	}
+	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
+		Workspace: workspace, ProtectedProjectRoot: root, TargetRef: target, Operation: reconcile.Promote,
+	})
+	if err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+	}
+	spec := Speculation{
+		SHA: plan.Candidate, BaseSHA: plan.Expected.Target,
+		RuntimeConfigDigest: runtimeConfig.Digest,
+		WorkspaceID:         id, WorkspacePath: workspace,
+		Evidence: append([]string{"queue:native-capsule-definition=" + def.ID, "queue:reconcile-plan=" + plan.Digest, runtimeConfig.evidence()}, stackEvidence...),
+	}
+	if plan.Continuation == nil {
+		if plan.Class != reconcile.LocalAhead && plan.Class != reconcile.UpToDate {
+			return spec, fmt.Errorf("queue: protected integration is %s", plan.Class)
+		}
+		return spec, nil
+	}
+	reconciler := reconcile.Reconciler{VCS: reconcile.Git{}, Headroom: p.Headroom}
+	artifact, artifactPath, err := reconciler.MaterializeConflictArtifact(ctx, plan, root)
+	if err != nil {
+		return spec, Environmental(err)
+	}
+	instance, instanceArtifact, err := reconciler.MaterializeIntegrationInstance(ctx, plan, root)
+	if err != nil {
+		return spec, Environmental(err)
+	}
+	instancePath := filepath.Join(root, filepath.FromSlash(instance.InstancePath))
+	if _, err := installLocalConfigSnapshot(root, instancePath, runtimeConfig); err != nil {
+		return spec, Environmental(fmt.Errorf("queue: propagate preparation local config to continuation: %w", err))
+	}
+	spec.Evidence = append(spec.Evidence, "queue:local-config-propagated-to-continuation digest="+runtimeConfig.Digest)
+	spec.WorkspaceID = artifact.ContinuationToken
+	spec.WorkspacePath = instancePath
+	spec.Evidence = append(spec.Evidence,
+		"queue:continuation="+artifact.ContinuationToken,
+		"queue:conflict-artifact="+relativePath(root, artifactPath),
+		"queue:integration-artifact="+relativePath(root, instanceArtifact),
+	)
+	if len(instance.ConflictPaths) == 0 {
 		if _, err := gitOutput(ctx, instancePath, "rev-parse", "-q", "--verify", "MERGE_HEAD"); err == nil {
 			if _, err := gitOutput(ctx, instancePath, "-c", "user.name=kitsoki-queue", "-c", "user.email=queue@kitsoki.invalid", "commit", "--no-edit"); err != nil {
 				return spec, err
@@ -535,10 +689,34 @@ func (p ProtectedIntegration) root() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(filepath.Join(root, "scripts", "dev-workspace.sh")); err != nil {
-		return "", fmt.Errorf("queue: managed workspace lifecycle unavailable: %w", err)
-	}
 	return root, nil
+}
+
+func (p ProtectedIntegration) definitionID() string {
+	if strings.TrimSpace(p.DefinitionID) == "" {
+		return "development"
+	}
+	return strings.TrimSpace(p.DefinitionID)
+}
+
+func (p ProtectedIntegration) definition(ctx context.Context, root string) (control.Definition, error) {
+	def, err := (control.FileDefinitionStore{ProjectRoot: root}).Get(ctx, p.definitionID())
+	if err != nil {
+		return control.Definition{}, fmt.Errorf("queue: load capsule definition %q: %w", p.definitionID(), err)
+	}
+	switch def.Source.Kind {
+	case control.SourceSelf, control.SourcePinned, control.SourceDevWorkspaceScript:
+		return def, nil
+	default:
+		return control.Definition{}, fmt.Errorf("queue: protected integration does not support capsule source kind %q", def.Source.Kind)
+	}
+}
+
+func (p ProtectedIntegration) manager(root string) (*control.Manager, error) {
+	if p.Manager != nil {
+		return p.Manager, nil
+	}
+	return capsuleproject.Open(root, []string{p.targetRef()})
 }
 
 func (p ProtectedIntegration) run(ctx context.Context, dir, program string, args ...string) error {

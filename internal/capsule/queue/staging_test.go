@@ -120,6 +120,59 @@ func TestProtectedIntegrationRetainsExactCandidateWorkspaceForSourcePromotion(t 
 	}
 }
 
+func TestProtectedIntegrationNativeSelfCapsulePromotesWithoutDevWorkspaceScript(t *testing.T) {
+	root := nativeSelfQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+	commit(t, root, "candidate.txt", "candidate\n", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/candidate", sha)
+	git(t, root, "reset", "--hard", base)
+	if _, err := os.Stat(filepath.Join(root, "scripts", "dev-workspace.sh")); !os.IsNotExist(err) {
+		t.Fatalf("native fixture unexpectedly has dev-workspace script: %v", err)
+	}
+
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{Branch: "agent/candidate", SHA: sha, Receipt: persistedReceipt(t, root, sha), TargetRef: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := state.Candidates[0]
+	if candidate.Status != Landed || candidate.ValidatedSHA != sha {
+		t.Fatalf("candidate=%#v", candidate)
+	}
+	if !hasEvidence(candidate, "queue:native-capsule-definition=development") {
+		t.Fatalf("native lifecycle evidence missing: %v", candidate.Evidence)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != sha {
+		t.Fatalf("main=%s, want candidate %s", got, sha)
+	}
+}
+
+func TestProtectedIntegrationDevWorkspaceScriptUsesScriptAdapter(t *testing.T) {
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+	commit(t, root, "candidate.txt", "candidate\n", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/candidate", sha)
+	git(t, root, "reset", "--hard", base)
+	script := filepath.Join(root, "scripts", "dev-workspace.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho script-adapter-selected >&2\nexit 42\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (ProtectedIntegration{ProjectRoot: root, TargetRef: "main"}).Speculate(context.Background(), Candidate{ID: "script-adapter", SHA: sha, TargetRef: "main"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "script-adapter-selected") {
+		t.Fatalf("err=%v, want script adapter marker", err)
+	}
+}
+
 func TestProtectedFinalizerAllowsExplicitEmergencySkipTestsAdmission(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")
@@ -202,6 +255,7 @@ func protectedQueueRepo(t *testing.T) string {
 	git(t, root, "init", "-b", "main")
 	git(t, root, "config", "user.name", "Queue Test")
 	git(t, root, "config", "user.email", "queue@example.invalid")
+	writeDevelopmentDefinition(t, root, "dev-workspace-script")
 	copyQueueScript(t, root, "dev-workspace.sh")
 	copyQueueScript(t, root, "refresh-staging-local.sh")
 	copyQueueScript(t, root, "protected-main-mode.sh")
@@ -221,6 +275,54 @@ func protectedQueueRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func nativeSelfQueueRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	git(t, root, "init", "-b", "main")
+	git(t, root, "config", "user.name", "Queue Test")
+	git(t, root, "config", "user.email", "queue@example.invalid")
+	writeDevelopmentDefinition(t, root, "self")
+	commit(t, root, "base.txt", "base\n", "base")
+	return root
+}
+
+func writeDevelopmentDefinition(t *testing.T, root, kind string) {
+	t.Helper()
+	path := filepath.Join(root, ".kitsoki", "capsules", "development.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	switch kind {
+	case "self":
+		raw = `schema: capsule-definition/v1
+id: development
+source:
+  kind: self
+policy:
+  network: none
+`
+	case "dev-workspace-script":
+		raw = `schema: capsule-definition/v1
+id: development
+source:
+  kind: dev-workspace-script
+  development:
+    base: staging/local
+    target: staging/local
+    branch_prefix: agent/
+policy:
+  network: none
+`
+	default:
+		t.Fatalf("unsupported development definition kind %q", kind)
+	}
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".kitsoki/capsules/development.yaml")
 }
 
 func copyQueueScript(t *testing.T, root, name string) {
