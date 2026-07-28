@@ -78,6 +78,9 @@ contributor commands.
 - [`application-jobs.md`](application-jobs.md) — deployment-owned background
   Application Event templates, durable job references, and privacy-safe
   artifact projections.
+- [`story-work-queue.md`](story-work-queue.md) — application-scoped durable
+  queued work, leases/fencing, worker matching, terminal receipts, and the
+  boundary from campaigns and protected Git promotion.
 - [`graph-storage.md`](graph-storage.md) — the graph `CatalogStore` seam,
   YAML as first-class interchange, and the Postgres catalog backend with
   `pg:` references and audit history.
