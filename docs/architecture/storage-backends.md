@@ -204,3 +204,7 @@ follow-up, not an implied behavior.
   the deployment shape these backends exist for.
 - [`../tracing/trace-format.md`](../tracing/trace-format.md) — the canonical
   JSONL trace contract.
+- [`../guide/integrations/hosted-pog.md`](../guide/integrations/hosted-pog.md) —
+  `deploy/hosted-pog/`'s config-driven sqlite/postgres selection, secret
+  handling, systemd ordering, and the SQLite -> Postgres migration procedure
+  for an existing host, all built on this backend contract.

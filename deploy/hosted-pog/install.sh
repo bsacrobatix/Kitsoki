@@ -61,11 +61,53 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer kitsoki-queue-admission.service kitsoki-queue-worker-admission.conf kitsoki-pog-integration-current-worker.service hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer kitsoki-queue-admission.service kitsoki-queue-worker-admission.conf kitsoki-pog-integration-current-worker.service hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh hosted-pog-db.env pg-password wait-for-postgres.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
 [[ "$github_client_secret" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid GitHub App client secret"
+
+# BEGIN db-backend-config (extracted verbatim and executed in isolation by
+# scripts/test-deploy-hosted-pog.sh; keep these two sentinel lines in place).
+# Session-store database backend. sqlite is the historical default and stays
+# strictly opt-out-free: an operator who sets nothing gets exactly today's
+# behavior. Postgres is selected via KITSOKI_HOSTED_POG_DB_BACKEND=postgres in
+# the non-secret hosted-pog-db.env staged alongside this installer (rendered
+# by scripts/deploy-hosted-pog.sh from KITSOKI_HOSTED_POG_PG_* env vars); the
+# password travels separately as the 0600 "pg-password" file, the same
+# pattern already used for the GitHub client secret, and is never accepted on
+# this script's own argv.
+# shellcheck disable=SC1091 -- uploaded beside this installer.
+. "$stage/hosted-pog-db.env"
+db_backend="${KITSOKI_HOSTED_POG_DB_BACKEND:-sqlite}"
+case "$db_backend" in
+	sqlite|postgres) ;;
+	*) die "unknown db backend: KITSOKI_HOSTED_POG_DB_BACKEND must be sqlite or postgres, got: $db_backend" ;;
+esac
+pg_dsn=""
+if [ "$db_backend" = postgres ]; then
+	pg_host="${KITSOKI_HOSTED_POG_PG_HOST:-}"
+	pg_port="${KITSOKI_HOSTED_POG_PG_PORT:-5432}"
+	pg_database="${KITSOKI_HOSTED_POG_PG_DATABASE:-}"
+	pg_role="${KITSOKI_HOSTED_POG_PG_ROLE:-}"
+	pg_sslmode="${KITSOKI_HOSTED_POG_PG_SSLMODE:-require}"
+	[[ "$pg_host" =~ ^[A-Za-z0-9.-]+$ ]] || die "postgres backend requires a valid KITSOKI_HOSTED_POG_PG_HOST"
+	[[ "$pg_port" =~ ^[0-9]{1,5}$ ]] && [ "$pg_port" -ge 1 ] && [ "$pg_port" -le 65535 ] || die "invalid postgres port: $pg_port"
+	[[ "$pg_database" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "postgres backend requires a valid KITSOKI_HOSTED_POG_PG_DATABASE"
+	[[ "$pg_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "postgres backend requires a valid KITSOKI_HOSTED_POG_PG_ROLE"
+	case "$pg_sslmode" in disable|allow|prefer|require|verify-ca|verify-full) ;; *) die "invalid postgres sslmode: $pg_sslmode" ;; esac
+	pg_password="$(tr -d '\n' <"$stage/pg-password")"
+	[ -n "$pg_password" ] || die "postgres backend requires a password; this installer never mints or clobbers one — provide KITSOKI_HOSTED_POG_PG_PASSWORD(_FILE) on first install, or let the local deploy helper reuse the value already installed on this host"
+	# libpq keyword/value connection string: avoids URL-percent-encoding the
+	# password entirely (host/database/role are already regex-restricted to
+	# safe identifier characters above). Single-quote the value and escape
+	# any backslash or embedded quote per libpq's own connstring escaping so
+	# an arbitrary password can never break out of its field.
+	pg_password_escaped="${pg_password//\\/\\\\}"
+	pg_password_escaped="${pg_password_escaped//\'/\\\'}"
+	pg_dsn="host=$pg_host port=$pg_port dbname=$pg_database user=$pg_role password='$pg_password_escaped' sslmode=$pg_sslmode"
+fi
+# END db-backend-config
 # Colony service token: reuse the installed value across deployments (same
 # posture as the reused OAuth client secret) and mint one on first install.
 # The value lives only in root-only env files on this host; the rendered
@@ -99,6 +141,7 @@ install -d -o pog -g pog -m 0750 "$capsule_state_root"
 install -d -o pog -g pog -m 0700 "$queue_admission_root"
 install -d -m 0755 /usr/local/libexec
 install -m 0755 "$stage/link-capsule-state.sh" /usr/local/libexec/kitsoki-hosted-pog-link-capsule-state
+install -m 0755 "$stage/wait-for-postgres.sh" /usr/local/libexec/kitsoki-hosted-pog-wait-for-postgres
 install -m 0644 "$stage/pog-capsule-state.service" /etc/systemd/system/pog-capsule-state.service
 
 # Portfolio members federated onto the hosted site, beyond POG's own home
@@ -466,6 +509,8 @@ previous_queue_admission_env="$stage/queue-admission.env.previous"
 previous_integration_worker="$stage/kitsoki-pog-integration-current-worker.service.previous"
 previous_colony_portfolio="$stage/pog-colony-runner.portfolio-authority.conf.previous"
 previous_colony_env="$stage/pog-colony-runner.env.previous"
+previous_postgres_dropin="$stage/kitsoki-pog.zz-postgres.conf.previous"
+previous_hosted_pog_env="$stage/hosted-pog.env.previous"
 had_previous_kitsoki_service=0
 had_previous_portal_service=0
 had_previous_finalizer_service=0
@@ -477,6 +522,8 @@ had_previous_queue_admission_env=0
 had_previous_integration_worker=0
 had_previous_colony_portfolio=0
 had_previous_colony_env=0
+had_previous_postgres_dropin=0
+had_previous_hosted_pog_env=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
 	cp /etc/systemd/system/kitsoki-pog.service "$previous_kitsoki_service"
 	had_previous_kitsoki_service=1
@@ -520,6 +567,15 @@ fi
 if [ -f /etc/kitsoki/pog-colony-runner.env ]; then
 	cp /etc/kitsoki/pog-colony-runner.env "$previous_colony_env"
 	had_previous_colony_env=1
+fi
+if [ -f /etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf ]; then
+	cp /etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf "$previous_postgres_dropin"
+	had_previous_postgres_dropin=1
+fi
+if [ -f /etc/kitsoki/hosted-pog.env ]; then
+	cp /etc/kitsoki/hosted-pog.env "$previous_hosted_pog_env"
+	chmod 0600 "$previous_hosted_pog_env"
+	had_previous_hosted_pog_env=1
 fi
 caddy_changed=0
 services_changed=0
@@ -633,6 +689,17 @@ rollback() {
 			else
 				rm -f /etc/kitsoki/pog-colony-runner.env
 			fi
+			if [ "$had_previous_postgres_dropin" -eq 1 ]; then
+				install -d -m 0755 /etc/systemd/system/kitsoki-pog.service.d
+				install -m 0644 "$previous_postgres_dropin" /etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf
+			else
+				rm -f /etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf
+			fi
+			if [ "$had_previous_hosted_pog_env" -eq 1 ]; then
+				install -m 0600 "$previous_hosted_pog_env" /etc/kitsoki/hosted-pog.env
+			else
+				rm -f /etc/kitsoki/hosted-pog.env
+			fi
 			systemctl daemon-reload >/dev/null 2>&1 || true
 		fi
 		if [ "$caddy_changed" -eq 1 ]; then
@@ -745,6 +812,21 @@ install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 {
 	printf 'KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=%s\n' "$github_client_secret"
 	printf 'KITSOKI_COLONY_TOKEN=%s\n' "$colony_token"
+	# Selecting the postgres backend is entirely additive: sqlite hosts get
+	# neither key below and start exactly as they always have. The daemon
+	# reads both from this EnvironmentFile, so KITSOKI_PG_DSN never appears on
+	# ExecStart's command line (world-readable via /proc/<pid>/cmdline) or in
+	# any rendered unit file.
+	if [ "$db_backend" = postgres ]; then
+		printf 'KITSOKI_DB_BACKEND=postgres\n'
+		printf 'KITSOKI_PG_DSN=%s\n' "$pg_dsn"
+		# Stored separately (not just embedded in the DSN above) so a future
+		# deploy that only changes host/port/database/role/sslmode can still
+		# reuse this exact password without the operator resupplying it — the
+		# same reuse contract scripts/deploy-hosted-pog.sh already applies to
+		# the GitHub client secret and the colony token.
+		printf 'KITSOKI_HOSTED_POG_PG_PASSWORD=%s\n' "$pg_password"
+	fi
 } >"$stage/hosted-pog.env"
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
 # `queue-worker.env` is intentionally shared with the portal and finalizer
@@ -770,6 +852,27 @@ for dropin in /etc/systemd/system/kitsoki-pog.service.d/*.conf; do
 done
 printf '[Service]\nEnvironment=POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki\n' \
 	>/etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
+postgres_dropin=/etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf
+if [ "$db_backend" = postgres ]; then
+	# Wants+After, not Requires: this only needs to order our start after
+	# Postgres, not to cascade-stop kitsoki-pog whenever a local
+	# postgresql.service unit restarts or is momentarily down (that would turn
+	# an ordinary database blip into a POG outage). Wants= on a unit that does
+	# not exist on this host — e.g. an external/managed Postgres — is a
+	# harmless no-op, so this is safe to add unconditionally rather than
+	# guessing whether Postgres runs locally. The actual readiness gate is the
+	# ExecStartPre TCP probe below, bounded to 30s; a database that is merely
+	# slow to accept connections delays activation instead of the daemon
+	# crash-looping against it, and Restart=always/StartLimitBurst already on
+	# this unit recovers automatically once Postgres is reachable.
+	{
+		printf '[Unit]\nWants=postgresql.service\nAfter=postgresql.service\n\n'
+		printf '[Service]\nExecStartPre=/usr/local/libexec/kitsoki-hosted-pog-wait-for-postgres %s %s 30\n' \
+			"$pg_host" "$pg_port"
+	} >"$postgres_dropin"
+else
+	rm -f "$postgres_dropin"
+fi
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
 install -m 0644 "$stage/pog-worker-finalizer.service" /etc/systemd/system/pog-worker-finalizer.service
 install -m 0644 "$stage/pog-worker-finalizer.timer" /etc/systemd/system/pog-worker-finalizer.timer
@@ -837,6 +940,37 @@ for _ in $(seq 1 60); do
 	sleep 1
 done
 [ "${status:-}" = "401" ] || die "Kitsoki auth service did not become ready"
+
+# The DSN/password must never land on this process's command line (world-
+# readable via /proc/<pid>/cmdline) — structurally true here since ExecStart
+# never carries --pg-dsn/--db-backend, but assert it rather than trust it.
+# Confirm the selected backend actually activated by reading the live
+# process's own environment (root-only /proc/<pid>/environ; install.sh runs
+# as root) instead of `systemctl show`, which only reflects Environment=
+# directives and would never see values sourced from EnvironmentFile=. Only
+# ever grep for a key name — the matched line (and therefore any secret
+# value) is never echoed, kept, or logged.
+kitsoki_pog_pid="$(systemctl show --property MainPID --value kitsoki-pog.service)"
+[[ "$kitsoki_pog_pid" =~ ^[1-9][0-9]*$ ]] || die "kitsoki-pog has no live process after restart"
+kitsoki_pog_cmdline="$(tr '\0' ' ' <"/proc/$kitsoki_pog_pid/cmdline")"
+case "$kitsoki_pog_cmdline" in
+	*pg-dsn*|*password*|*postgres://*) die "kitsoki-pog command line unexpectedly carries database connection material" ;;
+esac
+kitsoki_pog_environ="$(tr '\0' '\n' <"/proc/$kitsoki_pog_pid/environ")"
+if [ "$db_backend" = postgres ]; then
+	grep -qx 'KITSOKI_DB_BACKEND=postgres' <<<"$kitsoki_pog_environ" \
+		|| die "kitsoki-pog did not activate with the postgres backend"
+	grep -q '^KITSOKI_PG_DSN=' <<<"$kitsoki_pog_environ" \
+		|| die "kitsoki-pog did not receive a Postgres DSN"
+else
+	if grep -q '^KITSOKI_DB_BACKEND=' <<<"$kitsoki_pog_environ"; then
+		die "kitsoki-pog unexpectedly has a db backend override for a sqlite install"
+	fi
+	if grep -q '^KITSOKI_PG_DSN=' <<<"$kitsoki_pog_environ"; then
+		die "kitsoki-pog unexpectedly received a Postgres DSN for a sqlite install"
+	fi
+fi
+unset kitsoki_pog_environ
 
 # The colony bearer contract must actually authenticate before anything
 # depends on it: /auth/check is the same seam Caddy's forward_auth and
@@ -1025,4 +1159,4 @@ curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 "$stage/prune-releases.sh" "$kitsoki_release_root" "$kitsoki_current" 2
 
 trap - EXIT
-echo "hosted-pog install: active production POG $pog_sha on 127.0.0.1:7777 at $public_base_url (products=$portfolio_members; state=$state_mode; no Vite runtime; all content requires an invited session)"
+echo "hosted-pog install: active production POG $pog_sha on 127.0.0.1:7777 at $public_base_url (products=$portfolio_members; state=$state_mode; db=$db_backend; no Vite runtime; all content requires an invited session)"

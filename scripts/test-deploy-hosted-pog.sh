@@ -8,8 +8,9 @@ assets="$root/deploy/hosted-pog"
 digest_tool="$assets/state-content-digest.mjs"
 legacy_ship_importer="$assets/import-legacy-worker-ships.sh"
 capsule_state_linker="$assets/link-capsule-state.sh"
+postgres_waiter="$assets/wait-for-postgres.sh"
 
-bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_linker" "$assets/prune-releases.sh"
+bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_linker" "$assets/prune-releases.sh" "$postgres_waiter"
 node --check "$digest_tool"
 
 for required in \
@@ -30,6 +31,7 @@ for required in \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
 	"$capsule_state_linker" \
+	"$postgres_waiter" \
   "$packager"; do
   [ -f "$required" ] || { echo "missing hosted POG deployment asset: $required" >&2; exit 1; }
 done
@@ -50,6 +52,52 @@ grep -q 'client_id: __GITHUB_CLIENT_ID__' "$assets/hosted-pog.yaml"
 grep -qF 'client_secret: ${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}' "$assets/hosted-pog.yaml"
 ! grep -q 'device_flow' "$assets/hosted-pog.yaml"
 grep -q 'EnvironmentFile=/etc/kitsoki/hosted-pog.env' "$assets/kitsoki-pog.service"
+grep -q 'KITSOKI_DB_BACKEND' "$assets/kitsoki-pog.service"
+
+# Postgres backend: sqlite stays the strict default, selection is config-
+# driven (deploy-hosted-pog.sh env vars -> a staged, non-secret
+# hosted-pog-db.env sourced by install.sh), the password never rides on any
+# argv or in a rendered unit, DSN assembly uses libpq keyword=value escaping
+# (no URL-percent-encoding needed), ordering uses Wants (never Requires) so a
+# Postgres blip cannot cascade-stop the daemon, and activation is verified
+# through the live process's own /proc/<pid>/environ rather than printing it.
+grep -q 'hosted-pog-db.env pg-password wait-for-postgres.sh' "$assets/install.sh"
+grep -q 'KITSOKI_HOSTED_POG_DB_BACKEND:-sqlite' "$assets/install.sh"
+grep -q 'must be sqlite or postgres' "$assets/install.sh"
+grep -q "tr -d '\\\\n' <\"\$stage/pg-password\"" "$assets/install.sh"
+grep -q 'never mints or clobbers one' "$assets/install.sh"
+grep -qF 'pg_password_escaped=' "$assets/install.sh"
+grep -qF "libpq's own connstring escaping" "$assets/install.sh"
+grep -q 'host=\$pg_host port=\$pg_port dbname=\$pg_database user=\$pg_role' "$assets/install.sh"
+grep -q 'sslmode=\$pg_sslmode' "$assets/install.sh"
+grep -q 'printf .KITSOKI_DB_BACKEND=postgres' "$assets/install.sh"
+grep -q 'printf .KITSOKI_PG_DSN=%s' "$assets/install.sh"
+grep -q 'printf .KITSOKI_HOSTED_POG_PG_PASSWORD=%s' "$assets/install.sh"
+grep -q 'kitsoki-hosted-pog-wait-for-postgres' "$assets/install.sh"
+grep -q 'Wants=postgresql.service' "$assets/install.sh"
+! grep -q 'Requires=postgresql.service' "$assets/install.sh"
+grep -q 'ExecStartPre=/usr/local/libexec/kitsoki-hosted-pog-wait-for-postgres' "$assets/install.sh"
+grep -q 'not to cascade-stop kitsoki-pog' "$assets/install.sh"
+grep -q 'zz-postgres.conf' "$assets/install.sh"
+grep -q '/proc/\$kitsoki_pog_pid/cmdline' "$assets/install.sh"
+grep -q '/proc/\$kitsoki_pog_pid/environ' "$assets/install.sh"
+grep -q 'command line unexpectedly carries database connection material' "$assets/install.sh"
+grep -q 'did not activate with the postgres backend' "$assets/install.sh"
+grep -q 'unexpectedly received a Postgres DSN for a sqlite install' "$assets/install.sh"
+grep -q 'had_previous_postgres_dropin' "$assets/install.sh"
+grep -q 'had_previous_hosted_pog_env' "$assets/install.sh"
+bash -n "$postgres_waiter"
+grep -q 'exec 3<>"/dev/tcp/\$host/\$port"' "$postgres_waiter"
+
+grep -q 'KITSOKI_HOSTED_POG_DB_BACKEND:-sqlite' "$deploy"
+grep -q 'KITSOKI_HOSTED_POG_PG_PASSWORD_FILE' "$deploy"
+grep -q 'DB_BACKEND must be sqlite or postgres' "$deploy"
+grep -q "sed -n 's/^KITSOKI_HOSTED_POG_PG_PASSWORD=//p'" "$deploy"
+grep -q 'postgres backend needs a database password' "$deploy"
+grep -q 'hosted-pog-db.env' "$deploy"
+grep -q 'chmod 0600 "\$local_stage/pg-password"' "$deploy"
+grep -q 'wait-for-postgres.sh' "$deploy"
+
 grep -q 'gh-client-secret' "$deploy"
 grep -q 'chmod 0600 "$local_stage/gh-client-secret"' "$deploy"
 grep -q "KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=//p.*hosted-pog.env" "$deploy"
@@ -423,6 +471,115 @@ if node "$digest_tool" "$fixture/unpacked" .hosted-pog-local-state.json >/dev/nu
   echo "digest tool accepted divergent hosted state" >&2
   exit 1
 fi
+
+# Execute install.sh's actual db-backend-config block in isolation (real
+# code under test, not a reimplementation) against several fixtures, proving
+# the sqlite default, DSN assembly/escaping, and fail-closed validation all
+# really behave as documented — without needing root, systemd, or a live
+# Postgres.
+db_config_harness="$fixture/db-backend-config-harness.sh"
+{
+  echo '#!/usr/bin/env bash'
+  echo 'set -euo pipefail'
+  echo 'die() { echo "DIE: $*" >&2; exit 42; }'
+  echo 'stage="$1"'
+  sed -n '/# BEGIN db-backend-config/,/# END db-backend-config/p' "$assets/install.sh"
+  echo 'printf '"'"'db_backend=%s\npg_dsn=%s\n'"'"' "$db_backend" "$pg_dsn"'
+} >"$db_config_harness"
+chmod 0755 "$db_config_harness"
+
+db_fixture="$fixture/db-config"
+mkdir -p "$db_fixture"
+printf 'KITSOKI_HOSTED_POG_DB_BACKEND=sqlite\n' >"$db_fixture/hosted-pog-db.env"
+: >"$db_fixture/pg-password"
+out="$("$db_config_harness" "$db_fixture")"
+grep -qx 'db_backend=sqlite' <<<"$out"
+grep -qx 'pg_dsn=' <<<"$out"
+
+cat >"$db_fixture/hosted-pog-db.env" <<'EOF'
+KITSOKI_HOSTED_POG_DB_BACKEND=postgres
+KITSOKI_HOSTED_POG_PG_HOST=10.1.2.3
+KITSOKI_HOSTED_POG_PG_PORT=5433
+KITSOKI_HOSTED_POG_PG_DATABASE=kitsoki_hosted_pog
+KITSOKI_HOSTED_POG_PG_ROLE=kitsoki_hosted_pog
+KITSOKI_HOSTED_POG_PG_SSLMODE=verify-full
+EOF
+printf "sw0rd's\\\\here" >"$db_fixture/pg-password"
+out="$("$db_config_harness" "$db_fixture")"
+grep -qx 'db_backend=postgres' <<<"$out"
+q="'"
+expected_dsn="pg_dsn=host=10.1.2.3 port=5433 dbname=kitsoki_hosted_pog user=kitsoki_hosted_pog password=${q}sw0rd\\${q}s\\\\here${q} sslmode=verify-full"
+[ "$(grep '^pg_dsn=' <<<"$out")" = "$expected_dsn" ] || {
+  echo "unexpected escaped DSN: $(grep '^pg_dsn=' <<<"$out")" >&2
+  echo "expected:                $expected_dsn" >&2
+  exit 1
+}
+
+sed -i '' "s/^KITSOKI_HOSTED_POG_PG_HOST=.*/KITSOKI_HOSTED_POG_PG_HOST=/" "$db_fixture/hosted-pog-db.env" 2>/dev/null \
+  || sed -i "s/^KITSOKI_HOSTED_POG_PG_HOST=.*/KITSOKI_HOSTED_POG_PG_HOST=/" "$db_fixture/hosted-pog-db.env"
+if out="$("$db_config_harness" "$db_fixture" 2>&1)"; then
+  echo "db-backend-config accepted a missing postgres host: $out" >&2
+  exit 1
+fi
+grep -q 'DIE: postgres backend requires a valid KITSOKI_HOSTED_POG_PG_HOST' <<<"$out"
+
+cat >"$db_fixture/hosted-pog-db.env" <<'EOF'
+KITSOKI_HOSTED_POG_DB_BACKEND=postgres
+KITSOKI_HOSTED_POG_PG_HOST=10.1.2.3
+KITSOKI_HOSTED_POG_PG_PORT=5433
+KITSOKI_HOSTED_POG_PG_DATABASE=kitsoki_hosted_pog
+KITSOKI_HOSTED_POG_PG_ROLE=kitsoki_hosted_pog
+KITSOKI_HOSTED_POG_PG_SSLMODE=verify-full
+EOF
+: >"$db_fixture/pg-password"
+if out="$("$db_config_harness" "$db_fixture" 2>&1)"; then
+  echo "db-backend-config accepted an empty postgres password: $out" >&2
+  exit 1
+fi
+grep -q 'DIE: postgres backend requires a password; this installer never mints or clobbers one' <<<"$out"
+
+printf 'irrelevant' >"$db_fixture/pg-password"
+sed -i '' "s/^KITSOKI_HOSTED_POG_PG_SSLMODE=.*/KITSOKI_HOSTED_POG_PG_SSLMODE=bogus/" "$db_fixture/hosted-pog-db.env" 2>/dev/null \
+  || sed -i "s/^KITSOKI_HOSTED_POG_PG_SSLMODE=.*/KITSOKI_HOSTED_POG_PG_SSLMODE=bogus/" "$db_fixture/hosted-pog-db.env"
+if out="$("$db_config_harness" "$db_fixture" 2>&1)"; then
+  echo "db-backend-config accepted an invalid sslmode: $out" >&2
+  exit 1
+fi
+grep -q 'DIE: invalid postgres sslmode: bogus' <<<"$out"
+
+printf 'KITSOKI_HOSTED_POG_DB_BACKEND=nonsense\n' >"$db_fixture/hosted-pog-db.env"
+if out="$("$db_config_harness" "$db_fixture" 2>&1)"; then
+  echo "db-backend-config accepted an unknown backend: $out" >&2
+  exit 1
+fi
+grep -q 'DIE: unknown db backend' <<<"$out"
+
+# Postgres readiness gate: real behavior, not just a static grep. Proves the
+# ExecStartPre probe actually blocks-then-succeeds once something is
+# listening, and fails closed (bounded, no hang) when nothing ever answers —
+# without ever needing a real Postgres server or printing a credential (this
+# script takes host/port only).
+if command -v nc >/dev/null 2>&1; then
+  free_port="$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close()})')"
+  nc -l 127.0.0.1 "$free_port" >/dev/null 2>&1 &
+  nc_pid=$!
+  cleanup_nc() { kill "$nc_pid" >/dev/null 2>&1 || true; }
+  trap cleanup_nc EXIT
+  sleep 0.2
+  "$postgres_waiter" 127.0.0.1 "$free_port" 5 >/dev/null
+  cleanup_nc
+  trap - EXIT
+
+  closed_port="$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close()})')"
+  if "$postgres_waiter" 127.0.0.1 "$closed_port" 2 >/dev/null 2>&1; then
+    echo "wait-for-postgres.sh unexpectedly succeeded against a closed port" >&2
+    exit 1
+  fi
+else
+  echo "wait-for-postgres.sh: skipping live TCP checks (nc not available)" >&2
+fi
+! "$postgres_waiter" 127.0.0.1 not-a-port 1 >/dev/null 2>&1
+! "$postgres_waiter" 2>/dev/null
 
 trap - EXIT
 cleanup

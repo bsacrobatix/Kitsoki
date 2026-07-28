@@ -43,6 +43,26 @@ GH_CLIENT_ID="${KITSOKI_HOSTED_POG_GH_CLIENT_ID:-}"
 # this deployment's secret; the generic name wins when both are set.
 GH_CLIENT_SECRET="${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET:-${GH_KITSOKI_TEST_CLIENT_SECRET:-}}"
 GH_APP_PROFILE="${KITSOKI_HOSTED_POG_GH_APP_PROFILE:-$HOME/.config/kitsoki/gh-app/bsacrobatix-kitsoki-test/kitsoki.env}"
+# Session-store database backend. sqlite is the default and requires no
+# configuration at all — every existing deployment that sets none of these
+# keeps running on SQLite exactly as before. Postgres is strictly opt-in via
+# KITSOKI_HOSTED_POG_DB_BACKEND=postgres plus the connection details below;
+# see docs/architecture/storage-backends.md and
+# docs/guide/integrations/hosted-pog.md for the full contract and the
+# SQLite -> Postgres migration procedure. The password never touches this
+# script's argv or a log line: it travels the same way GH_CLIENT_SECRET does,
+# inside the 0700 staged upload as a 0600 file, and reuses the value already
+# installed on the host when neither an env var nor a file is supplied here.
+DB_BACKEND="${KITSOKI_HOSTED_POG_DB_BACKEND:-sqlite}"
+PG_HOST="${KITSOKI_HOSTED_POG_PG_HOST:-}"
+PG_PORT="${KITSOKI_HOSTED_POG_PG_PORT:-5432}"
+PG_DATABASE="${KITSOKI_HOSTED_POG_PG_DATABASE:-}"
+PG_ROLE="${KITSOKI_HOSTED_POG_PG_ROLE:-}"
+PG_SSLMODE="${KITSOKI_HOSTED_POG_PG_SSLMODE:-require}"
+PG_PASSWORD="${KITSOKI_HOSTED_POG_PG_PASSWORD:-}"
+if [ -z "$PG_PASSWORD" ] && [ -n "${KITSOKI_HOSTED_POG_PG_PASSWORD_FILE:-}" ]; then
+	PG_PASSWORD="$(tr -d '\n' <"$KITSOKI_HOSTED_POG_PG_PASSWORD_FILE")"
+fi
 GOCACHE="${GOCACHE:-/private/tmp/kitsoki-gocache}"
 NODE_RUNTIME_FILE="$ROOT/deploy/hosted-pog/node-runtime.env"
 STATE_PACKAGER="$ROOT/scripts/package-hosted-pog-state.sh"
@@ -85,6 +105,21 @@ PUBLIC_HOST="${PUBLIC_HOST#https://}"
 [ "$NODE_ARCHIVE" = "node-$NODE_VERSION-linux-x64.tar.xz" ] || { echo "hosted POG Node archive does not match its version" >&2; exit 2; }
 [ "$NODE_URL" = "https://nodejs.org/download/release/$NODE_VERSION/$NODE_ARCHIVE" ] || { echo "hosted POG Node URL is not the pinned official release URL" >&2; exit 2; }
 [[ "$NODE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid hosted POG Node SHA-256" >&2; exit 2; }
+case "$DB_BACKEND" in
+	sqlite|postgres) ;;
+	*) echo "KITSOKI_HOSTED_POG_DB_BACKEND must be sqlite or postgres, got: $DB_BACKEND" >&2; exit 2 ;;
+esac
+if [ "$DB_BACKEND" = postgres ]; then
+	[[ "$PG_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "postgres backend requires KITSOKI_HOSTED_POG_PG_HOST" >&2; exit 2; }
+	[[ "$PG_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$PG_PORT" -ge 1 ] && [ "$PG_PORT" -le 65535 ] \
+		|| { echo "invalid KITSOKI_HOSTED_POG_PG_PORT: $PG_PORT" >&2; exit 2; }
+	[[ "$PG_DATABASE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "postgres backend requires KITSOKI_HOSTED_POG_PG_DATABASE" >&2; exit 2; }
+	[[ "$PG_ROLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "postgres backend requires KITSOKI_HOSTED_POG_PG_ROLE" >&2; exit 2; }
+	case "$PG_SSLMODE" in
+		disable|allow|prefer|require|verify-ca|verify-full) ;;
+		*) echo "invalid KITSOKI_HOSTED_POG_PG_SSLMODE: $PG_SSLMODE" >&2; exit 2 ;;
+	esac
+fi
 
 verify() {
 	expect_public_status() {
@@ -300,6 +335,25 @@ grep -q '"bad_verification_code"' <<<"$cred_probe" || {
 }
 unset cred_probe
 
+# Same reuse contract as the GH client secret above: a repeat deploy that
+# only changes host/port/database/role/sslmode should not have to resupply a
+# stable database password, and the value never needs to round-trip through
+# the operator's shell history to keep working. install.sh stores it (and the
+# assembled DSN) in the same root-only /etc/kitsoki/hosted-pog.env. A first
+# postgres deployment still fails closed below when no explicit, file, or
+# installed value exists.
+if [ "$DB_BACKEND" = postgres ] && [ -z "$PG_PASSWORD" ]; then
+	if ! PG_PASSWORD="$(ssh "$REMOTE" \
+		"sed -n 's/^KITSOKI_HOSTED_POG_PG_PASSWORD=//p' /etc/kitsoki/hosted-pog.env 2>/dev/null | head -n 1")"; then
+		echo "could not inspect the existing remote hosted POG database credential" >&2
+		exit 1
+	fi
+fi
+if [ "$DB_BACKEND" = postgres ] && [ -z "$PG_PASSWORD" ]; then
+	echo "postgres backend needs a database password: set KITSOKI_HOSTED_POG_PG_PASSWORD or KITSOKI_HOSTED_POG_PG_PASSWORD_FILE, or install it through an initial deployment before later deployments can reuse it" >&2
+	exit 2
+fi
+
 [ -d "$POG_ROOT/.git" ] || { echo "POG checkout is missing at $POG_ROOT" >&2; exit 2; }
 KITSOKI_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 git -C "$ROOT" merge-base --is-ancestor "$KITSOKI_SHA" main || { echo "Kitsoki HEAD ($KITSOKI_SHA) is not contained in Kitsoki main" >&2; exit 2; }
@@ -325,6 +379,7 @@ deploy-hosted-pog:
   local state:    $([ "$sync_local_state" -eq 1 ] && echo 'bounded portal-state snapshot enabled' || echo 'preserve hosted runtime (no local import)')
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
   public protocol: GitHub OAuth login endpoints and the HMAC-verified webhook only
+  db backend:     $([ "$DB_BACKEND" = postgres ] && echo "postgres ($PG_ROLE@$PG_HOST:$PG_PORT/$PG_DATABASE sslmode=$PG_SSLMODE)" || echo 'sqlite (default)')
 EOF
 
 if [ "$mode" = "dry-run" ]; then
@@ -380,7 +435,7 @@ for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
 	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
 done
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-admission.service,kitsoki-queue-worker-admission.conf,kitsoki-queue-worker-hosted-engine.conf,kitsoki-pog-integration-current-worker.service,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-colony-runner-portfolio.conf,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,prune-releases.sh,state-content-digest.mjs} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-admission.service,kitsoki-queue-worker-admission.conf,kitsoki-queue-worker-hosted-engine.conf,kitsoki-pog-integration-current-worker.service,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-colony-runner-portfolio.conf,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,prune-releases.sh,state-content-digest.mjs,wait-for-postgres.sh} "$local_stage/"
 # POG's compatibility bridge still delegates lifecycle verbs to the checked-in
 # helper. Ship that exact-revision helper beside the immutable hosted binary;
 # the orchestrator must never require a mutable source checkout merely to close
@@ -391,6 +446,23 @@ chmod 0755 "$local_stage/kitsoki-dev-workspace.sh"
 # remote install -d) instead of the ssh argv, which would be visible in ps.
 printf '%s\n' "$GH_CLIENT_SECRET" >"$local_stage/gh-client-secret"
 chmod 0600 "$local_stage/gh-client-secret"
+# Non-secret db backend selection travels as a plain KEY=VALUE file install.sh
+# sources, the same convention as node-runtime.env. The password is a
+# separate 0600 file for the same reason the GH client secret is: it must
+# never be an install.sh positional argument (visible in ps/journal) or a
+# rendered unit value.
+{
+	printf 'KITSOKI_HOSTED_POG_DB_BACKEND=%s\n' "$DB_BACKEND"
+	if [ "$DB_BACKEND" = postgres ]; then
+		printf 'KITSOKI_HOSTED_POG_PG_HOST=%s\n' "$PG_HOST"
+		printf 'KITSOKI_HOSTED_POG_PG_PORT=%s\n' "$PG_PORT"
+		printf 'KITSOKI_HOSTED_POG_PG_DATABASE=%s\n' "$PG_DATABASE"
+		printf 'KITSOKI_HOSTED_POG_PG_ROLE=%s\n' "$PG_ROLE"
+		printf 'KITSOKI_HOSTED_POG_PG_SSLMODE=%s\n' "$PG_SSLMODE"
+	fi
+} >"$local_stage/hosted-pog-db.env"
+printf '%s' "$PG_PASSWORD" >"$local_stage/pg-password"
+chmod 0600 "$local_stage/pg-password"
 state_mode="preserve"
 if [ "$sync_local_state" -eq 1 ]; then
 	[ -x "$STATE_PACKAGER" ] || { echo "missing hosted POG state packager: $STATE_PACKAGER" >&2; exit 2; }

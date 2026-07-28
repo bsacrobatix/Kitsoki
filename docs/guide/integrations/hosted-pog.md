@@ -86,6 +86,135 @@ on the ssh command line), and installs it as root-only
 Do not add an App private key, webhook secret, installation token, or user PAT
 to the hosted POG config. Callback login needs none of them.
 
+## Database backend: SQLite (default) or Postgres
+
+`kitsoki-pog.service` is the process that owns the session store; it already
+supports `sqlite` (default), `postgres`, and `embedded-postgres` (see
+[`../../architecture/storage-backends.md`](../../architecture/storage-backends.md)).
+The hosted installer exposes only `sqlite`/`postgres`, config-driven and
+strictly opt-in — an existing host that is redeployed with none of the
+`KITSOKI_HOSTED_POG_PG_*` variables set keeps running on SQLite, byte-for-byte
+identical to today.
+
+Select Postgres by setting, alongside the usual `scripts/deploy-hosted-pog.sh`
+variables:
+
+```sh
+export KITSOKI_HOSTED_POG_DB_BACKEND=postgres
+export KITSOKI_HOSTED_POG_PG_HOST=127.0.0.1
+export KITSOKI_HOSTED_POG_PG_PORT=5432        # default
+export KITSOKI_HOSTED_POG_PG_DATABASE=kitsoki_hosted_pog
+export KITSOKI_HOSTED_POG_PG_ROLE=kitsoki_hosted_pog
+export KITSOKI_HOSTED_POG_PG_SSLMODE=require  # default; disable|allow|prefer|require|verify-ca|verify-full
+export KITSOKI_HOSTED_POG_PG_PASSWORD=...     # or KITSOKI_HOSTED_POG_PG_PASSWORD_FILE=/path
+```
+
+**The installer does not provision Postgres itself** — no `initdb`, no
+`CREATE ROLE`/`CREATE DATABASE`, no superuser use. The same precedent already
+applies to Caddy: this installer renders and reloads Caddy's config but does
+not install Caddy. Postgres — the server, the role, and the database — must
+pre-exist before the first postgres-backed deploy; the installer only wires
+Kitsoki up to it and fails closed with a clear message if the role, database,
+host, port, or password are missing or malformed. This keeps the installer
+from needing database-superuser credentials on the deploy path at all, and
+keeps provisioning (which varies wildly — a local `apt install postgresql`, a
+managed cloud database, a container) out of a script that has no business
+making that infrastructure decision.
+
+Provisioning example (run once, locally on the Postgres server, by whoever
+owns it):
+
+```sql
+CREATE ROLE kitsoki_hosted_pog LOGIN PASSWORD '...';
+CREATE DATABASE kitsoki_hosted_pog OWNER kitsoki_hosted_pog;
+```
+
+The password is never a `deploy-hosted-pog.sh`/`install.sh` positional
+argument and never appears on the wire to the VM outside the same 0700
+staged-upload/0600-installed-file channel already used for the GitHub client
+secret: it travels as a dedicated file, is installed as one more key inside
+the existing root-only `/etc/kitsoki/hosted-pog.env` (already wired to
+`kitsoki-pog.service` via `EnvironmentFile=`), and is assembled into a libpq
+keyword/value DSN (`host=... password='...' ...`, escaped, never
+URL-encoded) that similarly never touches `ExecStart` or any other
+`/proc/<pid>/cmdline`-visible location. Re-running the deploy without
+`KITSOKI_HOSTED_POG_PG_PASSWORD(_FILE)` reuses the password already installed
+on the host — the same reuse contract the GitHub client secret and the colony
+token already have — so routine redeploys never need to resupply it. Nothing
+mints or rotates this password on your behalf; a first postgres deployment
+fails closed if no password is available from any of the three sources.
+
+Ordering: `kitsoki-pog.service` gets a rendered drop-in
+(`kitsoki-pog.service.d/zz-postgres.conf`) with `Wants=postgresql.service` /
+`After=postgresql.service` (never `Requires=`) plus an `ExecStartPre` TCP
+readiness probe bounded to 30 seconds
+(`deploy/hosted-pog/wait-for-postgres.sh`). `Wants=` is deliberate: a
+`Requires=` dependency would propagate a `postgresql.service` restart or
+blip into a forced stop of `kitsoki-pog.service`, turning routine Postgres
+maintenance into a POG outage. `Wants=` gets the same start-ordering and is a
+harmless no-op if no local `postgresql.service` unit exists at all — e.g. a
+managed/remote Postgres — so it is safe to add unconditionally. The readiness
+probe is what actually blocks activation until Postgres is reachable; if it
+times out, the unit fails to start and `Restart=always` (already on this
+unit) keeps retrying with the existing `StartLimitIntervalSec=60`/
+`StartLimitBurst=10` backoff, so a slow-to-start database delays activation
+rather than requiring a manual restart.
+
+Reverting a host from postgres back to sqlite is symmetric: redeploy with
+`KITSOKI_HOSTED_POG_DB_BACKEND` unset (or `sqlite`). The installer removes the
+`KITSOKI_DB_BACKEND`/`KITSOKI_PG_DSN` keys from `/etc/kitsoki/hosted-pog.env`
+and the `zz-postgres.conf` drop-in on that deploy.
+
+### Migrating an existing SQLite host to Postgres
+
+This is an explicit, operator-driven procedure — nothing here auto-migrates
+on install, and running the installer with `KITSOKI_HOSTED_POG_DB_BACKEND=postgres`
+against a host that has never been migrated starts that Postgres database
+empty (see the `--allow-nonempty-dest` note below). To move existing sessions,
+invites, and events onto Postgres before cutting the host over:
+
+1. Provision the Postgres role/database (above) if you have not already.
+2. On the VM, run the verified copy tool against the live `sessions.db`,
+   exporting the DSN as an environment variable rather than a flag so it does
+   not appear on this command's own argv either:
+
+   ```sh
+   ssh root@<host> \
+     'cd /var/lib/kitsoki-pog && runuser -u pog -- env \
+        KITSOKI_DB_BACKEND=postgres \
+        KITSOKI_PG_DSN="host=127.0.0.1 port=5432 dbname=kitsoki_hosted_pog user=kitsoki_hosted_pog password='"'"'...'"'"' sslmode=require" \
+        /opt/kitsoki-hosted-pog/current/kitsoki db migrate \
+          --sqlite-path /var/lib/kitsoki-pog/sessions.db --dry-run'
+   ```
+
+   Drop `--dry-run` once the reported per-table counts look right. `kitsoki
+   db migrate` is idempotent and resumable (every insert is `ON CONFLICT ...
+   DO NOTHING` against the destination's real primary key), so it is safe to
+   run again; it also verifies row counts and fails loudly on any mismatch.
+   The `cd`/`runuser` shape matches the existing invite command above and for
+   the same reason. Hosted POG does not use the optional turncache/endpoint
+   satellite SQLite files, so `--turncache-sqlite`/`--endpoint-sqlite` are not
+   needed here.
+3. Re-run `scripts/deploy-hosted-pog.sh --yes` with `KITSOKI_HOSTED_POG_DB_BACKEND=postgres`
+   and the connection variables set. The daemon now opens the already-migrated
+   Postgres database — the destination is non-empty by design at this point, which is
+   exactly what a successful migration produced, not a fresh empty postgres
+   backend.
+4. Verify with the checks already documented under "Operations and
+   verification" below; `--verify` is backend-agnostic and exercises the same
+   auth/portal/health surfaces regardless of which store is behind them.
+
+**Known cross-repo gap.** POG's own Node portal reads `sessions.db` directly
+for two features — `/api/agent-runner/reaped-sessions` and the colony
+runner's `POG_AGENT_RUNNER_DB` environment variable — independent of the
+Kitsoki daemon. Flipping the backend to Postgres does not update those two
+read paths: they will keep reading (or fail to read) the now-stale SQLite
+file, since POG itself is not Postgres-aware. This is a POG-side gap, not a
+Kitsoki one; per this repo's "never edit a sibling repo" policy it should be
+filed as a typed requirement into POG's own catalog rather than patched here.
+Do not enable the postgres backend on a host that depends on either of those
+two features until POG's side of this gap is closed.
+
 ## Deploy or upgrade
 
 After both changes are contained in protected `main`, run the deploy helper
