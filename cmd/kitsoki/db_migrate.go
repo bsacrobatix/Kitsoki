@@ -35,6 +35,7 @@ func dbCmd() *cobra.Command {
 		Short: "Database backend maintenance",
 	}
 	cmd.AddCommand(dbMigrateCmd())
+	cmd.AddCommand(dbVerifyCmd())
 	return cmd
 }
 

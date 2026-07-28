@@ -291,6 +291,11 @@ func main() {
 		if code, ok := IsInterceptExitError(err); ok {
 			os.Exit(code)
 		}
+		// kitsoki db verify: a failing report already printed its own JSON
+		// artifact + summary table; do not print a redundant "error:" line.
+		if code, ok := IsVerifyFailedError(err); ok {
+			os.Exit(code)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

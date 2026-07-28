@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -107,9 +108,28 @@ func OpenPostgres(db *sql.DB) (Store, error) {
 	}, nil
 }
 
+// ApplicationName is the Postgres application_name every kitsoki-opened
+// connection identifies itself with (see withApplicationName below). It is a
+// runtime-reported identity signal that lives in Postgres's own
+// pg_stat_activity view, independent of anything the kitsoki process
+// declares about itself: a deployment verification tool with DSN access can
+// query "SELECT count(*) FROM pg_stat_activity WHERE application_name =
+// store.ApplicationName" to confirm the running service is genuinely holding
+// live connections to THIS database, rather than trusting a --db-backend
+// flag or an environment variable. See cmd/kitsoki/db_verify.go /
+// internal/pgverify for the consumer.
+const ApplicationName = "kitsoki"
+
 // OpenPostgresDSN opens a Postgres session store from a DSN (URL or
-// keyword=value form) using the pgx stdlib driver.
+// keyword=value form) using the pgx stdlib driver. The DSN is stamped with
+// application_name=kitsoki (see [ApplicationName]) unless the caller already
+// set one explicitly, so every live connection this package opens is
+// independently identifiable from Postgres's side.
 func OpenPostgresDSN(dsn string) (Store, error) {
+	dsn, err := WithApplicationName(dsn, ApplicationName)
+	if err != nil {
+		return nil, fmt.Errorf("store.OpenPostgresDSN: %w", err)
+	}
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store.OpenPostgresDSN: sql.Open: %w", err)
@@ -124,6 +144,39 @@ func OpenPostgresDSN(dsn string) (Store, error) {
 		return nil, err
 	}
 	return st, nil
+}
+
+// WithApplicationName returns dsn with application_name=name added, unless
+// dsn already specifies one (an explicit caller choice always wins). Accepts
+// both URL (postgres://...) and libpq keyword=value DSN forms, mirroring
+// internal/dbruntime/pgtest's dsnWithDatabase. Exported so a caller opening
+// its OWN separate connection to the same server as OpenPostgresDSN — e.g.
+// internal/pgverify's round-trip probe — can stamp a deliberately different
+// application_name, keeping the two identifiable apart in pg_stat_activity
+// (see internal/pgverify.CheckBackendIdentity's doc comment for why that
+// distinction matters: without it, a verification tool's own connection
+// could be mistaken for the real service's).
+func WithApplicationName(dsn, name string) (string, error) {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			return "", fmt.Errorf("parse DSN: %w", err)
+		}
+		q := u.Query()
+		if q.Get("application_name") == "" {
+			q.Set("application_name", name)
+			u.RawQuery = q.Encode()
+		}
+		return u.String(), nil
+	}
+	if strings.Contains(dsn, "application_name=") {
+		return dsn, nil
+	}
+	sep := " "
+	if strings.TrimSpace(dsn) == "" {
+		sep = ""
+	}
+	return dsn + sep + "application_name=" + name, nil
 }
 
 // stripSQLComments removes "--" line comments from ddl so the statement split
