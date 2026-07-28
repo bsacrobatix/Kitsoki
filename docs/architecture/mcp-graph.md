@@ -202,13 +202,14 @@ catalog ([`writevia.go`](../../internal/mcp/graphsrv/writevia.go)):
   (workspace under `<repo>/.capsules/workspaces/graph-mcp-<pid>`, based on
   the staging branch), the engine op runs against the workspace copy, and
   every successful write is `commit`ted (DCO sign-off is the script's own
-  contract) and `merge`d into the staging branch **without teardown** — the
-  workspace stays alive for the server's lifetime, and once it exists every
-  read for that catalog routes to it too, so a proposed changeset is visible
-  to the `graph.get`/`changeset`/`apply` calls that follow. The primary
-  checkout is never touched. When a newly adopted repo has no `staging/local`
-  ref yet, the first default workspace starts from `main` and its merge creates
-  `staging/local`; later graph work starts from that staging ref normally.
+  contract) on the dedicated `agent/graph-mcp-<pid>` branch. It does **not**
+  merge into `staging/local`. The `graph.propose` response includes
+  `write.branch`, `write.commit_sha`, `write.workspace_path`, and
+  `write.pr_ready:true` so the caller can open or hand off a review PR from
+  that branch. The workspace stays alive for the server's lifetime, and once
+  it exists every read for that catalog routes to it too, so a proposed
+  changeset is visible to the `graph.get`/`changeset`/`apply` calls that
+  follow in the same MCP session. The primary checkout is never touched.
 
 Resolution precedence, per bound catalog:
 
@@ -217,11 +218,11 @@ Resolution precedence, per bound catalog:
 2. otherwise (`--write-via auto`, the default) the catalog repo's checked-in
    `.kitsoki/project-profile.yaml`:
 
-   ```yaml
-   graph:
-     write_via: capsule   # or direct
-     gate: "git diff --check"   # optional dev-workspace.sh merge gate
-   ```
+     ```yaml
+     graph:
+       write_via: capsule   # or direct
+       gate: "git diff --check"   # legacy; MCP proposal writes do not auto-merge
+     ```
 
 3. otherwise, when the bound catalog is visibly read-only and its repository
    carries `scripts/dev-workspace.sh`, **`capsule`** — protected primary
@@ -233,17 +234,12 @@ Resolution precedence, per bound catalog:
 fallback checks mode bits without attempting a write, so it never probes or
 weakens the protected checkout.
 
-The default capsule merge gate is `git diff --check`, not the repo's full CI
-gate: graph writes are already validated all-or-nothing by the engine (lint
-regression gate, hazard guards) before any file changes, so the integration
-gate only needs repo hygiene. A project can widen it via `graph.gate`.
-
 Failure honesty: a workspace that cannot be created (no
 `scripts/dev-workspace.sh` in a repo whose profile says `capsule`), or a
-completed write that cannot be committed/merged, comes back as
-`CAPSULE_WORKFLOW` whose hint names the workspace path/branch holding the
-work. An engine *rejection* is never masked by a lifecycle warning — the
-post-reject integrate is best-effort. Receipts and feedback artifacts keep
+completed write that cannot be committed, comes back as `CAPSULE_WORKFLOW`
+whose hint names the workspace path/branch holding the work. An engine
+*rejection* is never masked by a lifecycle warning — the post-reject commit is
+best-effort. Receipts and feedback artifacts keep
 anchoring to the **primary** repo root (never a disposable workspace), so
 `.artifacts/graph-mcp/` stays in one predictable place.
 
@@ -380,8 +376,8 @@ constants in `errors.go`:
   exists in the catalog but sits outside the session's baked scope (see
   "Scoped sessions"); only a differently-scoped session can reach it.
 - `CAPSULE_WORKFLOW` — a capsule-routed write's workspace lifecycle failed
-  (workspace create, commit, or merge into the staging branch); the hint
-  names where the work physically is so nothing is silently lost.
+  (workspace create or commit); the hint names where the work physically is
+  so nothing is silently lost.
 
 `routing_errors[].code` on `feedback.report` reuses this same vocabulary
 (currently only `READ_ONLY_MODE`, for the catalog sink's read-mode degrade)

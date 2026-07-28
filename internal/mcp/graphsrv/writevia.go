@@ -18,9 +18,10 @@ import (
 // Write routing decides WHERE a mutating graph.* call materializes: straight
 // into the bound catalog's working tree ("direct", the historical behavior),
 // or through the repo's managed clone-backed capsule workflow ("capsule"):
-// the write lands in a scripts/dev-workspace.sh workspace, is committed with
-// a DCO sign-off, and is merged into the repo's staging branch — the primary
-// checkout (typically pinned to main) is never touched.
+// the write lands in a scripts/dev-workspace.sh workspace and is committed
+// with a DCO sign-off on a dedicated agent branch. The primary checkout
+// (typically pinned to main) is never touched, and MCP proposal writes do not
+// auto-merge into staging/local.
 //
 // Resolution precedence, per bound catalog:
 //  1. the server-level --write-via flag (direct|capsule), when not "auto";
@@ -52,12 +53,9 @@ func ValidateWriteVia(via string) error {
 	}
 }
 
-// defaultCapsuleGate is the merge gate passed to dev-workspace.sh when the
-// project profile doesn't declare one. Graph writes are already validated
-// all-or-nothing by the engine (lint regression gate, guards) before any
-// file changes, so the capsule integration gate only needs to be a cheap
-// repo-hygiene check — not the repo's full CI gate, which the script would
-// otherwise default to on every single graph write.
+// defaultCapsuleGate is kept for compatibility with existing project profiles.
+// Capsule-routed MCP proposal writes now stop at a committed review branch
+// instead of invoking the merge gate automatically.
 const defaultCapsuleGate = "git diff --check"
 
 // projectGraphConfig is the `graph:` block of a repo's checked-in
@@ -66,8 +64,9 @@ const defaultCapsuleGate = "git diff --check"
 type projectGraphConfig struct {
 	// WriteVia is direct|capsule (empty means unset → direct).
 	WriteVia string `yaml:"write_via"`
-	// Gate optionally overrides the dev-workspace.sh merge gate run when a
-	// capsule-routed write integrates into the staging branch.
+	// Gate is retained for older project profiles. MCP proposal writes do not
+	// automatically merge into staging/local, so this value is not used by the
+	// capsule proposal route.
 	Gate string `yaml:"gate"`
 }
 
@@ -139,9 +138,9 @@ func (execWorkspaceRunner) Run(ctx context.Context, dir, program string, args ..
 
 // WriteRouter resolves and caches each bound catalog's write route and, for
 // capsule-routed catalogs, owns the lazy workspace lifecycle: create on the
-// first write, commit+merge into the staging branch after every successful
-// write, workspace kept alive for the server's lifetime so later reads and
-// writes see earlier (already-merged) changesets.
+// first write, commit after every successful write, workspace kept alive for
+// the server's lifetime so later reads and writes see same-session proposal
+// changes without touching staging/local.
 type WriteRouter struct {
 	via    string // server-level override: auto|direct|capsule
 	runner WorkspaceRunner
@@ -157,6 +156,19 @@ type catalogRoute struct {
 	gate     string
 	wsID     string
 	wsPath   string // non-empty once the capsule workspace exists
+}
+
+// CapsuleWriteEvidence is returned from capsule-routed writes so MCP clients
+// can hand off the dedicated branch for review/PR creation without inferring
+// state from staging/local.
+type CapsuleWriteEvidence struct {
+	Via           string `json:"via"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspacePath string `json:"workspace_path"`
+	Branch        string `json:"branch"`
+	BaseBranch    string `json:"base_branch"`
+	CommitSHA     string `json:"commit_sha"`
+	PRReady       bool   `json:"pr_ready"`
 }
 
 // NewWriteRouter builds the router. via is the server-level --write-via
@@ -234,8 +246,8 @@ func (r *WriteRouter) route(primaryPath string) *catalogRoute {
 // readPath maps a bound catalog path to the path read tools should load.
 // Once a capsule workspace exists for the catalog, reads come from it — a
 // changeset proposed through the capsule route must be visible to the
-// graph.get/changeset/apply calls that follow it, and the workspace tracks
-// the staging branch (it is re-merged into staging after every write).
+// graph.get/changeset/apply calls that follow it. That same-session read
+// projection is the workspace branch, not staging/local.
 // Before the first write there is no workspace and reads use the bound path.
 func (r *WriteRouter) readPath(primaryPath string) string {
 	rt := r.route(primaryPath)
@@ -312,46 +324,50 @@ func (r *WriteRouter) ensureWorkspace(ctx context.Context, rt *catalogRoute) *Er
 	return nil
 }
 
-// integrate lands a completed capsule-routed write on the staging branch:
-// dev-workspace.sh commit (DCO sign-off is the script's own contract) then
-// merge WITHOUT teardown, so the workspace stays alive for later calls. A
-// clean workspace ("no changes" — e.g. the engine rejected the write, or a
-// dry-run) is a successful no-op, never an error. The returned payload is
-// non-nil only when work is committed in the workspace but could not be
-// merged — the hint names the workspace so nothing is lost.
-func (r *WriteRouter) integrate(ctx context.Context, primaryPath, message string) *ErrorPayload {
+// integrate commits a completed capsule-routed write on the dedicated
+// workspace branch. It deliberately does not merge into staging/local: MCP
+// proposal writes are review/PR handoffs, and the response includes the branch
+// and SHA needed for that handoff. A clean workspace ("no changes" — e.g. the
+// engine rejected the write, or a dry-run) is a successful no-op, never an
+// error.
+func (r *WriteRouter) integrate(ctx context.Context, primaryPath, message string) (*CapsuleWriteEvidence, *ErrorPayload) {
 	rt := r.route(primaryPath)
 	r.mu.Lock()
 	skip := rt.via != WriteViaCapsule || rt.wsPath == ""
 	r.mu.Unlock()
 	if skip {
-		return nil
+		return nil, nil
 	}
 	script := r.script(rt)
-	commit, err := r.runner.Run(ctx, rt.repoRoot, script, "commit", rt.wsPath, "--message", message)
+	commit, err := r.runner.Run(ctx, rt.repoRoot, script, "commit", rt.wsPath, "--message", message, "--json")
 	if err != nil {
-		return NewError(CodeCapsuleWorkflow, "capsule write routing: commit: "+err.Error(),
+		return nil, NewError(CodeCapsuleWorkflow, "capsule write routing: commit: "+err.Error(),
 			"the write is on disk in "+rt.wsPath+" but not committed")
 	}
 	if commit.ExitCode != 0 {
 		if strings.Contains(commit.Stderr, "no changes") {
-			return nil
+			return nil, nil
 		}
-		return NewError(CodeCapsuleWorkflow,
+		return nil, NewError(CodeCapsuleWorkflow,
 			fmt.Sprintf("capsule write routing: dev-workspace.sh commit exited %d: %s", commit.ExitCode, strings.TrimSpace(commit.Stderr)),
 			"the write is on disk in "+rt.wsPath+" but not committed")
 	}
-	merge, err := r.runner.Run(ctx, rt.repoRoot, script, "merge", rt.wsPath, "--gate", rt.gate)
-	if err != nil {
-		return NewError(CodeCapsuleWorkflow, "capsule write routing: merge: "+err.Error(),
-			"the write is committed on branch agent/"+rt.wsID+" in "+rt.wsPath+"; rerun focused validation and retry the merge")
+	var committed struct {
+		SHA string `json:"sha"`
 	}
-	if merge.ExitCode != 0 {
-		return NewError(CodeCapsuleWorkflow,
-			fmt.Sprintf("capsule write routing: dev-workspace.sh merge exited %d: %s", merge.ExitCode, strings.TrimSpace(merge.Stderr)),
-			"the write is committed on branch agent/"+rt.wsID+" in "+rt.wsPath+"; rerun focused validation and retry the merge")
+	if err := json.Unmarshal([]byte(commit.Stdout), &committed); err != nil || strings.TrimSpace(committed.SHA) == "" {
+		return nil, NewError(CodeCapsuleWorkflow, "capsule write routing: dev-workspace.sh commit returned no commit sha",
+			"the write may be committed in "+rt.wsPath+"; inspect the workspace branch agent/"+rt.wsID)
 	}
-	return nil
+	return &CapsuleWriteEvidence{
+		Via:           WriteViaCapsule,
+		WorkspaceID:   rt.wsID,
+		WorkspacePath: rt.wsPath,
+		Branch:        "agent/" + rt.wsID,
+		BaseBranch:    "staging/local",
+		CommitSHA:     committed.SHA,
+		PRReady:       true,
+	}, nil
 }
 
 // resolveRead resolves a tool call's catalog arg for a READ: the bound
@@ -392,13 +408,13 @@ func (d *Deps) resolveWrite(ctx context.Context, arg string) (enginePath, anchor
 // no-op for direct-routed catalogs). bestEffort suppresses the error payload
 // — used when the tool result already carries a more important outcome (an
 // engine rejection) that a lifecycle warning must not mask.
-func (d *Deps) integrateWrite(ctx context.Context, anchorPath, message string, bestEffort bool) *ErrorPayload {
+func (d *Deps) integrateWrite(ctx context.Context, anchorPath, message string, bestEffort bool) (*CapsuleWriteEvidence, *ErrorPayload) {
 	if d.Router == nil {
-		return nil
+		return nil, nil
 	}
-	ep := d.Router.integrate(ctx, anchorPath, message)
+	evidence, ep := d.Router.integrate(ctx, anchorPath, message)
 	if bestEffort {
-		return nil
+		return evidence, nil
 	}
-	return ep
+	return evidence, ep
 }

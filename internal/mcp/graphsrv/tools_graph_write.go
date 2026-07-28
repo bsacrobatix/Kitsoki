@@ -148,7 +148,11 @@ type graphProposeOK struct {
 	Catalog     string `json:"catalog"`
 	ChangesetID string `json:"changeset_id"`
 	Status      string `json:"status"`
-	GuardFills  []any  `json:"guard_fills,omitempty"`
+	// Write is present when --write-via resolves to capsule. It names the
+	// committed branch handoff; callers should open a PR from this branch
+	// instead of assuming the proposal was merged to staging/local.
+	Write      *CapsuleWriteEvidence `json:"write,omitempty"`
+	GuardFills []any                 `json:"guard_fills,omitempty"`
 	// Canonicalized/CanonicalizedFiles report that this write also rewrote
 	// catalog files into canonical YAML form, in the same commit — see
 	// internal/graph/canonicalize.go. On a validate_only call it describes
@@ -216,7 +220,7 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 		// Best-effort: a rejected proposal normally writes nothing (the
 		// integrate is then a clean no-op), and a lifecycle warning must
 		// never mask the engine's reject reasons.
-		_ = deps.integrateWrite(ctx, anchor, "graph-mcp: graph.propose rejected "+changesetID, true)
+		_, _ = deps.integrateWrite(ctx, anchor, "graph-mcp: graph.propose rejected "+changesetID, true)
 		return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, writeRejectResult("graph.propose", rejectReasons, lint), changesetID), nil
 	}
 
@@ -224,8 +228,11 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 	guardFills, _ := res.Data["guard_fills"].([]any)
 	validatedOnly, _ := res.Data["validated_only"].(bool)
 
+	var writeEvidence *CapsuleWriteEvidence
 	if !args.ValidateOnly && !validatedOnly {
-		if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.propose "+changesetID, false); ep != nil {
+		var ep *ErrorPayload
+		writeEvidence, ep = deps.integrateWrite(ctx, anchor, "graph-mcp: graph.propose "+changesetID, false)
+		if ep != nil {
 			return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, errorResult(ep), changesetID), nil
 		}
 	}
@@ -236,6 +243,7 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 		Catalog:            alias,
 		ChangesetID:        changesetID,
 		Status:             status,
+		Write:              writeEvidence,
 		GuardFills:         guardFills,
 		Canonicalized:      canonicalized,
 		CanonicalizedFiles: stringList(res.Data["canonicalized_files"]),
@@ -358,7 +366,7 @@ func handleGraphWithdraw(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRe
 		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, writeRejectResult("graph.withdraw", rejectReasons, lintIssues), args.ID), nil
 	}
 
-	if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.withdraw "+args.ID, false); ep != nil {
+	if _, ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.withdraw "+args.ID, false); ep != nil {
 		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
@@ -458,7 +466,7 @@ func handleGraphApply(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReque
 	}
 
 	if !args.DryRun {
-		if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.apply "+args.ID, false); ep != nil {
+		if _, ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.apply "+args.ID, false); ep != nil {
 			return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 		}
 	}
@@ -555,7 +563,7 @@ func handleGraphAuthorize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, writeRejectResult("graph.authorize", rejectReasons, lintIssues), args.ID), nil
 	}
 
-	if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.authorize "+args.ID, false); ep != nil {
+	if _, ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.authorize "+args.ID, false); ep != nil {
 		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
@@ -655,7 +663,7 @@ func handleGraphCanonicalize(ctx context.Context, deps *Deps, req *mcpsdk.CallTo
 	}
 
 	if !args.DryRun && len(changedFiles) > 0 {
-		if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.canonicalize", false); ep != nil {
+		if _, ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.canonicalize", false); ep != nil {
 			return journal(deps, "graph.canonicalize", anchor, alias, req.Params.Arguments, errorResult(ep), ""), nil
 		}
 	}

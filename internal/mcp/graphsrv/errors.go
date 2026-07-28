@@ -91,8 +91,8 @@ const (
 	// CodeCapsuleWorkflow: a capsule-routed write's workspace lifecycle
 	// failed — the catalog repo declares graph.write_via: capsule (or the
 	// server runs --write-via capsule) but the workspace could not be
-	// created, or a completed write could not be committed/merged into the
-	// staging branch. The hint names where the work physically is (the
+	// created, or a completed write could not be committed on its dedicated
+	// workspace branch. The hint names where the work physically is (the
 	// managed workspace path/branch) so nothing is silently lost.
 	CodeCapsuleWorkflow = "CAPSULE_WORKFLOW"
 
@@ -102,7 +102,6 @@ const (
 	// CodeNotClaimHolder means release was attempted by a different actor or
 	// liveness handle than the current owner.
 	CodeNotClaimHolder = "NOT_CLAIM_HOLDER"
-
 )
 
 // defaultIfStuck is the standing advertisement of the feedback channel:

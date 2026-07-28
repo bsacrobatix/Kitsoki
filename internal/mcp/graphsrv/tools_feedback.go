@@ -380,8 +380,8 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 	}
 
 	changesetID, _ := res.Data["changeset_id"].(string)
-	if iep := deps.integrateWrite(ctx, path, "graph-mcp: feedback.report "+reportID, false); iep != nil {
-		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Code: iep.Code, Error: iep.Error + " (changeset " + changesetID + " is proposed in the workspace but not merged)"}
+	if _, iep := deps.integrateWrite(ctx, path, "graph-mcp: feedback.report "+reportID, false); iep != nil {
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Code: iep.Code, Error: iep.Error + " (changeset " + changesetID + " is proposed in the workspace but not committed)"}
 	}
 	return routedEntry{Sink: "catalog", Ref: changesetID}, nil
 }

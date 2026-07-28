@@ -99,7 +99,7 @@ Examples:
 	cmd.Flags().StringVar(&actor, "actor", "", "actor name stamped on write-tool calls (authored_by/authorized_by) and checked for graph.withdraw's own-changeset gate in propose mode")
 	cmd.Flags().StringVar(&feedbackSink, "feedback-sink", graphsrv.FeedbackSinkLocal, "one of: local, catalog, github (local always writes; catalog proposes a changeset per the catalog's feedback_routing block; github files an issue via the native ticket provider; catalog/github degrade to local-only with a routing_errors entry when unconfigured/blocked)")
 	cmd.Flags().StringVar(&journalPath, "journal", "", "receipts JSONL path for write-tool calls (default: .artifacts/graph-mcp/receipts.jsonl next to the bound catalog's repo root)")
-	cmd.Flags().StringVar(&writeVia, "write-via", graphsrv.DefaultWriteVia, "one of: auto, direct, capsule — where write tools materialize: direct edits the bound catalog's working tree; capsule routes each write through the repo's managed workspace (scripts/dev-workspace.sh create/commit/merge into the staging branch); auto consults the catalog repo's .kitsoki/project-profile.yaml graph.write_via, defaulting to direct")
+	cmd.Flags().StringVar(&writeVia, "write-via", graphsrv.DefaultWriteVia, "one of: auto, direct, capsule — where write tools materialize: direct edits the bound catalog's working tree; capsule routes each write through the repo's managed workspace (scripts/dev-workspace.sh create/commit on a dedicated agent branch, no automatic staging merge); auto consults the catalog repo's .kitsoki/project-profile.yaml graph.write_via, defaulting to direct")
 	cmd.Flags().StringVar(&clockFixed, "clock-fixed", "", "RFC3339 timestamp to pin the server's clock to (also honors KITSOKI_GRAPH_CLOCK_FIXED)")
 	return cmd
 }

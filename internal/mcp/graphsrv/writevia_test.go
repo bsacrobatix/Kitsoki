@@ -38,16 +38,16 @@ func mustWriteFile(t *testing.T, path, content string, mode os.FileMode) {
 }
 
 // fakeWorkspaceRunner is the deterministic dev-workspace.sh stand-in: create
-// materializes the workspace by copying the repo's catalog file, commit and
-// merge just record (configurably failing), so no real clone ever happens.
+// materializes the workspace by copying the repo's catalog file, and commit
+// records a synthetic SHA, so no real clone ever happens.
 type fakeWorkspaceRunner struct {
 	t        *testing.T
 	repoRoot string
 	wsRoot   string
 
-	mu       sync.Mutex
-	calls    [][]string
-	mergeErr string // non-empty: merge exits 1 with this stderr
+	mu        sync.Mutex
+	calls     [][]string
+	commitErr string // non-empty: commit exits 1 with this stderr
 }
 
 func (f *fakeWorkspaceRunner) Run(_ context.Context, dir, program string, args ...string) (graphsrv.WorkspaceRunResult, error) {
@@ -74,12 +74,11 @@ func (f *fakeWorkspaceRunner) Run(_ context.Context, dir, program string, args .
 		out, _ := json.Marshal(map[string]any{"ok": true, "id": id, "path": wsPath})
 		return graphsrv.WorkspaceRunResult{Stdout: string(out)}, nil
 	case "commit":
-		return graphsrv.WorkspaceRunResult{}, nil
-	case "merge":
-		if f.mergeErr != "" {
-			return graphsrv.WorkspaceRunResult{ExitCode: 1, Stderr: f.mergeErr}, nil
+		if f.commitErr != "" {
+			return graphsrv.WorkspaceRunResult{ExitCode: 1, Stderr: f.commitErr}, nil
 		}
-		return graphsrv.WorkspaceRunResult{}, nil
+		out, _ := json.Marshal(map[string]any{"ok": true, "path": args[1], "sha": "1111222233334444555566667777888899990000"})
+		return graphsrv.WorkspaceRunResult{Stdout: string(out)}, nil
 	default:
 		f.t.Fatalf("unexpected dev-workspace verb: %v", args)
 		return graphsrv.WorkspaceRunResult{}, nil
@@ -174,18 +173,26 @@ func TestGraphServer_CapsuleWriteRoutesThroughWorkspace(t *testing.T) {
 		t.Fatalf("capsule-routed write mutated the primary catalog")
 	}
 
-	// The full lifecycle ran: create, then commit, then merge.
-	if verbs := runner.verbs(); strings.Join(verbs, ",") != "create,commit,merge" {
-		t.Fatalf("dev-workspace verbs = %v, want [create commit merge]", verbs)
+	// The full lifecycle ran: create, then commit. It must not merge into
+	// staging/local automatically; the result names the review branch handoff.
+	if verbs := runner.verbs(); strings.Join(verbs, ",") != "create,commit" {
+		t.Fatalf("dev-workspace verbs = %v, want [create commit]", verbs)
 	}
 	if commit := runner.call("commit"); !strings.Contains(strings.Join(commit, " "), changesetID) {
 		t.Fatalf("commit call does not name the changeset: %v", commit)
 	}
-	if merge := runner.call("merge"); argValue(merge, "--gate") != "git diff --check" {
-		t.Fatalf("merge gate = %q, want the default hygiene gate", argValue(merge, "--gate"))
+	if commit := runner.call("commit"); !strings.Contains(strings.Join(commit, " "), "--json") {
+		t.Fatalf("commit call must request JSON evidence: %v", commit)
 	}
-	if merge := runner.call("merge"); strings.Contains(strings.Join(merge, " "), "--teardown") {
-		t.Fatalf("merge must keep the workspace alive (no --teardown): %v", merge)
+	if merge := runner.call("merge"); merge != nil {
+		t.Fatalf("capsule proposal writes must not auto-merge to staging/local: %v", merge)
+	}
+	write, _ := m["write"].(map[string]any)
+	if write == nil {
+		t.Fatalf("capsule proposal result must include branch handoff evidence: %+v", m)
+	}
+	if write["branch"] != "agent/"+argValue(runner.call("create"), "--id") || write["commit_sha"] == "" || write["pr_ready"] != true {
+		t.Fatalf("unexpected write handoff evidence: %+v", write)
 	}
 
 	// The workspace copy carries the proposed changeset...
@@ -294,8 +301,8 @@ func TestGraphServer_ProtectedCatalogAutoRoutesThroughCapsule(t *testing.T) {
 	if m, isErr := callTool(t, cs, "graph.propose", proposeArgs("flip req-beta", []map[string]any{flipStatusOp("req-beta", "active", "done")})); isErr {
 		t.Fatalf("graph.propose (protected auto route): %+v", m)
 	}
-	if verbs := runner.verbs(); strings.Join(verbs, ",") != "create,commit,merge" {
-		t.Fatalf("dev-workspace verbs = %v, want [create commit merge]", verbs)
+	if verbs := runner.verbs(); strings.Join(verbs, ",") != "create,commit" {
+		t.Fatalf("dev-workspace verbs = %v, want [create commit]", verbs)
 	}
 }
 
@@ -343,9 +350,9 @@ func TestGraphServer_CapsuleWithoutScriptFails(t *testing.T) {
 	}
 }
 
-func TestGraphServer_CapsuleMergeFailureNamesWorkspace(t *testing.T) {
+func TestGraphServer_CapsuleCommitFailureNamesWorkspace(t *testing.T) {
 	repoRoot, catalogPath := capsuleFixture(t, "capsule")
-	runner := &fakeWorkspaceRunner{t: t, repoRoot: repoRoot, wsRoot: t.TempDir(), mergeErr: "merge: gate failed"}
+	runner := &fakeWorkspaceRunner{t: t, repoRoot: repoRoot, wsRoot: t.TempDir(), commitErr: "commit: hook failed"}
 	cs, done := connectGraphServer(t, graphsrv.Config{
 		CatalogFlags:    []string{catalogPath},
 		Mode:            graphsrv.ModePropose,
@@ -362,6 +369,6 @@ func TestGraphServer_CapsuleMergeFailureNamesWorkspace(t *testing.T) {
 	}
 	hint, _ := m["hint"].(string)
 	if !strings.Contains(hint, runner.wsRoot) {
-		t.Fatalf("merge-failure hint must name the workspace so work isn't lost, got %q", hint)
+		t.Fatalf("commit-failure hint must name the workspace so work isn't lost, got %q", hint)
 	}
 }

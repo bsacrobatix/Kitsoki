@@ -801,11 +801,12 @@ func graphScopeWire(info *objectgraph.ScopeInfo) map[string]any {
 }
 
 // graphOpenGuide is graph.open's ~6-line orientation string.
-const graphOpenGuide = `This catalog is served by kitsoki mcp-graph (read-only in this session).
+const graphOpenGuide = `This catalog is served by kitsoki mcp-graph.
 Use graph.find to search by type/status/field, graph.get to fetch full
 node envelopes by id, graph.neighbors to walk edges from a node.
 graph.type explains a type's schema and edge vocabulary; graph.impact
 predicts what a retype/remove would break — call it before proposing one.
+If graph.propose is listed, this session can write proposed changesets.
 Stuck or missing something? Call feedback.report — it's non-blocking.`
 
 // graphOpenTypeCensus builds one census row per registered type (excluding
