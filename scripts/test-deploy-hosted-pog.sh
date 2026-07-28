@@ -280,7 +280,7 @@ grep -Fq 'queue_admission_bucket_url=https://kitsoki-test.sgp1.digitaloceanspace
 grep -Fq 'queue_admission_key_env=DO_SPACES_KEY_ID' "$assets/install.sh"
 grep -Fq 'queue_admission_secret_env=DO_KITSOKI_TEST_API_KEY' "$assets/install.sh"
 grep -Fq 'KITSOKI_QUEUE_ADMISSION_BUCKET_URL=%s' "$assets/install.sh"
-grep -Fq 'printf '\''%s=%s\\n'\'' "$queue_admission_key_env" "$access_key"' "$assets/install.sh"
+grep -Fq 'printf '\''%s=%s\n'\'' "$queue_admission_key_env" "$access_key"' "$assets/install.sh"
 grep -Fq -- '--bucket-url ${KITSOKI_QUEUE_ADMISSION_BUCKET_URL}' "$assets/kitsoki-queue-admission.service"
 grep -Fq -- '--bucket-key-env DO_SPACES_KEY_ID' "$assets/kitsoki-queue-admission.service"
 grep -Fq -- '--bucket-secret-env DO_KITSOKI_TEST_API_KEY' "$assets/kitsoki-queue-admission.service"
