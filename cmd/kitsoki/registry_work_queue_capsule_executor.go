@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"kitsoki/internal/artifactjob"
@@ -41,7 +45,7 @@ func (r *SessionRegistry) StartWorkQueueCapsuleExecutors(ctx context.Context) (f
 			cancel()
 			return nil, fmt.Errorf("work queue capsule executor %q worker %q is unavailable", id, binding.WorkerID)
 		}
-		client := capsuleQueueClient{binding: binding}
+		client := capsuleQueueClient{binding: binding, bundleRoot: r.cfg.WorkQueueBundleRoot}
 		exec := workqueue.CapsuleExecutor{Store: store, Client: client, Config: workqueue.CapsuleExecutorConfig{
 			ApplicationID: binding.TargetApplication, Queue: binding.Queue, WorkerID: binding.WorkerID,
 			ProjectRoot: binding.ProjectRoot, WorkspaceID: binding.WorkspaceID, Pipeline: binding.Pipeline, WorkerPolicy: binding.WorkerPolicy,
@@ -54,7 +58,9 @@ func (r *SessionRegistry) StartWorkQueueCapsuleExecutors(ctx context.Context) (f
 }
 
 type capsuleQueueClient struct {
-	binding webconfig.WorkQueueExecutorBinding
+	binding    webconfig.WorkQueueExecutorBinding
+	bundleRoot string
+	readWIP    func(context.Context, ci.Config, string, string) ([]byte, error)
 }
 
 func (c capsuleQueueClient) Dispatch(ctx context.Context, raw json.RawMessage) (workqueue.CapsuleResult, error) {
@@ -101,6 +107,10 @@ func (c capsuleQueueClient) Status(ctx context.Context, runRef string) (workqueu
 	if run.Result.Terminal {
 		return c.project(run.Result)
 	}
+	cfg, err := ci.Load(c.binding.ProjectRoot)
+	if err != nil {
+		return workqueue.CapsuleResult{}, err
+	}
 	controller, pipeline, authority, err := capsuleCIExecutionController(ctx, c.binding.ProjectRoot, run)
 	if err != nil {
 		return workqueue.CapsuleResult{}, err
@@ -125,6 +135,16 @@ func (c capsuleQueueClient) Status(ctx context.Context, runRef string) (workqueu
 			return workqueue.CapsuleResult{}, err
 		}
 		verdict = ci.NormalizeVerdict(verdict)
+		if err := ci.ValidateVerdict(verdict, run.Result.Envelope, pipeline.Result); err != nil {
+			return workqueue.CapsuleResult{}, err
+		}
+		executionID := status.ExecutionID
+		if executionID == "" {
+			executionID = status.Result.ExecutionID
+		}
+		if err := c.projectRetainedWIP(ctx, cfg, run.Result.Executor, executionID, &verdict); err != nil {
+			return workqueue.CapsuleResult{}, err
+		}
 		if err := ci.ValidateVerdict(verdict, run.Result.Envelope, pipeline.Result); err != nil {
 			return workqueue.CapsuleResult{}, err
 		}
@@ -160,4 +180,59 @@ func (c capsuleQueueClient) project(result ci.RunResult) (workqueue.CapsuleResul
 	}
 	out.BundleRef, out.BundleDigest, out.BundleKind = ref, digest, result.Verdict.Outputs[c.binding.BundleKindOutput]
 	return out, nil
+}
+
+// projectRetainedWIP replaces any Story-provided bundle claims with the bytes
+// that the worker has already durably mirrored under its execution identity.
+// The subsequent fenced queue completion runs the normal bundle validator,
+// which retains/canonicalizes this daemon-owned intake file (including the
+// PostgreSQL shared-retention path) before it becomes countable.
+func (c capsuleQueueClient) projectRetainedWIP(ctx context.Context, cfg ci.Config, executorName, executionID string, verdict *ci.Verdict) error {
+	if verdict == nil || verdict.Outcome != "passed" {
+		return nil
+	}
+	if strings.TrimSpace(c.binding.BundleRefOutput) == "" || strings.TrimSpace(c.binding.BundleDigestOutput) == "" {
+		return fmt.Errorf("capsule ci terminal bundle output names are not configured")
+	}
+	root := filepath.Clean(strings.TrimSpace(c.bundleRoot))
+	if !filepath.IsAbs(root) {
+		return fmt.Errorf("capsule ci retained WIP intake root is not absolute")
+	}
+	read := c.readWIP
+	if read == nil {
+		read = ci.ReadRetainedWIP
+	}
+	data, err := read(ctx, cfg, executorName, executionID)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(data)
+	ref, err := writeRetainedWIP(root, executionID, data)
+	if err != nil {
+		return err
+	}
+	if verdict.Outputs == nil {
+		verdict.Outputs = map[string]string{}
+	}
+	verdict.Outputs[c.binding.BundleRefOutput] = ref
+	verdict.Outputs[c.binding.BundleDigestOutput] = "sha256:" + hex.EncodeToString(digest[:])
+	if c.binding.BundleKindOutput != "" {
+		verdict.Outputs[c.binding.BundleKindOutput] = "git-bundle"
+	}
+	return nil
+}
+
+func writeRetainedWIP(root, executionID string, data []byte) (string, error) {
+	if strings.TrimSpace(executionID) == "" || strings.ContainsAny(executionID, "/\\") || executionID == "." || executionID == ".." || len(data) == 0 {
+		return "", fmt.Errorf("capsule ci retained WIP identity or bytes are unsafe")
+	}
+	dir := filepath.Join(root, "capsule-ci")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create retained WIP intake directory: %w", err)
+	}
+	path := filepath.Join(dir, executionID+".bundle")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write retained WIP intake: %w", err)
+	}
+	return filepath.ToSlash(filepath.Join("capsule-ci", executionID+".bundle")), nil
 }

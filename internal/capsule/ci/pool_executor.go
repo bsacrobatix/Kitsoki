@@ -480,6 +480,44 @@ var newPoolObjectStore = func(name string, sb SourceBucket) (objectstore.Store, 
 	return store, nil
 }
 
+// ReadRetainedWIP reads the one canonical WIP bundle exported by a completed
+// pool execution. The key is derived only from the provider execution ID; a
+// Story verdict cannot select an object or supply its digest. Callers must
+// retain and hash the returned bytes in their own durable authority before
+// making the execution countable.
+func ReadRetainedWIP(ctx context.Context, cfg Config, executorName, executionID string) ([]byte, error) {
+	executorName = strings.TrimSpace(executorName)
+	executionID = strings.TrimSpace(executionID)
+	if executorName == "" || executionID == "" || strings.ContainsAny(executionID, "/\\") || executionID == "." || executionID == ".." {
+		return nil, fmt.Errorf("capsule ci: retained WIP requires a safe executor and execution id")
+	}
+	remote, ok := cfg.Remotes[executorName]
+	if !ok || remote.Pool == nil || remote.Pool.SourceBucket == nil {
+		return nil, fmt.Errorf("capsule ci: executor %q has no pool output bucket", executorName)
+	}
+	store, err := newPoolObjectStore(executorName, *remote.Pool.SourceBucket)
+	if err != nil {
+		return nil, err
+	}
+	key := bucketsource.DefaultRunPrefix + "/" + executionID + "/wip/refs.bundle"
+	rc, meta, err := store.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: read retained WIP bundle %s: %w", key, err)
+	}
+	defer rc.Close()
+	if meta.Size <= 0 || meta.Size > executor.DefaultMaxBundleSize {
+		return nil, fmt.Errorf("capsule ci: retained WIP bundle %s has unsafe size %d", key, meta.Size)
+	}
+	data, err := io.ReadAll(io.LimitReader(rc, executor.DefaultMaxBundleSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: read retained WIP bundle %s: %w", key, err)
+	}
+	if int64(len(data)) != meta.Size || len(data) == 0 || int64(len(data)) > executor.DefaultMaxBundleSize {
+		return nil, fmt.Errorf("capsule ci: retained WIP bundle %s changed or has unsafe size", key)
+	}
+	return data, nil
+}
+
 var _ executor.Provider = (*poolProvider)(nil)
 var _ executor.PreparedAcceptor = (*poolProvider)(nil)
 var _ executor.DetachedStarter = (*poolProvider)(nil)

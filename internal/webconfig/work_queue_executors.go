@@ -13,20 +13,23 @@ import (
 // workspace/pipeline and worker placement. No queue payload can choose a
 // repository, source revision, workspace, story, executor, or output path.
 type WorkQueueExecutorBinding struct {
-	TargetApplication  string                          `yaml:"target_application"`
-	Queue              string                          `yaml:"queue"`
-	ProjectRoot        string                          `yaml:"project_root"`
-	WorkspaceID        string                          `yaml:"workspace_id"`
-	Pipeline           string                          `yaml:"pipeline"`
-	WorkerID           string                          `yaml:"worker_id"`
-	WorkerPolicy       string                          `yaml:"worker_policy"`
-	InputSchema        map[string]workqueue.InputField `yaml:"input_schema"`
-	BundleRefOutput    string                          `yaml:"bundle_ref_output"`
-	BundleDigestOutput string                          `yaml:"bundle_digest_output"`
-	BundleKindOutput   string                          `yaml:"bundle_kind_output,omitempty"`
-	MaxConcurrent      int                             `yaml:"max_concurrent"`
-	LeaseSeconds       int                             `yaml:"lease_seconds"`
-	PollSeconds        int                             `yaml:"poll_seconds"`
+	TargetApplication string                          `yaml:"target_application"`
+	Queue             string                          `yaml:"queue"`
+	ProjectRoot       string                          `yaml:"project_root"`
+	WorkspaceID       string                          `yaml:"workspace_id"`
+	Pipeline          string                          `yaml:"pipeline"`
+	WorkerID          string                          `yaml:"worker_id"`
+	WorkerPolicy      string                          `yaml:"worker_policy"`
+	InputSchema       map[string]workqueue.InputField `yaml:"input_schema"`
+	// Bundle*Output name the daemon-owned verdict projection written after it
+	// reads the worker's retained WIP bundle. They never authorize Story
+	// supplied bundle values.
+	BundleRefOutput    string `yaml:"bundle_ref_output"`
+	BundleDigestOutput string `yaml:"bundle_digest_output"`
+	BundleKindOutput   string `yaml:"bundle_kind_output,omitempty"`
+	MaxConcurrent      int    `yaml:"max_concurrent"`
+	LeaseSeconds       int    `yaml:"lease_seconds"`
+	PollSeconds        int    `yaml:"poll_seconds"`
 }
 
 func (cfg *WebConfig) resolveWorkQueueExecutors() error {

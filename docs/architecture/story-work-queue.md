@@ -188,11 +188,15 @@ choose a project, source revision, workspace, pipeline, provider, or output.
 The daemon persists the queue work reference to the remote CI run and execution
 identities before polling. After a restart, a newly leased worker reads that
 mapping and asks the durable executor for status; it never assumes an old
-process resumed. A passed pipeline must expose the configured terminal bundle
-outputs in its typed verdict. The executor maps those into the existing fenced
-work-queue receipt, and code work is still countable only after the daemon's
-bundle validator verifies the retained bytes and digest. Missing terminal
-outputs, invalid payloads, and unknown durable status fail closed.
+process resumed. For code work, the configured output names are daemon-owned
+projection keys, not Story claims: after a passed terminal run, the daemon
+reads only `runs/<execution-id>/wip/refs.bundle` from that pool's durable
+output bucket, hashes the observed bytes, stages them under the configured
+work-queue intake root, and overwrites those verdict keys. The fenced queue
+completion then runs the normal bundle validator, including PostgreSQL shared
+retention, before the receipt is countable. A missing WIP object, unsafe
+execution identity or bytes, invalid payload, and unknown durable status all
+fail closed; a Story-provided ref or digest is never trusted.
 
 ## Adjacent Runtime Services
 
