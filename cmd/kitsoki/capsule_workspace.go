@@ -339,8 +339,9 @@ func capsuleWorkspaceReconcileCmd() *cobra.Command {
 				Adopted: adoption.Adopted, Adoptable: true, CommitsAdopted: adoption.Commits,
 				Summary: adoption.Summary, Next: drift.Next(),
 			}
-			if !adoption.Adopted {
-				result.Next = drift.Next()
+			if adoption.Adopted {
+				// The drift is gone; point at what the operator wanted to do next.
+				result.Next = fmt.Sprintf("verify with: kitsoki capsule workspace status --id %s --json ; land with: kitsoki capsule promote --workspace %s", in.ID, in.ID)
 			}
 			if !jsonOut {
 				fmt.Fprintln(cmd.OutOrStdout(), result.Summary)
