@@ -54,6 +54,19 @@ type ProtectedIntegration struct {
 	// conflict_resolver; the running executable is used when empty.
 	KitsokiBin string
 	Headroom   headroom.Guard
+	// GitOpsEmbeddedResolver optionally resolves the git-ops
+	// conflict_resolver's app.yaml from the embedded kitsoki story library —
+	// consulted ONLY when the project carries no stories/git-ops/app.yaml of
+	// its own (project-local always wins; see runGitOpsResolver in
+	// resolver.go). Nil defaults to defaultGitOpsEmbeddedResolver, which
+	// materializes basestories' embedded library, the same mechanism
+	// internal/capsule/storylauncher.Launcher and basestories.DefaultResolver
+	// use to satisfy an `@kitsoki/<name>` import with no on-disk kitsoki
+	// checkout present. Tests inject a fake here instead of relying on the
+	// real embedded library (which may not be staged into the test binary —
+	// see basestories.ErrNotStaged) and to keep tests free of any real agent
+	// launch.
+	GitOpsEmbeddedResolver func(ctx context.Context) (string, error)
 }
 
 func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead []Candidate) (Speculation, error) {

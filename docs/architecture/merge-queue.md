@@ -109,16 +109,25 @@ materializes a conflict artifact and an integration instance:
   committed automatically and the train proceeds
   (`queue:disjoint-histories-merged-automatically` in evidence).
 - **Conflicts are resolved, not merely quarantined.** The queue first replays
-  recorded resolutions (`git rerere`), then drives the project's kitsoki
-  git-ops `conflict_resolver` agent (`stories/git-ops/app.yaml`) against the
-  integration instance in CodeAct mode. The agent is write-fenced (Read/Edit,
-  no git); the queue performs every git operation — staging, marker
-  verification, rerere recording, and the merge commit. A project-supplied
-  `ResolverCommand` overrides the git-ops launch for deterministic policies.
+  recorded resolutions (`git rerere`), then drives a kitsoki git-ops
+  `conflict_resolver` agent against the integration instance in CodeAct mode.
+  The app.yaml is resolved in two tiers, project-local always winning: the
+  project's own `stories/git-ops/app.yaml`, falling back — only when that is
+  absent — to the git-ops story in the embedded kitsoki story library
+  (`internal/basestories`, the same `@kitsoki/<name>` mechanism
+  `internal/capsule/storylauncher` uses). This gives a project that ships no
+  git-ops story of its own a working automatic resolver anyway. The agent is
+  write-fenced (Read/Edit, no git); the queue performs every git operation —
+  staging, marker verification, rerere recording, and the merge commit. A
+  project-supplied `ResolverCommand` overrides the git-ops launch for
+  deterministic policies.
 - **Outcomes are strictly classified.** Resolved → the train continues.
-  Conflicts remain (or no git-ops story exists) → `needs_conflict_input`,
+  Conflicts remain (or neither a project-local nor an embedded git-ops story
+  exists — `queue:git-ops-resolver-unavailable` in evidence, with the
+  specific reason spelled out rather than a bare tag) → `needs_conflict_input`,
   with the integration instance and continuation retained on disk. Launch
-  harness broken → `needs_input` immediately.
+  harness broken (including a broken embedded-fallback mechanism itself) →
+  `needs_input` immediately.
 
 ## WIP preservation: the protected checkout never blocks and never loses data
 

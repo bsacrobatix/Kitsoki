@@ -231,8 +231,13 @@ func TestProtectedIntegrationPersistsDivergedContinuationInsteadOfEjecting(t *te
 	if _, err := store.Submit(Submit{Branch: "agent/conflict", SHA: candidateSHA, Receipt: testReceipt(t, candidateSHA)}); err != nil {
 		t.Fatal(err)
 	}
+	// Neither a project-local stories/git-ops story nor the embedded-library
+	// fallback is configured here (the latter explicitly disabled): this test
+	// is about the continuation-persistence behavior, independent of whether
+	// an automatic resolver happens to be available — see resolver_test.go
+	// for the resolver-availability matrix itself.
 	state, err := store.Process(context.Background(), ProcessDeps{
-		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main", GitOpsEmbeddedResolver: func(context.Context) (string, error) { return "", nil }},
 		Gate:        ShellGate{Command: "git diff --check"},
 	})
 	if err != nil {
