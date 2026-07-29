@@ -31,8 +31,10 @@ model axis matters as much as the structure axis.
 ### The 2×4 factorial
 
 For each of 5 bugs we run a **2 (treatment) × 4 (candidate)** grid — up to
-**40 cells** — from the manifest
-[`tools/bugfix-bakeoff/bakeoff.yaml`](../../tools/bugfix-bakeoff/bakeoff.yaml).
+**40 cells** — from the per-project manifest
+[`tools/bugfix-bakeoff/external/projects/kitsoki/manifest.yaml`](../../tools/bugfix-bakeoff/external/projects/kitsoki/manifest.yaml)
+crossed with the candidate axis in
+[`tools/bugfix-bakeoff/external/candidates.yaml`](../../tools/bugfix-bakeoff/external/candidates.yaml).
 
 - **Structure axis (treatment).** `kitsoki` drives the
   [`bugfix`](../../stories/bugfix/) story (the seven-room
@@ -189,8 +191,9 @@ where a single prompt happened to land a correct fix unaided.
 ## 4. Reproducibility appendix
 
 - **Framework.** Everything lives at
-  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/) — manifest
-  ([`bakeoff.yaml`](../../tools/bugfix-bakeoff/bakeoff.yaml)), per-cell
+  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/) — manifests
+  ([`external/projects/<name>/manifest.yaml`](../../tools/bugfix-bakeoff/external/projects/)
+  plus [`external/candidates.yaml`](../../tools/bugfix-bakeoff/external/candidates.yaml)), per-cell
   prepare/run, scoring (`score.py`, with adjudication +
   committed-work-aware compliance + format-agnostic cost), aggregation
   (`aggregate.py`), the result contract

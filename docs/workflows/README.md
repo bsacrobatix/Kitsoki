@@ -14,8 +14,8 @@ doesn't support it yet.
 | File a bug | [`file-a-bug.md`](file-a-bug.md) |
 | Fix a bug | [`fix-a-bug.md`](fix-a-bug.md) |
 
-These are the **canonical, gated** references (WS-G G3 of
-[`.context/dev-workflows-surface-matrix-plan.md`](../../.context/dev-workflows-surface-matrix-plan.md)):
+These are the **canonical, gated** references (WS-G G3 of the dev-workflows
+surface matrix):
 the eventual docs-fidelity check drives a persona through a workflow using
 **only** the doc below, no repo spelunking — so a stale claim here is a
 seeded gate failure, not a hygiene nit. Each doc:

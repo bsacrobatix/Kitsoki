@@ -8,9 +8,9 @@ friction report. The identical tool family also mounts on the
 [studio server](mcp-studio.md) (`kitsoki mcp`) so a human's Claude Code
 session gets `mcp__kitsoki__graph.*` beside the story/vcs tools. This
 document is the server-wide invariants companion to `mcp-studio.md`: budgets,
-error codes, the actor ceiling, and the catalog-binding model — see
-[`docs/proposals/graph-mcp.md`](../proposals/graph-mcp.md) for the full design
-rationale and work-plan history (P1–P6).
+error codes, the actor ceiling, and the catalog-binding model. It is now the
+authoritative design reference; the P1–P6 proposal it grew out of has been
+retired into this doc and [`graph-storage.md`](graph-storage.md).
 
 Implementation: [`internal/mcp/graphsrv/`](../../internal/mcp/graphsrv/)
 (server, tools, budgets, error vocabulary, feedback sinks) and
@@ -440,5 +440,5 @@ local sink already triggers (always, on every call, regardless of mode).
 - [`cmd/kitsoki/mcp.go`](../../cmd/kitsoki/mcp.go) — `kitsoki mcp`'s
   `--catalog`/`--graph-scope`/`--graph-steward`/`--graph-actor`/
   `--graph-feedback-sink`/`--graph-write-via` flags.
-- [`docs/proposals/graph-mcp.md`](../proposals/graph-mcp.md) — the full plan,
-  design rationale, and P1–P6 work-plan history.
+- [`docs/architecture/graph-storage.md`](graph-storage.md) — the storage and
+  catalog-binding model this server enforces.
