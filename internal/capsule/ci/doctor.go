@@ -250,11 +250,19 @@ func (d Doctor) checkWorkspace(ctx context.Context, req DoctorRequest, add func(
 		return inspection, false
 	}
 	if inspection.Dirty {
-		add(DoctorCheck{ID: "workspace", Outcome: "failed", Summary: "Workspace contains uncommitted or untracked changes", Details: details, Remedies: []string{"commit or remove workspace changes before CI so the source digest is complete"}})
+		add(DoctorCheck{ID: "workspace", Outcome: "failed", Summary: "Workspace contains uncommitted or untracked changes, so the CI source digest would not describe the full tree", Details: details, Remedies: []string{
+			fmt.Sprintf("commit them with git (supported), then run: kitsoki capsule workspace reconcile --id %s", req.Workspace.ID),
+			fmt.Sprintf("or let Capsule commit them: kitsoki capsule workspace commit --id %s --message \"<message>\"", req.Workspace.ID),
+			"or remove the stray files if they are not part of the change",
+		}})
 		return inspection, false
 	}
 	if req.Workspace.Head == "" || inspection.Head != req.Workspace.Head {
-		add(DoctorCheck{ID: "workspace", Outcome: "failed", Summary: "Live workspace HEAD does not match the managed instance source HEAD", Details: details, Remedies: []string{"refresh workspace status/source metadata or recreate the workspace from the intended ref"}})
+		add(DoctorCheck{ID: "workspace", Outcome: "failed", Summary: fmt.Sprintf("Registered Capsule head %q is not the workspace's live git HEAD %q, so CI would run the wrong source", req.Workspace.Head, inspection.Head), Details: details, Remedies: []string{
+			fmt.Sprintf("if you committed with git (this is the supported path), adopt it: kitsoki capsule workspace reconcile --id %s", req.Workspace.ID),
+			fmt.Sprintf("diagnose the exact relationship first: kitsoki capsule workspace status --id %s --json", req.Workspace.ID),
+			"reconcile refuses a rewrite (reset/rebase/amend) and names it; recover those commits or recreate the workspace",
+		}})
 		return inspection, false
 	}
 	add(DoctorCheck{ID: "workspace", Outcome: "passed", Summary: "Managed workspace is clean and source HEAD is current", Details: details})

@@ -27,7 +27,7 @@ var (
 // letting any onboarded project use the native manager directly.
 func capsuleWorkspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "workspace", Short: "Create and manage native Capsule workspaces"}
-	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceCreateScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd(), capsuleWorkspacePurgeCmd())
+	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceCreateScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceReconcileCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd(), capsuleWorkspacePurgeCmd())
 	return cmd
 }
 
@@ -234,25 +234,43 @@ func capsuleWorkspaceStatusCmd() *cobra.Command {
 func capsuleWorkspaceCommitCmd() *cobra.Command {
 	var project, id, message string
 	var jsonOut bool
-	cmd := &cobra.Command{Use: "commit", Short: "Commit all local workspace changes", RunE: func(cmd *cobra.Command, args []string) error {
-		m, err := capsuleWorkspaceManager(project)
-		if err != nil {
-			return err
-		}
-		in, err := m.Instances.Get(cmd.Context(), id)
-		if err != nil {
-			return err
-		}
-		h, err := m.CommitVCS(cmd.Context(), control.Handle{ID: in.ID, Generation: in.Generation}, message)
-		if err != nil {
-			return err
-		}
-		view, err := capsuleWorkspaceView(cmd.Context(), m, h)
-		if err != nil {
-			return err
-		}
-		return capsuleWorkspaceWrite(cmd, view, jsonOut)
-	}}
+	cmd := &cobra.Command{
+		Use:   "commit",
+		Short: "Commit local workspace changes and reconcile the registered head with git",
+		Long: "Commit outstanding working-tree changes in a managed Capsule workspace.\n\n" +
+			"Committing with plain `git commit` inside the workspace is fully supported.\n" +
+			"When there is nothing left to stage but git HEAD has advanced past the\n" +
+			"registered head with a clean tree, this command adopts that head and reports\n" +
+			"what it adopted. It refuses only when there is genuinely nothing to do, or\n" +
+			"when adopting would drop commits Capsule had already registered.",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := capsuleWorkspaceManager(project)
+			if err != nil {
+				return err
+			}
+			in, err := m.Instances.Get(cmd.Context(), id)
+			if err != nil {
+				return err
+			}
+			result, err := m.CommitVCSResult(cmd.Context(), control.Handle{ID: in.ID, Generation: in.Generation}, message)
+			if err != nil {
+				return err
+			}
+			view, err := capsuleWorkspaceView(cmd.Context(), m, result.Handle)
+			if err != nil {
+				return err
+			}
+			view.Committed = result.Committed
+			view.Adopted = result.Adopted
+			view.PreviousHead = result.Previous
+			view.CommitsAdopted = result.Commits
+			view.Summary = result.Summary
+			if !jsonOut {
+				fmt.Fprintln(cmd.OutOrStdout(), result.Summary)
+			}
+			return capsuleWorkspaceWrite(cmd, view, jsonOut)
+		}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&id, "id", "", "workspace id")
 	cmd.Flags().StringVar(&message, "message", "", "commit message")
@@ -260,6 +278,92 @@ func capsuleWorkspaceCommitCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("message")
 	return cmd
+}
+
+// capsuleWorkspaceReconcileCmd is the deliberate operator path for absorbing
+// raw `git commit` work into the Capsule registered head. It never creates a
+// commit and never touches the working tree, so it is safe to run at any time
+// to answer "why won't this promote?".
+func capsuleWorkspaceReconcileCmd() *cobra.Command {
+	var project, id string
+	var jsonOut, dryRun bool
+	cmd := &cobra.Command{
+		Use:   "reconcile",
+		Short: "Adopt a workspace head that advanced via raw git into the Capsule registered head",
+		Long: "Reconcile the Capsule registered head with the workspace's live git HEAD.\n\n" +
+			"Adoption requires a clean working tree and a git HEAD that is a strict\n" +
+			"descendant of the registered head, so no registered commit can be dropped.\n" +
+			"A rewrite (reset, rebase, amend) is refused loudly and named. Reconciling\n" +
+			"records provenance only: it never runs a gate and never marks work validated,\n" +
+			"so promotion still requires its own Capsule CI receipt.",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := capsuleWorkspaceManager(project)
+			if err != nil {
+				return err
+			}
+			in, err := m.Instances.Get(cmd.Context(), id)
+			if err != nil {
+				return err
+			}
+			handle := control.Handle{ID: in.ID, Generation: in.Generation}
+			if dryRun {
+				drift, err := m.InspectHead(cmd.Context(), handle)
+				if err != nil {
+					return err
+				}
+				return capsuleWorkspaceWrite(cmd, capsuleWorkspaceReconcileResult{
+					Schema: "capsule-workspace-reconcile/v1", ID: in.ID, Generation: in.Generation,
+					Relation: string(drift.Relation), RegisteredHead: drift.RegisteredHead, GitHead: drift.GitHead,
+					Branch: drift.Branch, Dirty: drift.Dirty, Ahead: drift.Ahead, Behind: drift.Behind,
+					Adoptable: drift.Relation.Adoptable() && !drift.Dirty,
+					Summary:   drift.Explain(), Next: drift.Next(),
+				}, jsonOut)
+			}
+			adoption, err := m.AdoptHead(cmd.Context(), handle)
+			if err != nil {
+				return err
+			}
+			drift := adoption.Drift
+			result := capsuleWorkspaceReconcileResult{
+				Schema: "capsule-workspace-reconcile/v1", ID: in.ID, Generation: adoption.Handle.Generation,
+				Relation: string(drift.Relation), RegisteredHead: adoption.Previous, GitHead: adoption.Head,
+				Branch: drift.Branch, Dirty: drift.Dirty, Ahead: drift.Ahead, Behind: drift.Behind,
+				Adopted: adoption.Adopted, Adoptable: true, CommitsAdopted: adoption.Commits,
+				Summary: adoption.Summary, Next: drift.Next(),
+			}
+			if !adoption.Adopted {
+				result.Next = drift.Next()
+			}
+			if !jsonOut {
+				fmt.Fprintln(cmd.OutOrStdout(), result.Summary)
+			}
+			return capsuleWorkspaceWrite(cmd, result, jsonOut)
+		}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&id, "id", "", "workspace id")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "diagnose drift without changing the registered head")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
+type capsuleWorkspaceReconcileResult struct {
+	Schema         string `json:"schema"`
+	ID             string `json:"id"`
+	Generation     uint64 `json:"generation"`
+	Relation       string `json:"relation"`
+	RegisteredHead string `json:"registered_head,omitempty"`
+	GitHead        string `json:"git_head,omitempty"`
+	Branch         string `json:"branch,omitempty"`
+	Dirty          bool   `json:"dirty"`
+	Ahead          int    `json:"ahead,omitempty"`
+	Behind         int    `json:"behind,omitempty"`
+	Adoptable      bool   `json:"adoptable"`
+	Adopted        bool   `json:"adopted"`
+	CommitsAdopted int    `json:"commits_adopted,omitempty"`
+	Summary        string `json:"summary"`
+	Next           string `json:"next"`
 }
 
 func capsuleWorkspaceIntegrateCmd() *cobra.Command {
@@ -341,6 +445,26 @@ type capsuleWorkspaceViewResult struct {
 	Branch       string        `json:"branch,omitempty"`
 	State        control.State `json:"state"`
 	Owner        string        `json:"owner"`
+
+	// Head drift. `head` is what Capsule has registered; `git_head` is what the
+	// workspace's git actually points at. They diverge whenever an agent uses
+	// plain `git commit`, which is supported — `relation`/`next` say how to
+	// reconcile without reading Go source.
+	GitHead   string `json:"git_head,omitempty"`
+	Relation  string `json:"relation,omitempty"`
+	Dirty     bool   `json:"dirty,omitempty"`
+	Ahead     int    `json:"ahead,omitempty"`
+	Behind    int    `json:"behind,omitempty"`
+	Drifted   bool   `json:"drifted,omitempty"`
+	Diagnosis string `json:"diagnosis,omitempty"`
+	Next      string `json:"next,omitempty"`
+
+	// Populated by commit/reconcile to report what was actually absorbed.
+	Committed      bool   `json:"committed,omitempty"`
+	Adopted        bool   `json:"adopted,omitempty"`
+	PreviousHead   string `json:"previous_head,omitempty"`
+	CommitsAdopted int    `json:"commits_adopted,omitempty"`
+	Summary        string `json:"summary,omitempty"`
 }
 
 type capsuleWorkspaceIntegrationResult struct {
@@ -514,7 +638,7 @@ func capsuleWorkspaceView(ctx context.Context, manager *control.Manager, handle 
 	if err != nil {
 		return capsuleWorkspaceViewResult{}, err
 	}
-	return capsuleWorkspaceViewResult{
+	view := capsuleWorkspaceViewResult{
 		ID:           in.ID,
 		Generation:   in.Generation,
 		DefinitionID: in.DefinitionID,
@@ -525,7 +649,23 @@ func capsuleWorkspaceView(ctx context.Context, manager *control.Manager, handle 
 		Branch:       in.Branch,
 		State:        in.State,
 		Owner:        in.Lease.Owner,
-	}, nil
+	}
+	// Drift reporting is best effort: a workspace that is not a git checkout
+	// (or is mid-materialization) must still return its lifecycle view.
+	if drift, err := manager.InspectHead(ctx, control.Handle{ID: in.ID, Generation: in.Generation}); err == nil {
+		view.GitHead = drift.GitHead
+		view.Relation = string(drift.Relation)
+		view.Dirty = drift.Dirty
+		view.Ahead = drift.Ahead
+		view.Behind = drift.Behind
+		view.Drifted = drift.Relation != control.HeadInSync
+		view.Diagnosis = drift.Explain()
+		view.Next = drift.Next()
+		if drift.Branch != "" {
+			view.Branch = drift.Branch
+		}
+	}
+	return view, nil
 }
 
 func projectRelativeWorkspacePath(projectRoot, workspacePath string) (string, error) {

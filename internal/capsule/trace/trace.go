@@ -17,6 +17,7 @@ const (
 	KindWorkspaceFailed        = "capsule.workspace.failed"
 	KindWorkspaceChanged       = "capsule.workspace.changed"
 	KindWorkspaceCommitted     = "capsule.workspace.committed"
+	KindWorkspaceHeadAdopted   = "capsule.workspace.head_adopted"
 	KindWorkspaceIntegrated    = "capsule.workspace.integrated"
 	KindWorkspaceClosed        = "capsule.workspace.closed"
 
@@ -129,7 +130,7 @@ func ValidateEvent(event Event) error {
 		if event.PlanDigest == "" || event.Operation == "" || event.TargetRef == "" {
 			return fmt.Errorf("%s requires plan_digest, operation, and target_ref", event.Kind)
 		}
-	case KindWorkspaceMaterializing, KindWorkspaceReady, KindWorkspaceFailed, KindWorkspaceChanged, KindWorkspaceCommitted, KindWorkspaceIntegrated, KindWorkspaceClosed:
+	case KindWorkspaceMaterializing, KindWorkspaceReady, KindWorkspaceFailed, KindWorkspaceChanged, KindWorkspaceCommitted, KindWorkspaceHeadAdopted, KindWorkspaceIntegrated, KindWorkspaceClosed:
 		if event.InstanceID == "" {
 			return fmt.Errorf("%s requires instance_id", event.Kind)
 		}

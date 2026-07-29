@@ -109,6 +109,251 @@ type VCSStatus struct {
 	Porcelain string `json:"porcelain,omitempty"`
 }
 
+// HeadRelation classifies the live git HEAD of a managed workspace against the
+// head the Capsule control plane has registered for it.
+//
+// Agents inside a workspace commit with plain `git commit` — that is the
+// natural, supported thing to do — so the registered head routinely falls
+// behind the real branch. Capsule reconciles from git rather than demanding
+// its own commit verb, but only for the one relation that provably cannot drop
+// registered history: a fast-forward.
+type HeadRelation string
+
+const (
+	// HeadInSync means the registered head is exactly the live git HEAD.
+	HeadInSync HeadRelation = "in_sync"
+	// HeadAhead means git HEAD is a strict descendant of the registered head:
+	// ordinary `git commit` work, safe to adopt.
+	HeadAhead HeadRelation = "ahead"
+	// HeadBehind means the registered head is a strict descendant of git HEAD:
+	// the workspace was reset/rolled back below what Capsule recorded.
+	HeadBehind HeadRelation = "behind"
+	// HeadDiverged means neither head reaches the other: a rebase, amend, or
+	// force-move that would drop registered history if adopted silently.
+	HeadDiverged HeadRelation = "diverged"
+	// HeadMissing means the registered head commit is not present in the
+	// workspace object database at all.
+	HeadMissing HeadRelation = "missing"
+	// HeadUnregistered means no head was ever registered for this instance.
+	// There is no registered history to drop, so adoption is safe.
+	HeadUnregistered HeadRelation = "unregistered"
+)
+
+// Adoptable reports whether the live git HEAD can replace the registered head
+// without discarding any registered commit.
+func (r HeadRelation) Adoptable() bool { return r == HeadAhead || r == HeadUnregistered }
+
+// HeadDrift is the operator-facing diagnosis of registered head vs git HEAD.
+// It is deliberately printable: a person must be able to tell what state the
+// workspace is in, and what to run next, without reading Go source.
+type HeadDrift struct {
+	Handle         Handle       `json:"workspace"`
+	Path           string       `json:"-"`
+	Branch         string       `json:"branch,omitempty"`
+	RegisteredHead string       `json:"registered_head,omitempty"`
+	GitHead        string       `json:"git_head,omitempty"`
+	Relation       HeadRelation `json:"relation"`
+	Dirty          bool         `json:"dirty"`
+	Ahead          int          `json:"ahead,omitempty"`
+	Behind         int          `json:"behind,omitempty"`
+}
+
+// ErrHeadDiverged marks the one drift case that genuinely needs a human: the
+// live branch cannot be adopted without dropping commits Capsule registered.
+var ErrHeadDiverged = fmt.Errorf("capsule vcs: workspace head diverged from the registered head")
+
+// ErrNothingToCommit marks a workspace that is already fully reconciled: clean
+// tree, registered head equal to git HEAD. It is not a failure of the caller's
+// intent, it is "there is nothing left to do".
+var ErrNothingToCommit = fmt.Errorf("capsule vcs: nothing to commit")
+
+func shortSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	if sha == "" {
+		return "(unset)"
+	}
+	return sha
+}
+
+// Explain renders the WHAT/WHY/NEXT triple every refusal in this area owes the
+// operator.
+func (d HeadDrift) Explain() string {
+	switch d.Relation {
+	case HeadInSync:
+		return fmt.Sprintf("workspace %s is in sync: registered head %s equals git HEAD, and the tree is clean", d.Handle.ID, shortSHA(d.RegisteredHead))
+	case HeadAhead:
+		return fmt.Sprintf("workspace %s advanced via git: registered head %s -> git HEAD %s (%d commit(s) ahead)", d.Handle.ID, shortSHA(d.RegisteredHead), shortSHA(d.GitHead), d.Ahead)
+	case HeadUnregistered:
+		return fmt.Sprintf("workspace %s has no registered head; git HEAD is %s", d.Handle.ID, shortSHA(d.GitHead))
+	case HeadBehind:
+		return fmt.Sprintf("workspace %s moved BACKWARDS: git HEAD %s is an ancestor of registered head %s (%d registered commit(s) would be dropped)", d.Handle.ID, shortSHA(d.GitHead), shortSHA(d.RegisteredHead), d.Behind)
+	case HeadDiverged:
+		return fmt.Sprintf("workspace %s DIVERGED: registered head %s and git HEAD %s share no fast-forward path (%d registered commit(s) would be dropped, %d local commit(s) are unregistered) — this is a rebase, amend, or reset, not ordinary git commit work", d.Handle.ID, shortSHA(d.RegisteredHead), shortSHA(d.GitHead), d.Behind, d.Ahead)
+	case HeadMissing:
+		return fmt.Sprintf("workspace %s cannot be reconciled: registered head %s is not present in the workspace object database (git HEAD is %s)", d.Handle.ID, shortSHA(d.RegisteredHead), shortSHA(d.GitHead))
+	default:
+		return fmt.Sprintf("workspace %s head relation is %s", d.Handle.ID, d.Relation)
+	}
+}
+
+// Next is the exact command an operator should run for this state.
+func (d HeadDrift) Next() string {
+	switch d.Relation {
+	case HeadAhead, HeadUnregistered:
+		if d.Dirty {
+			return fmt.Sprintf("commit or discard the remaining working-tree changes, then run: kitsoki capsule workspace reconcile --id %s", d.Handle.ID)
+		}
+		return fmt.Sprintf("run: kitsoki capsule workspace reconcile --id %s", d.Handle.ID)
+	case HeadInSync:
+		if d.Dirty {
+			return fmt.Sprintf("run: kitsoki capsule workspace commit --id %s --message \"<message>\" (or commit with git, then reconcile)", d.Handle.ID)
+		}
+		return fmt.Sprintf("nothing to reconcile; inspect with: kitsoki capsule workspace status --id %s --json", d.Handle.ID)
+	case HeadBehind, HeadDiverged, HeadMissing:
+		return fmt.Sprintf("inspect the divergence with: git -C <workspace> log --oneline --left-right %s...%s ; recover the registered commits, or recreate the workspace. Capsule will not adopt a head that drops registered history", shortSHA(d.RegisteredHead), shortSHA(d.GitHead))
+	default:
+		return fmt.Sprintf("inspect with: kitsoki capsule workspace status --id %s --json", d.Handle.ID)
+	}
+}
+
+func (d HeadDrift) refusal(action string) error {
+	return fmt.Errorf("%w: %s: %s; %s", ErrHeadDiverged, action, d.Explain(), d.Next())
+}
+
+// InspectHead diagnoses registered head vs live git HEAD. It performs no
+// mutation and requires no effect grant: diagnosis must always be available,
+// especially in the states where an action would be refused.
+func (m *Manager) InspectHead(ctx context.Context, h Handle) (HeadDrift, error) {
+	in, err := m.Status(ctx, h)
+	if err != nil {
+		return HeadDrift{}, err
+	}
+	path, err := m.WorkspacePath(ctx, h)
+	if err != nil {
+		return HeadDrift{}, err
+	}
+	return m.inspectHeadAt(ctx, Handle{ID: in.ID, Generation: in.Generation}, path, strings.TrimSpace(in.Head))
+}
+
+func (m *Manager) inspectHeadAt(ctx context.Context, h Handle, path, registered string) (HeadDrift, error) {
+	drift := HeadDrift{Handle: h, Path: path, RegisteredHead: registered}
+	head, err := git(ctx, path, "rev-parse", "HEAD")
+	if err != nil {
+		return HeadDrift{}, err
+	}
+	drift.GitHead = strings.TrimSpace(head)
+	if branch, err := git(ctx, path, "branch", "--show-current"); err == nil {
+		drift.Branch = strings.TrimSpace(branch)
+	}
+	porcelain, err := git(ctx, path, "status", "--porcelain")
+	if err != nil {
+		return HeadDrift{}, err
+	}
+	drift.Dirty = strings.TrimSpace(porcelain) != ""
+
+	switch {
+	case registered == "":
+		drift.Relation = HeadUnregistered
+		return drift, nil
+	case registered == drift.GitHead:
+		drift.Relation = HeadInSync
+		return drift, nil
+	}
+	if _, err := git(ctx, path, "cat-file", "-e", registered+"^{commit}"); err != nil {
+		drift.Relation = HeadMissing
+		return drift, nil
+	}
+	counts, err := git(ctx, path, "rev-list", "--left-right", "--count", registered+"..."+drift.GitHead)
+	if err != nil {
+		return HeadDrift{}, err
+	}
+	fields := strings.Fields(counts)
+	if len(fields) == 2 {
+		fmt.Sscanf(fields[0], "%d", &drift.Behind)
+		fmt.Sscanf(fields[1], "%d", &drift.Ahead)
+	}
+	switch {
+	case drift.Behind == 0 && drift.Ahead > 0:
+		drift.Relation = HeadAhead
+	case drift.Ahead == 0 && drift.Behind > 0:
+		drift.Relation = HeadBehind
+	default:
+		drift.Relation = HeadDiverged
+	}
+	return drift, nil
+}
+
+// AdoptHeadResult reports exactly what AdoptHead did, so callers can say so out
+// loud instead of silently mutating registered state.
+type AdoptHeadResult struct {
+	Handle   Handle    `json:"workspace"`
+	Drift    HeadDrift `json:"drift"`
+	Adopted  bool      `json:"adopted"`
+	Previous string    `json:"previous_head,omitempty"`
+	Head     string    `json:"head,omitempty"`
+	Commits  int       `json:"commits_adopted,omitempty"`
+	Summary  string    `json:"summary"`
+}
+
+// AdoptHead reconciles the registered head forward to the live git HEAD.
+//
+// Safety properties, all preserved and none of them optional:
+//   - the working tree must be clean (nothing uncommitted is ever adopted, so
+//     the adopted head always describes the full source),
+//   - the live HEAD must be a strict descendant of the registered head, so no
+//     registered commit can be dropped,
+//   - a rewrite (behind/diverged/missing registered commit) fails loudly and
+//     names the divergence.
+//
+// Adoption records provenance only. It never runs a gate and never marks work
+// validated: promotion admission still requires its own receipt.
+func (m *Manager) AdoptHead(ctx context.Context, h Handle) (AdoptHeadResult, error) {
+	if !m.Grant.Allows("effect", "vcs_commit") {
+		return AdoptHeadResult{}, fmt.Errorf("%w: vcs_commit", ErrDenied)
+	}
+	drift, err := m.InspectHead(ctx, h)
+	if err != nil {
+		return AdoptHeadResult{}, err
+	}
+	return m.adopt(ctx, drift)
+}
+
+func (m *Manager) adopt(ctx context.Context, drift HeadDrift) (AdoptHeadResult, error) {
+	if !drift.Relation.Adoptable() {
+		if drift.Relation == HeadInSync {
+			return AdoptHeadResult{
+				Handle:   drift.Handle,
+				Drift:    drift,
+				Previous: drift.RegisteredHead,
+				Head:     drift.GitHead,
+				Summary:  drift.Explain(),
+			}, nil
+		}
+		return AdoptHeadResult{}, drift.refusal("refusing to adopt workspace head")
+	}
+	if drift.Dirty {
+		return AdoptHeadResult{}, fmt.Errorf("capsule vcs: refusing to adopt workspace head: %s, but the working tree has uncommitted or untracked changes, so the adopted head would not describe the full source; %s", drift.Explain(), drift.Next())
+	}
+	handle, err := m.markWith(ctx, drift.Handle, StateCommitted, "capsule.workspace.head_adopted", func(in *Instance) {
+		in.Head = drift.GitHead
+	})
+	if err != nil {
+		return AdoptHeadResult{}, err
+	}
+	return AdoptHeadResult{
+		Handle:   handle,
+		Drift:    drift,
+		Adopted:  true,
+		Previous: drift.RegisteredHead,
+		Head:     drift.GitHead,
+		Commits:  drift.Ahead,
+		Summary:  fmt.Sprintf("registered head advanced %s -> %s, %d commit(s) adopted", shortSHA(drift.RegisteredHead), shortSHA(drift.GitHead), drift.Ahead),
+	}, nil
+}
+
 func (m *Manager) ReadFile(ctx context.Context, h Handle, relative string) ([]byte, error) {
 	path, err := m.resolve(ctx, h, relative, true)
 	if err != nil {
@@ -420,33 +665,95 @@ func (m *Manager) DiffVCS(ctx context.Context, h Handle) (string, error) {
 	}
 	return git(ctx, path, "diff", "--no-ext-diff", "HEAD")
 }
+
+// CommitResult reports what CommitVCS actually did. Committing new work and
+// adopting work that git already committed are both success, and both say so.
+type CommitResult struct {
+	Handle    Handle    `json:"workspace"`
+	Drift     HeadDrift `json:"drift"`
+	Committed bool      `json:"committed"`
+	Adopted   bool      `json:"adopted"`
+	Previous  string    `json:"previous_head,omitempty"`
+	Head      string    `json:"head,omitempty"`
+	Commits   int       `json:"commits_adopted,omitempty"`
+	Summary   string    `json:"summary"`
+}
+
+// CommitVCS is the handle-shaped wrapper kept for existing callers.
 func (m *Manager) CommitVCS(ctx context.Context, h Handle, message string) (Handle, error) {
+	result, err := m.CommitVCSResult(ctx, h, message)
+	if err != nil {
+		return Handle{}, err
+	}
+	return result.Handle, nil
+}
+
+// CommitVCSResult commits outstanding working-tree changes and reconciles the
+// registered head with git.
+//
+// Raw `git commit` inside a workspace is a first-class, supported path. An
+// agent that did the obvious thing gets its work adopted here, not an error:
+// when there is nothing left to stage but git HEAD has advanced past the
+// registered head with a clean tree, the head is adopted and reported. The
+// only remaining error states are (a) genuinely nothing to do, which says so,
+// and (b) a rewrite that would drop registered history, which fails loudly.
+func (m *Manager) CommitVCSResult(ctx context.Context, h Handle, message string) (CommitResult, error) {
 	if strings.TrimSpace(message) == "" {
-		return Handle{}, fmt.Errorf("capsule vcs: message is required")
+		return CommitResult{}, fmt.Errorf("capsule vcs: message is required")
 	}
 	if !m.Grant.Allows("effect", "vcs_commit") {
-		return Handle{}, fmt.Errorf("%w: vcs_commit", ErrDenied)
+		return CommitResult{}, fmt.Errorf("%w: vcs_commit", ErrDenied)
 	}
-	path, err := m.WorkspacePath(ctx, h)
+	drift, err := m.InspectHead(ctx, h)
 	if err != nil {
-		return Handle{}, err
+		return CommitResult{}, err
 	}
+	// Fail closed before touching the index: a rewrite must never be laundered
+	// into the registered head by layering one more commit on top of it.
+	if !drift.Relation.Adoptable() && drift.Relation != HeadInSync {
+		return CommitResult{}, drift.refusal("refusing to commit")
+	}
+	path := drift.Path
 	if _, err = git(ctx, path, "add", "-A"); err != nil {
-		return Handle{}, err
+		return CommitResult{}, err
 	}
-	if _, err = git(ctx, path, "diff", "--cached", "--quiet"); err == nil {
-		return Handle{}, fmt.Errorf("capsule vcs: no staged changes")
+	if _, err = git(ctx, path, "diff", "--cached", "--quiet"); err != nil {
+		if _, err = git(ctx, path, "commit", "--signoff", "-m", message); err != nil {
+			return CommitResult{}, err
+		}
+		head, err := git(ctx, path, "rev-parse", "HEAD")
+		if err != nil {
+			return CommitResult{}, err
+		}
+		head = strings.TrimSpace(head)
+		adopted := 0
+		if drift.RegisteredHead != "" {
+			if out, err := git(ctx, path, "rev-list", "--count", drift.RegisteredHead+".."+head); err == nil {
+				fmt.Sscanf(strings.TrimSpace(out), "%d", &adopted)
+			}
+		}
+		handle, err := m.markWith(ctx, drift.Handle, StateCommitted, "capsule.workspace.committed", func(in *Instance) {
+			in.Head = head
+		})
+		if err != nil {
+			return CommitResult{}, err
+		}
+		summary := fmt.Sprintf("committed working-tree changes; registered head advanced %s -> %s", shortSHA(drift.RegisteredHead), shortSHA(head))
+		if adopted > 1 {
+			summary = fmt.Sprintf("%s, %d commit(s) adopted (%d already existed from git)", summary, adopted, adopted-1)
+		}
+		return CommitResult{Handle: handle, Drift: drift, Committed: true, Adopted: adopted > 1, Previous: drift.RegisteredHead, Head: head, Commits: adopted, Summary: summary}, nil
 	}
-	if _, err = git(ctx, path, "commit", "--signoff", "-m", message); err != nil {
-		return Handle{}, err
+	// Nothing to stage. That is the normal outcome when the agent already
+	// committed with git; adopt what git recorded instead of refusing.
+	if drift.Relation.Adoptable() {
+		adoption, err := m.adopt(ctx, drift)
+		if err != nil {
+			return CommitResult{}, err
+		}
+		return CommitResult{Handle: adoption.Handle, Drift: drift, Adopted: adoption.Adopted, Previous: adoption.Previous, Head: adoption.Head, Commits: adoption.Commits, Summary: adoption.Summary}, nil
 	}
-	head, err := git(ctx, path, "rev-parse", "HEAD")
-	if err != nil {
-		return Handle{}, err
-	}
-	return m.markWith(ctx, h, StateCommitted, "capsule.workspace.committed", func(in *Instance) {
-		in.Head = strings.TrimSpace(head)
-	})
+	return CommitResult{}, fmt.Errorf("%w: %s; %s", ErrNothingToCommit, drift.Explain(), drift.Next())
 }
 
 // MarkIntegrated advances lifecycle only after a reconciler completed its

@@ -233,6 +233,24 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	if err != nil {
 		return capsulePromoteResult{}, err
 	}
+	// Absorb ordinary `git commit` work before readiness is judged. Agents in a
+	// workspace commit with git — that is the natural thing to do — and the
+	// registered head must follow git rather than the other way round. Adoption
+	// is strictly a fast-forward of provenance: the tree must be clean and the
+	// live HEAD must be a strict descendant of the registered head, so nothing
+	// unvalidated and nothing unregistered-by-rewrite can enter here. The CI
+	// receipt below is still required and is computed over the adopted head.
+	adoption, err := capsulePromoteReconcileHead(ctx, manager, handle)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	if adoption.Adopted {
+		instance, err = manager.Instances.Get(ctx, adoption.Handle.ID)
+		if err != nil {
+			return capsulePromoteResult{}, err
+		}
+		handle = control.Handle{ID: instance.ID, Generation: instance.Generation}
+	}
 	report, err := capsulePromoteDoctorCheck(ctx, root, opts.Pipeline, instance, workspacePath)
 	if err != nil {
 		return capsulePromoteResult{}, err
@@ -341,6 +359,35 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	out.ProtectedMainSHA = queued.ResultMainSHA
 	out.Status = PromoteStatusPromoted
 	return out, nil
+}
+
+// capsulePromoteReconcileHead adopts a workspace head that advanced through
+// raw git, so promotion admits the work an agent actually did.
+//
+// It deliberately does not weaken any admission property:
+//   - a dirty tree is NOT adopted here; it falls through to the doctor, which
+//     still refuses it, so a partially-committed workspace can never promote;
+//   - only a strict fast-forward is adopted, so no registered commit is ever
+//     silently dropped;
+//   - a rewrite (behind, diverged, or a registered head missing from the object
+//     database) fails loudly and names the divergence — that case needs a human;
+//   - the receipt/gate requirements downstream are untouched, and CI runs over
+//     the adopted head.
+func capsulePromoteReconcileHead(ctx context.Context, manager *control.Manager, handle control.Handle) (control.AdoptHeadResult, error) {
+	drift, err := manager.InspectHead(ctx, handle)
+	if err != nil {
+		return control.AdoptHeadResult{}, err
+	}
+	switch {
+	case drift.Relation == control.HeadInSync:
+		return control.AdoptHeadResult{Drift: drift, Summary: drift.Explain()}, nil
+	case !drift.Relation.Adoptable():
+		return control.AdoptHeadResult{}, fmt.Errorf("capsule promote: refusing to promote: %s; %s", drift.Explain(), drift.Next())
+	case drift.Dirty:
+		// Leave the typed not-ready doctor report to explain this.
+		return control.AdoptHeadResult{Drift: drift, Summary: drift.Explain()}, nil
+	}
+	return manager.AdoptHead(ctx, handle)
 }
 
 // capsulePromoteDoctorCheck runs the same bounded, no-spend readiness

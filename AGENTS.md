@@ -21,6 +21,31 @@ chmod the primary checkout except to repair the guard itself.
 See `docs/dev-workspaces.md` for the full lifecycle contract, metadata files,
 failure modes, recovery rules, and validation commands.
 
+**Committing with plain `git commit` inside a managed workspace is fully
+supported.** You do not have to learn a Capsule-specific commit verb to do
+normal work. The Capsule control plane reconciles *from* git, not the other way
+round:
+
+- `kitsoki capsule workspace commit --id <id> --message "<m>"` commits anything
+  still uncommitted, and if the tree is already clean it adopts the commits git
+  made, reporting `registered head advanced <old> -> <new>, N commit(s)
+  adopted`.
+- `kitsoki capsule workspace reconcile --id <id>` is the explicit adopt path
+  when you already committed everything with git. Add `--dry-run` to diagnose
+  without changing anything.
+- `kitsoki capsule workspace status --id <id> --json` reports `head` (what
+  Capsule registered) next to `git_head`, their `relation`, `dirty`, and a
+  `next` command. Start here whenever promotion complains about the head.
+- `kitsoki capsule promote` adopts a git-advanced head automatically before its
+  readiness preflight, so raw-git work promotes without a separate step.
+
+Adoption is provenance only and is deliberately narrow: it requires a clean
+working tree and a git HEAD that is a strict descendant of the registered head.
+It never runs a gate and never substitutes for a Capsule CI receipt. A rewrite
+(`reset`, `rebase`, `commit --amend`) that would drop commits Capsule already
+registered is refused loudly and named — recover those commits or recreate the
+workspace; do not force it.
+
 When a project needs a long-running task-oriented Kitsoki service, use
 `kitsoki daemon` rather than wrapping `kitsoki web` in a generic process
 manager. Daemon mode owns stable artifact-job IDs, SQLite session bindings,

@@ -210,3 +210,49 @@ func writeDoctorStory(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 }
+
+// Requirement 4: readiness refusals in this area must say WHAT they found, WHY
+// they refused, and WHAT to run next.
+func TestDoctorWorkspaceHeadDriftRefusalNamesTheReconcileCommand(t *testing.T) {
+	registered := "1111111111111111111111111111111111111111"
+	live := "2222222222222222222222222222222222222222"
+	var checks []DoctorCheck
+	doctor := Doctor{Workspace: stubWorkspaceProbe{inspection: WorkspaceInspection{Path: "/w", Head: live, Branch: "agent/x"}}}
+	inspection, ok := doctor.checkWorkspace(context.Background(), DoctorRequest{
+		Workspace:     control.Instance{ID: "ws-1", Generation: 3, State: control.StateReady, Head: registered},
+		WorkspacePath: "/w",
+	}, func(c DoctorCheck) { checks = append(checks, c) })
+	if ok || inspection.Head != live || len(checks) != 1 {
+		t.Fatalf("unexpected outcome ok=%t checks=%#v", ok, checks)
+	}
+	joined := checks[0].Summary + " || " + strings.Join(checks[0].Remedies, " | ")
+	for _, want := range []string{registered, live, "CI would run the wrong source", "kitsoki capsule workspace reconcile --id ws-1", "kitsoki capsule workspace status --id ws-1", "refuses a rewrite"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("head-drift refusal %q does not contain %q", joined, want)
+		}
+	}
+}
+
+func TestDoctorWorkspaceDirtyRefusalOffersBothCommitPaths(t *testing.T) {
+	head := "3333333333333333333333333333333333333333"
+	var checks []DoctorCheck
+	doctor := Doctor{Workspace: stubWorkspaceProbe{inspection: WorkspaceInspection{Path: "/w", Head: head, Dirty: true}}}
+	if _, ok := doctor.checkWorkspace(context.Background(), DoctorRequest{
+		Workspace:     control.Instance{ID: "ws-2", Generation: 1, State: control.StateReady, Head: head},
+		WorkspacePath: "/w",
+	}, func(c DoctorCheck) { checks = append(checks, c) }); ok {
+		t.Fatal("readiness admitted a dirty workspace")
+	}
+	joined := checks[0].Summary + " || " + strings.Join(checks[0].Remedies, " | ")
+	for _, want := range []string{"uncommitted or untracked changes", "commit them with git (supported)", "kitsoki capsule workspace reconcile --id ws-2", "kitsoki capsule workspace commit --id ws-2"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("dirty refusal %q does not contain %q", joined, want)
+		}
+	}
+}
+
+type stubWorkspaceProbe struct{ inspection WorkspaceInspection }
+
+func (s stubWorkspaceProbe) Inspect(context.Context, string) (WorkspaceInspection, error) {
+	return s.inspection, nil
+}

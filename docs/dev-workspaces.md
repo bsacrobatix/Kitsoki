@@ -87,6 +87,47 @@ work. Never rewrite a manifest to repair identity in place.
 `capsule ci` accepts only registered workspace ids, so an unregistered legacy
 clone cannot enter the CI or merge queue with false provenance.
 
+### Registered head vs git HEAD
+
+A registered Capsule tracks a *registered head*: the commit its identity, CI
+source digest, and promotion candidate are all bound to. Agents working inside
+a workspace commit with plain `git commit` — that is the natural thing to do and
+it is a supported path — so the registered head routinely falls behind the
+branch. Capsule reconciles from git rather than requiring its own commit verb.
+
+```sh
+# What does Capsule think the head is, and what does git say?
+go run ./cmd/kitsoki capsule workspace status --id change-1 --json
+
+# Adopt work that git already committed (clean tree, fast-forward only).
+go run ./cmd/kitsoki capsule workspace reconcile --id change-1
+go run ./cmd/kitsoki capsule workspace reconcile --id change-1 --dry-run   # diagnose only
+
+# Commit anything left over AND adopt earlier git commits in one step.
+go run ./cmd/kitsoki capsule workspace commit --id change-1 --message "<message>"
+```
+
+`status` reports `head` (registered), `git_head` (live), `relation`, `dirty`,
+`ahead`/`behind`, a plain-language `diagnosis`, and the exact `next` command.
+`relation` is one of:
+
+| relation | meaning | adoptable |
+| --- | --- | --- |
+| `in_sync` | registered head is git HEAD | nothing to do |
+| `ahead` | git HEAD is a strict descendant — ordinary `git commit` work | yes |
+| `unregistered` | no head recorded yet; no registered history to lose | yes |
+| `behind` | workspace was reset below the registered head | **no** |
+| `diverged` | rebase/amend/force-move; no fast-forward path | **no** |
+| `missing` | registered commit is absent from the object database | **no** |
+
+Adoption is provenance only. It requires a clean working tree (so the adopted
+head describes the complete source) and a strict fast-forward (so no registered
+commit can be dropped). It never runs a gate and never stands in for a Capsule
+CI receipt — promotion admission still requires its own receipt over the adopted
+head. `capsule promote` performs this adoption itself before its readiness
+preflight, so raw-git work promotes without a separate step; a rewrite is
+refused loudly, names both SHAs, and needs a human.
+
 ## Commands
 
 ### `create`
