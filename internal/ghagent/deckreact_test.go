@@ -28,9 +28,8 @@ func TestDeckID_StableAndSafe(t *testing.T) {
 	if got := DeckID("bsacrobatix/Kitsoki", "62"); got != "bsacrobatix-Kitsoki-62" {
 		t.Fatalf("DeckID = %q", got)
 	}
-	if DeckID("o/r", "62") != DeckID("o/r", "62") {
-		t.Fatal("DeckID must be stable")
-	}
+	// Stability is pinned by the exact-value assertion above; comparing
+	// DeckID(x) to DeckID(x) only restated that a pure function is pure.
 	if strings.ContainsAny(DeckID("a/../b", "1/2"), "/") {
 		t.Fatal("DeckID must be a single safe path segment")
 	}

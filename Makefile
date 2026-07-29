@@ -744,6 +744,36 @@ fix-tests:
 vet:
 	go vet ./...
 
+# staticcheck catches the correctness class `go vet` misses — dead assignments
+# that silently drop an error (SA4006), nil Context (SA1012), tautological
+# comparisons in tests (SA4000), empty branches (SA9003). It found a real
+# error-shadowing bug in reviewedfeedback and a vacuous ghagent test assertion
+# that had been green since they were written.
+#
+# Scope is deliberately the SA (correctness) class only. The S1/ST1 style
+# classes and U1000 (unused) are NOT gated: U1000 currently reports 41 symbols,
+# several of which belong to built-but-not-yet-wired subsystems
+# (internal/browserresearch, internal/capsule/runtime/qatarget, …) where
+# deletion is a product decision, not a lint fix. Run
+# `make staticcheck-full` to see the full report.
+#
+# SA1019 (deprecation) is excluded: go.starlark.net/starlarkjson and
+# tar.TypeRegA are live, working call sites; migrating them is its own change.
+# Pinned to v0.7.0, NOT the 2025.1.1 (v0.6.1) release: v0.6.1 panics with
+# "internal error: unhandled case *types.Signature" on this codebase's generics
+# (its own S1009 analyzer bug). staticcheck runs every analyzer regardless of
+# -checks and only filters the output, so the crash is not avoidable by
+# narrowing the check set.
+STATICCHECK_VERSION ?= v0.7.0
+STATICCHECK_CHECKS  ?= SA*,-SA1019
+staticcheck:
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) \
+		-checks '$(STATICCHECK_CHECKS)' ./...
+
+staticcheck-full:
+	@go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) \
+		-checks 'all,-ST1000,-ST1003,-ST1020,-ST1021,-ST1022,-S1009' ./... || true
+
 fmt:
 	go fmt ./...
 

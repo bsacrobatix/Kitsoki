@@ -179,10 +179,9 @@ func TestInboxClockInjection_SyntheticPollSyncsGitHubOnThrottle(t *testing.T) {
 	require.Equal(t, 2, *apiCalls, "second nearby inbox tick should not query GitHub again")
 
 	fakeClk.Advance(5 * time.Minute)
-	updated, cmd = m.Update(tuipkg.InboxPollMsg())
+	_, cmd = m.Update(tuipkg.InboxPollMsg())
 	require.NotNil(t, cmd)
 	_ = cmd()
-	m = updated
 	require.Equal(t, 4, *apiCalls, "tick after throttle interval should query GitHub again")
 }
 

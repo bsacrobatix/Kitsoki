@@ -43,8 +43,9 @@ func TestQuestionBuffer_SubscribeSeedsAtHeadAndStreamsTail(t *testing.T) {
 	sub := b.lookup(subID)
 	require.NotNil(t, sub)
 
-	frames, wm := b.since(sub.sent)
+	frames, _ := b.since(sub.sent)
 	assert.Empty(t, frames, "subscribe seeds at head; nothing pre-existing is replayed")
+	var wm int
 
 	b.append(questionFrame{QuestionID: "q-new", SessionID: "s1"})
 	frames, wm = b.since(sub.sent)

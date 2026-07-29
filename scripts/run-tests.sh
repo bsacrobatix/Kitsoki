@@ -2,9 +2,12 @@
 #
 # run-tests.sh — concise runner for the kitsoki non-browser test suite.
 #
-# Runs eight non-browser suites and NEVER bails early — every failure across all is
+# Runs nine non-browser suites and NEVER bails early — every failure across all is
 # collected before we exit:
 #   1. go test $KITSOKI_GO_TEST_FLAGS ./...
+#   1b. staticcheck                   (SA correctness class only — dropped
+#                                      errors, nil Context, tautological
+#                                      compares; see `make staticcheck`)
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
 #   3. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
 #                                      for each tracked stories/*/app.yaml)
@@ -117,6 +120,7 @@ run_timed() {
 GO_TIMEOUT_SECONDS=${KITSOKI_TEST_GO_TIMEOUT_SECONDS:-300}
 BUILD_TIMEOUT_SECONDS=${KITSOKI_TEST_BUILD_TIMEOUT_SECONDS:-120}
 STARLARK_TIMEOUT_SECONDS=${KITSOKI_TEST_STARLARK_TIMEOUT_SECONDS:-120}
+STATICCHECK_TIMEOUT_SECONDS=${KITSOKI_TEST_STATICCHECK_TIMEOUT_SECONDS:-600}
 FLOW_TIMEOUT_SECONDS=${KITSOKI_TEST_FLOW_TIMEOUT_SECONDS:-360}
 VITEST_TIMEOUT_SECONDS=${KITSOKI_TEST_VITEST_TIMEOUT_SECONDS:-240}
 FEATURES_TIMEOUT_SECONDS=${KITSOKI_TEST_FEATURES_TIMEOUT_SECONDS:-120}
@@ -124,6 +128,7 @@ MEDIA_TIMEOUT_SECONDS=${KITSOKI_TEST_MEDIA_TIMEOUT_SECONDS:-120}
 PYTHON_TIMEOUT_SECONDS=${KITSOKI_TEST_PYTHON_TIMEOUT_SECONDS:-300}
 
 go_failures=0
+staticcheck_failures=0
 starlark_failures=0
 flow_failures=0
 vitest_failures=0
@@ -250,6 +255,21 @@ go_failures=${#GO_FAILED_PKGS[@]}
 if [ "$go_rc" -ne 0 ] && [ "$go_failures" -eq 0 ]; then
 	go_failures=1
 fi
+
+# ---------------------------------------------------------------------------
+# Suite 1b: staticcheck (SA correctness class)
+# ---------------------------------------------------------------------------
+# `go vet` does not catch dead assignments that silently drop an error
+# (SA4006), nil Context (SA1012), tautological comparisons (SA4000), or empty
+# branches (SA9003). A real error-shadowing bug in reviewedfeedback's dispatch
+# resume and a vacuous ghagent assertion both sat green until this ran. Style
+# (S1/ST1) and unused-symbol (U1000) classes are deliberately NOT gated —
+# `make staticcheck-full` reports those non-blocking.
+section "staticcheck"
+run_timed "$STATICCHECK_TIMEOUT_SECONDS" "staticcheck" make --no-print-directory staticcheck >"$TMP/staticcheck.out" 2>&1
+staticcheck_rc=$?
+cat "$TMP/staticcheck.out" >>"$REPORT"
+[ "$staticcheck_rc" -ne 0 ] && staticcheck_failures=1
 
 # ---------------------------------------------------------------------------
 # Suite 2: Starlark static validation
@@ -439,7 +459,7 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 # ---------------------------------------------------------------------------
 # Console summary
 # ---------------------------------------------------------------------------
-total_failures=$((go_failures + starlark_failures + flow_failures + vitest_failures + features_failures + media_failures + mining_failures + python_policy_failures))
+total_failures=$((go_failures + staticcheck_failures + starlark_failures + flow_failures + vitest_failures + features_failures + media_failures + mining_failures + python_policy_failures))
 
 if [ "$total_failures" -eq 0 ]; then
 	printf '%s✓%s %s   %s%d packages%s\n' "$GREEN" "$RST" "$GO_TEST_LABEL" "$DIM" "$go_pkgs_total" "$RST"
@@ -492,6 +512,12 @@ if [ "$go_failures" -gt 0 ]; then
 		printf '%sgo test exited %d with no package-level failure (build error?):%s\n' "$RED" "$go_rc" "$RST"
 		sed 's/^/  /' "$TMP/go.stderr"
 	fi
+fi
+
+# --- staticcheck failures ---------------------------------------------------
+if [ "$staticcheck_failures" -gt 0 ]; then
+	printf '\n%s✗ staticcheck%s — SA (correctness) findings:\n' "$BOLD$RED" "$RST"
+	sed 's/^/  /' "$TMP/staticcheck.out"
 fi
 
 # --- Starlark failures ------------------------------------------------------

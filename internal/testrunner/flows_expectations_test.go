@@ -402,8 +402,6 @@ expect_no_errors: true
 	for _, r := range report.Results {
 		for _, tr := range r.Turns {
 			for _, f := range tr.Failures {
-				if filepath.Base(f) != f { // just ensure non-empty
-				}
 				if containsAny(f, "forbidden", "host.must_not_fire") {
 					sawForbidden = true
 				}

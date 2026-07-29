@@ -101,8 +101,9 @@ func TestIDECapture_RecordedInTrace(t *testing.T) {
 
 	t.Run("disconnected records nothing", func(t *testing.T) {
 		rm, sink := recordingCloakModel(t)
-		// No link set → not connected.
-		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		// No link set → not connected. The returned model is irrelevant here;
+		// the assertion is on what the call did (or did not) write to the sink.
+		_ = tuipkg.CaptureIDEAmbientForTest(rm)
 		require.Empty(t, idePayloadsFromSink(t, sink),
 			"a disconnected turn must not write an ide.context_captured event")
 	})

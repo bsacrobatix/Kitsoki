@@ -104,16 +104,12 @@ func TestGenerateUserDataEnvLinesSortedAndComplete(t *testing.T) {
 		t.Fatalf("GenerateUserData: %v", err)
 	}
 
-	envStart := strings.Index(script, "> /etc/kitsoki-worker/env")
-	if envStart == -1 {
+	if strings.Index(script, "> /etc/kitsoki-worker/env") == -1 {
 		t.Fatalf("expected env heredoc redirect")
 	}
-	envBlock := script[envStart:]
-	endMarkerIdx := strings.Index(envBlock, string(markerEnv)+"\n")
-	if endMarkerIdx == -1 {
-		// last block in file may not have trailing newline after marker; still find marker.
-		endMarkerIdx = strings.Index(envBlock[1:], string(markerEnv))
-	}
+	// The ordering loop below scans the whole script, so no env-block slicing is
+	// needed here (the previous envBlock/endMarkerIdx pair was computed and
+	// never read).
 
 	wantOrder := []string{
 		"KITSOKI_WORKER_TOKEN=tok-abc123",

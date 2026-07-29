@@ -75,7 +75,7 @@ func newStore(db *sql.DB, d dialect, opts ...Option) (*SQLStore, error) {
 	if d == sqlite {
 		db.SetMaxOpenConns(1)
 	}
-	stmts := []string{}
+	var stmts []string
 	if d == postgres {
 		stmts = []string{"CREATE SCHEMA IF NOT EXISTS workqueue", `CREATE TABLE IF NOT EXISTS workqueue.jobs (id TEXT PRIMARY KEY, application_id TEXT NOT NULL, queue_name TEXT NOT NULL, idempotency_key TEXT NOT NULL, payload BYTEA NOT NULL, payload_digest TEXT NOT NULL, capabilities JSONB NOT NULL, produces_code INTEGER NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, attempts INTEGER NOT NULL, max_attempts INTEGER NOT NULL, available_at BIGINT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at BIGINT, fence BIGINT NOT NULL DEFAULT 0, receipt JSONB, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, UNIQUE(application_id,queue_name,idempotency_key))`, `CREATE INDEX IF NOT EXISTS workqueue_claim ON workqueue.jobs(application_id,queue_name,state,available_at,priority DESC,created_at)`, `CREATE TABLE IF NOT EXISTS workqueue.capsule_dispatches (work_ref TEXT PRIMARY KEY, run_ref TEXT NOT NULL, execution_ref TEXT NOT NULL DEFAULT '', payload_digest TEXT NOT NULL)`}
 	} else {

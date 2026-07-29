@@ -234,13 +234,13 @@ func TestPromotionGateEnforcesReceiptSignaturePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := reconcile.Plan{Candidate: "sha256:candidate"}
-	if err := (PromotionGate{ProjectRoot: root}).Verify(nil, stored.Receipt.ReceiptID, plan); err == nil {
+	if err := (PromotionGate{ProjectRoot: root}).Verify(context.Background(), stored.Receipt.ReceiptID, plan); err == nil {
 		t.Fatal("unsigned verifier accepted signed-required policy without signer")
 	}
-	if err := (PromotionGate{ProjectRoot: root, Signer: receipt.FakeSigner{ID: "test-signer"}}).Verify(nil, stored.Receipt.ReceiptID, plan); err != nil {
+	if err := (PromotionGate{ProjectRoot: root, Signer: receipt.FakeSigner{ID: "test-signer"}}).Verify(context.Background(), stored.Receipt.ReceiptID, plan); err != nil {
 		t.Fatal(err)
 	}
-	if err := (PromotionGate{ProjectRoot: root, Signer: receipt.FakeSigner{ID: "wrong"}}).Verify(nil, stored.Receipt.ReceiptID, plan); err == nil {
+	if err := (PromotionGate{ProjectRoot: root, Signer: receipt.FakeSigner{ID: "wrong"}}).Verify(context.Background(), stored.Receipt.ReceiptID, plan); err == nil {
 		t.Fatal("wrong signer accepted")
 	}
 }
@@ -259,7 +259,7 @@ func TestPromotionGateRejectsAcceptedAttemptSubstitution(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := reconcile.Plan{Candidate: "sha256:candidate"}
-	if err := (PromotionGate{ProjectRoot: root}).Verify(nil, stored.Receipt.ReceiptID, plan); err == nil || !strings.Contains(err.Error(), "run record does not match receipt") {
+	if err := (PromotionGate{ProjectRoot: root}).Verify(context.Background(), stored.Receipt.ReceiptID, plan); err == nil || !strings.Contains(err.Error(), "run record does not match receipt") {
 		t.Fatalf("accepted substituted run record: %v", err)
 	}
 }

@@ -3,6 +3,7 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -48,7 +49,7 @@ func OpenScoped(root string, scope ScopeOptions) (*control.Manager, error) {
 		return nil, err
 	}
 	definitions := control.FileDefinitionStore{ProjectRoot: abs}
-	list, err := definitions.List(nil)
+	list, err := definitions.List(context.TODO())
 	if err != nil {
 		return nil, err
 	}

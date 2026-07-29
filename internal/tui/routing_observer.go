@@ -403,12 +403,10 @@ func isRoutingMsg(msg string) bool {
 
 // recordEvent appends a record to the per-turn ring, evicting the
 // oldest turn when the ring is full.
+// A non-positive turnNum is deliberately NOT special-cased: some events (e.g.
+// EvTurnCancelled at orchestrator shutdown) carry no turn number, and recording
+// them under turn=0 is what lets the overlay show "session-scope" entries.
 func (o *RoutingObserver) recordEvent(turnNum int64, ts time.Time, msg string, attrs map[string]any) {
-	if turnNum <= 0 {
-		// Some events (e.g. EvTurnCancelled at orchestrator shutdown)
-		// may not carry a turn number; still record under turn=0 so
-		// the overlay can show "session-scope" entries.
-	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	rt, ok := o.ring[turnNum]
