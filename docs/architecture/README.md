@@ -89,6 +89,10 @@ contributor commands.
   validation, areas, and initiatives.
 - [`repo-history-training.md`](repo-history-training.md) — manifest and
   promotion rule for repo-history training data.
+- [`qa-runtime-targeting.md`](qa-runtime-targeting.md) — lease-verified browser
+  targets for QA drivers and the typed infra-vs-product failure taxonomy behind
+  completion-state `health`. Substrate landed, not yet wired; the Python
+  harness still owns the live path.
 
 ## Guide Handoff
 
