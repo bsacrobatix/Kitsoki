@@ -38,11 +38,10 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 	var claimed Candidate
 	var ok bool
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, migrated, err := w.Store.read(path)
+		state, dirty, err := w.Store.readCompacted(path)
 		if err != nil {
 			return State{}, err
 		}
-		dirty := migrated
 		n := now(w.Deps)
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
@@ -329,7 +328,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 	var candidate Candidate
 	var ok bool
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, migrated, err := w.Store.read(path)
+		state, dirty, err := w.Store.readCompacted(path)
 		if err != nil {
 			return State{}, err
 		}
@@ -368,7 +367,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 			candidate, ok = *head, true
 			return state, write(path, state)
 		}
-		if migrated {
+		if dirty {
 			return state, write(path, state)
 		}
 		// An idle worker must be a read-only observer. Rewriting the whole

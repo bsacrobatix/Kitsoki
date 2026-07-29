@@ -607,11 +607,11 @@ func now(deps ProcessDeps) time.Time {
 func (s Store) readState() (State, error) {
 	var out State
 	_, err := s.withLock(func(path string) (State, error) {
-		state, migrated, err := s.read(path)
+		state, dirty, err := s.readCompacted(path)
 		if err != nil {
 			return State{}, err
 		}
-		if migrated {
+		if dirty {
 			if err := write(path, state); err != nil {
 				return State{}, err
 			}
@@ -955,6 +955,12 @@ func mustAbs(path string) string {
 }
 func write(path string, state State) error {
 	state = normalize(state)
+	// Every durable persist compacts terminal (landed/rejected) history down
+	// to DefaultTerminalHistoryLimit per status first — bounded retention
+	// runs on every save automatically, never as an operator command. Parked
+	// and actively-worked candidates are untouched: compactTerminalHistory
+	// only ever removes Landed or Rejected records.
+	state = compactTerminalHistory(state, DefaultTerminalHistoryLimit)
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
