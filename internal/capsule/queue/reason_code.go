@@ -49,9 +49,22 @@ const (
 	// any current code path.
 	ReasonSealMismatch ReasonCode = "seal-mismatch"
 
+	// ReasonResolverFailed: preparation (Integration.Speculate, which
+	// includes the queue's conflict-resolution stage — see resolver.go)
+	// returned a non-environmental, non-conflict error and the candidate is
+	// still within its bounded product-failure attempt budget (retry_wait).
+	// The still-retrying counterpart to ReasonResolverExhausted, exactly as
+	// ReasonGateFailed is the still-retrying counterpart to
+	// ReasonRepairerExhausted — nothing is exhausted yet, so the code must
+	// not say so.
+	ReasonResolverFailed ReasonCode = "resolver-failed"
+
 	// ReasonResolverExhausted: preparation (Integration.Speculate, which
 	// includes the queue's conflict-resolution stage — see resolver.go) kept
-	// failing until the bounded product-failure attempt budget ran out.
+	// failing until the bounded product-failure attempt budget actually ran
+	// out. Only ever assigned at the exhaustion transition itself
+	// (exhaustionReasonCode); a still-retrying speculation failure is
+	// ReasonResolverFailed instead.
 	ReasonResolverExhausted ReasonCode = "resolver-exhausted"
 
 	// ReasonRepairerExhausted: a configured Repairer kept being unable to
@@ -71,10 +84,14 @@ const (
 	// to be reached by any stage the queue currently produces.
 	ReasonBudgetExhausted ReasonCode = "budget-exhausted"
 
-	// ReasonEnvironmentDegraded: a transient-infrastructure failure streak
-	// (fetch/lock/workspace-create — see the EnvError/Environmental family)
-	// persisted past ProcessDeps.MaxEnvDuration without ever burning the
-	// product-failure attempt budget it is deliberately kept separate from.
+	// ReasonEnvironmentDegraded: a transient-infrastructure failure
+	// (fetch/lock/workspace-create — see the EnvError/Environmental family),
+	// deliberately kept off the product-failure attempt budget and tracked
+	// against its own wall-clock bound (ProcessDeps.MaxEnvDuration) instead.
+	// Used both while that environmental retry streak is still within bound
+	// (retry_wait) and once it has persisted past the bound (needs_human) —
+	// the failure is environmental either way, so the code does not change
+	// just because the wall-clock ran out; only the phase does.
 	ReasonEnvironmentDegraded ReasonCode = "environment-degraded"
 
 	// ReasonHarnessFailure: the queue's own machinery — a resolver, gate, or
@@ -96,13 +113,16 @@ const (
 	ReasonLegacyFreeform ReasonCode = "legacy-freeform"
 )
 
-// reasonCodeForStage maps a queue-internal, still-retrying stage tag (the
-// `reason` string retryOrPark/retryOrParkEnv are called with, e.g.
-// "gate_failed", "speculation_failed", "finalization_failed") to its typed
-// code. It is also used for the corresponding harness-free exhaustion case
-// via exhaustionReasonCode, which starts from this and only elevates to a
-// *-exhausted code where a distinct remediation subsystem was actually in
-// play.
+// reasonCodeForStage maps a queue-internal, still-retrying (not yet
+// exhausted) stage tag — the `reason` string retryOrPark/retryOrParkEnv stamp
+// while moving a candidate to retry_wait, e.g. "gate_failed",
+// "speculation_failed", "finalization_failed" — to its typed code. Every
+// branch here must describe a candidate that is merely retrying, nothing is
+// exhausted yet, so none of these may be a *-exhausted code: that is why
+// "speculation_failed" maps to ReasonResolverFailed here (the neutral,
+// still-retrying counterpart) rather than ReasonResolverExhausted (reserved
+// for exhaustionReasonCode below, the only place a bounded attempt budget
+// has actually run out).
 func reasonCodeForStage(stage string) ReasonCode {
 	switch stage {
 	case "gate_failed":
@@ -110,7 +130,7 @@ func reasonCodeForStage(stage string) ReasonCode {
 	case "finalization_failed":
 		return ReasonFinalizationFailed
 	case "speculation_failed":
-		return ReasonResolverExhausted
+		return ReasonResolverFailed
 	default:
 		return ReasonBudgetExhausted
 	}
@@ -120,13 +140,27 @@ func reasonCodeForStage(stage string) ReasonCode {
 // ran out on to its needs_human ReasonCode. hasRepairer reports whether
 // ProcessDeps.Repairer was configured for this run: a gate stage only earns
 // the more specific ReasonRepairerExhausted when a repairer actually had
-// attempts to exhaust.
+// attempts to exhaust. Deliberately does not delegate to reasonCodeForStage
+// for anything but the neutral, dual-purpose codes (gate/finalization):
+// unlike those, "speculation_failed" needs a different code once actually
+// exhausted (ReasonResolverExhausted) than while still retrying
+// (ReasonResolverFailed), so this stays an explicit switch rather than a
+// thin wrapper.
 func exhaustionReasonCode(stage string, hasRepairer bool) ReasonCode {
 	if strings.HasSuffix(stage, "_environment_degraded") {
 		return ReasonEnvironmentDegraded
 	}
-	if stage == "gate_failed" && hasRepairer {
-		return ReasonRepairerExhausted
+	switch stage {
+	case "gate_failed":
+		if hasRepairer {
+			return ReasonRepairerExhausted
+		}
+		return ReasonGateFailed
+	case "finalization_failed":
+		return ReasonFinalizationFailed
+	case "speculation_failed":
+		return ReasonResolverExhausted
+	default:
+		return ReasonBudgetExhausted
 	}
-	return reasonCodeForStage(stage)
 }

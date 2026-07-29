@@ -587,6 +587,16 @@ func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 		return
 	}
 	if strings.Contains(err.Error(), "continuation") {
+		// A NeedsConflictInput park is a human-actionable park just like
+		// NeedsHuman, so it now gets the same treatment: a typed code
+		// (ReasonMergeConflict) plus ParkedAt/ParkedBy. This is a deliberate
+		// side effect of this change beyond needs_human itself, not an
+		// accident — previously ParkedAt stayed zero for a conflict park, so
+		// Summarize's OldestParkedAge silently skipped these candidates
+		// (status.go) and Sweep could never classify one SweepStale, only
+		// ever SweepUnclassified (sweep.go) — an aging, unresolved conflict
+		// looked identical to a fresh one. Also adds a
+		// "merge_conflict_unresolved" key to RetryReasonCounts.
 		c.Phase, c.Status, c.ConflictContinuation = NeedsConflictInput, NeedsConflictInput, err.Error()
 		c.RetryReason, c.ReasonCode = "merge_conflict_unresolved", ReasonMergeConflict
 		c.ParkedAt, c.ParkedBy = now(w.Deps), "queue-worker"
@@ -651,7 +661,7 @@ func (w Worker) parkNoVerdict(c *Candidate, stage, cause string) {
 }
 
 // retryOrPark applies the bounded retry policy: requeue to the back of the
-// line under exponential backoff, or park as needs_input once attempts are
+// line under exponential backoff, or park as needs_human once attempts are
 // exhausted. Both outcomes are durable and human-recoverable (kick / resume /
 // override), so a failing candidate can delay only itself, never wedge the
 // train, and never spin unbounded.
@@ -724,7 +734,13 @@ func (w Worker) retryOrParkEnv(c *Candidate, reason string, cause error) {
 		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environment degraded for %s since %s; parked as needs_human", n.Sub(c.FirstEnvFailureAt).Round(time.Second), c.FirstEnvFailureAt.Format(time.RFC3339)))
 		return
 	}
-	c.Phase, c.Status, c.RetryReason, c.ReasonCode = RetryWait, RetryWait, reason, reasonCodeForStage(reason)
+	// This is an EnvError-driven retry, on the environmental budget that is
+	// deliberately kept separate from the product-failure one — the code
+	// must say so (ReasonEnvironmentDegraded), not reasonCodeForStage(reason)
+	// (which would stamp a product-failure code such as gate-failed for what
+	// is actually a transport/fetch/lock failure that merely happened
+	// during the gate stage).
+	c.Phase, c.Status, c.RetryReason, c.ReasonCode = RetryWait, RetryWait, reason, ReasonEnvironmentDegraded
 	c.RetryAt = n.Add(w.Deps.envRetryDelay())
 	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environmental failure (%s), retry %d, retry_at=%s", reason, c.EnvRetries, c.RetryAt.Format(time.RFC3339)))
 }

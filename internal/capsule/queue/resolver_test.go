@@ -283,7 +283,7 @@ func TestDefaultGitOpsEmbeddedResolverUsesRealEmbeddedLibrary(t *testing.T) {
 
 // A present-but-broken resolver harness parks immediately as needs_human:
 // burning bounded retries on a broken launch path would only delay the train.
-func TestBrokenGitOpsHarnessParksAsNeedsInputImmediately(t *testing.T) {
+func TestBrokenGitOpsHarnessParksAsNeedsHumanImmediately(t *testing.T) {
 	store, root, _ := conflictingCandidate(t)
 	appPath := filepath.Join(root, "stories", "git-ops", "app.yaml")
 	if err := os.MkdirAll(filepath.Dir(appPath), 0o755); err != nil {

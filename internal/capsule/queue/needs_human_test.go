@@ -220,6 +220,64 @@ func TestNhResumeMovesNeedsHumanBackToWorkableQueued(t *testing.T) {
 	}
 }
 
+// TestNhEvidenceRefPrefersGateLogOverFinalizationLogOverWorkspacePathOverID
+// pins requirement (2)'s evidence pointer: parkHuman must prefer the most
+// specific durable pointer available, in a fixed order (gate log,
+// finalization log, workspace path, candidate ID), not just "set something
+// non-empty". Each sub-case leaves only the fields at-or-after the expected
+// winner populated, so a wrong precedence order — not just a blank
+// NeedsHumanEvidenceRef — would be caught.
+func TestNhEvidenceRefPrefersGateLogOverFinalizationLogOverWorkspacePathOverID(t *testing.T) {
+	w := Worker{}
+	cases := []struct {
+		name string
+		c    Candidate
+		want string
+	}{
+		{
+			name: "gate log wins over everything else",
+			c: Candidate{
+				ID:              "cand-1",
+				GateLog:         "/logs/gate-1.log",
+				FinalizationLog: "/logs/finalize-1.log",
+				WorkspacePath:   "/work/cand-1",
+			},
+			want: "/logs/gate-1.log",
+		},
+		{
+			name: "finalization log wins when gate log is absent",
+			c: Candidate{
+				ID:              "cand-2",
+				FinalizationLog: "/logs/finalize-2.log",
+				WorkspacePath:   "/work/cand-2",
+			},
+			want: "/logs/finalize-2.log",
+		},
+		{
+			name: "workspace path wins when neither log is recorded",
+			c: Candidate{
+				ID:            "cand-3",
+				WorkspacePath: "/work/cand-3",
+			},
+			want: "/work/cand-3",
+		},
+		{
+			name: "candidate ID is the last-resort fallback",
+			c:    Candidate{ID: "cand-4"},
+			want: "cand-4",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := tc.c
+			w.parkHuman(&c, "test_reason", ReasonGateFailed)
+			if c.NeedsHumanEvidenceRef != tc.want {
+				t.Fatalf("evidence ref=%q, want %q", c.NeedsHumanEvidenceRef, tc.want)
+			}
+		})
+	}
+}
+
 // TestNhQueueStatusRendersNeedsHumanDistinctly pins requirement (4)'s status
 // rendering half: needs_human must show up as its own, distinctly countable
 // phase in both the summary roll-up (StatusSummary/Summarize, what `queue

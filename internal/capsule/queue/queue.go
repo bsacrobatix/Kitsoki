@@ -272,7 +272,7 @@ type ProcessDeps struct {
 
 	// Retry policy. A red gate or failed speculation moves the candidate to
 	// the back of the line in retry_wait with exponential backoff; once
-	// MaxAttempts is exhausted the candidate parks as needs_input instead of
+	// MaxAttempts is exhausted the candidate parks as needs_human instead of
 	// spinning. Zero values take the defaults below.
 	RetryDelay    time.Duration // default 5m
 	MaxRetryDelay time.Duration // default 30m
@@ -348,7 +348,7 @@ func (d ProcessDeps) maxEnvRepeat() int {
 
 // HarnessError marks a failure of the queue's own machinery (a resolver or
 // gate harness that could not launch) rather than a red result from a harness
-// that ran. Harness failures park the candidate immediately as needs_input:
+// that ran. Harness failures park the candidate immediately as needs_human:
 // burning bounded retry attempts on a broken launch path only delays every
 // candidate behind it in the FIFO.
 type HarnessError struct{ Err error }
@@ -817,7 +817,20 @@ func normalize(state State) State {
 		// it to ReasonLegacyFreeform on load rather than leaving it
 		// unclassified — every candidate that has ever parked or retried
 		// carries some code once loaded through Store, old or new.
-		if c.RetryReason != "" && c.ReasonCode == "" {
+		//
+		// Gated on RetryWait/parked (matching Summarize's own guard at
+		// status.go) rather than firing on any non-empty RetryReason: a
+		// live candidate's RetryReason is stage-tag history that survives a
+		// successful claim (claimPreparation clears ReasonCode/Failure but
+		// intentionally leaves RetryReason as "what happened last time" —
+		// see worker.go) and survives landing. Without this gate, a
+		// candidate that merely retried once and then succeeded — in
+		// flight (Preparing/Gating/Finalizing) or already Landed — would be
+		// mis-stamped legacy-freeform, indistinguishable from an actual
+		// pre-enum free-text record. Only a candidate currently in
+		// RetryWait or an actually-parked phase gets the legacy marker.
+		phase := c.phase()
+		if c.RetryReason != "" && c.ReasonCode == "" && (phase == RetryWait || parked(phase)) {
 			c.ReasonCode = ReasonLegacyFreeform
 		}
 	}

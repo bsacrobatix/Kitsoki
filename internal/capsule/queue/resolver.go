@@ -21,7 +21,7 @@ import (
 //   - resolved            → merge committed, the train continues
 //   - conflicts remain    → needs_conflict_input, continuation retained for a
 //     human (resume / override / reject all apply)
-//   - harness broken      → HarnessError → needs_input immediately; a broken
+//   - harness broken      → HarnessError → needs_human immediately; a broken
 //     launch path must not burn bounded retry attempts
 const gitOpsAppRelPath = "stories/git-ops/app.yaml"
 
@@ -96,7 +96,7 @@ func (p ProtectedIntegration) resolveConflicts(ctx context.Context, root, instan
 // no-op (needs_conflict_input, no retry burn), but a LOUD one — the evidence
 // records exactly why, rather than the bare unqualified tag a silent skip
 // would leave behind. A story that resolves (either tier) but whose launch
-// fails is a broken harness (needs_input, no retry burn); a broken embedded
+// fails is a broken harness (needs_human, no retry burn); a broken embedded
 // fallback mechanism itself (not merely "no story found") is likewise a
 // harness failure rather than a silent no-op.
 func (p ProtectedIntegration) runGitOpsResolver(ctx context.Context, root, instancePath string, conflictPaths []string) ([]string, error) {

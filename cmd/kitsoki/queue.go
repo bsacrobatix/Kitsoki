@@ -486,10 +486,10 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&gateTimeout, "gate-timeout", queue.DefaultStageTimeout, "hard timeout applied independently to gate, repair, and anti-weakening review stages")
 	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
 	cmd.Flags().DurationVar(&maxRetryDelay, "max-retry-delay", queue.DefaultMaxRetryDelay, "backoff ceiling for repeated failures")
-	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
+	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_human")
 	cmd.Flags().DurationVar(&envRetryDelay, "env-retry-delay", queue.DefaultEnvRetryDelay, "fixed backoff before retrying an environmental failure (fetch/lock/workspace-create); does not consume the attempt budget")
-	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_input")
-	cmd.Flags().IntVar(&maxEnvRepeat, "max-env-repeat", queue.DefaultMaxEnvRepeat, "consecutive byte-identical environmental failure messages before parking as needs_input, regardless of --max-env-duration; a changed message resets the count")
+	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_human")
+	cmd.Flags().IntVar(&maxEnvRepeat, "max-env-repeat", queue.DefaultMaxEnvRepeat, "consecutive byte-identical environmental failure messages before parking as needs_human, regardless of --max-env-duration; a changed message resets the count")
 	return cmd
 }
 

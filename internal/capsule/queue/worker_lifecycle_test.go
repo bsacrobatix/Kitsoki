@@ -375,7 +375,7 @@ func TestWltFailGateRetryableFailureSetsBackoffAndRetryReason(t *testing.T) {
 	}
 }
 
-func TestWltFailGateExhaustedAttemptsParksAsNeedsInput(t *testing.T) {
+func TestWltFailGateExhaustedAttemptsParksAsNeedsHuman(t *testing.T) {
 	store := Store{ProjectRoot: t.TempDir()}
 	wltSubmit(t, store, "gate-exhausted")
 	w := Worker{Store: store, Deps: ProcessDeps{MaxAttempts: 2}}

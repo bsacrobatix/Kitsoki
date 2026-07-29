@@ -39,12 +39,25 @@ Every `retry_wait`/parked candidate carries two things together: `retry_reason`
 matching still read it) and `reason_code`, a small closed-set enum
 (`queue.ReasonCode`) an operator or a medic can switch on instead of parsing
 prose. The codes: `gate-failed`, `merge-conflict`, `lease-lost`,
-`seal-mismatch` (reserved), `resolver-exhausted`, `repairer-exhausted`,
-`finalization-failed`, `budget-exhausted` (generic fallback),
-`environment-degraded`, `harness-failure`, `operator-parked`, and
+`seal-mismatch` (reserved), `resolver-failed`, `resolver-exhausted`,
+`repairer-exhausted`, `finalization-failed`, `budget-exhausted` (generic
+fallback), `environment-degraded`, `harness-failure`, `operator-parked`, and
 `legacy-freeform` for any pre-existing record that has a `retry_reason` but
 no code (every `state.json` written before this enum existed loads cleanly
-and is classified this way — see `normalize`).
+and is classified this way — see `normalize`; the stamp only fires on a
+candidate that is currently `retry_wait` or parked, so a live candidate that
+merely retried in the past, or a `landed` record, keeps an empty
+`reason_code` rather than being mislabeled legacy).
+
+`resolver-failed` and `resolver-exhausted` are deliberately two codes, not
+one: `resolver-failed` is the still-retrying counterpart (a failed
+speculation attempt with budget remaining), `resolver-exhausted` only fires
+at the actual exhaustion transition — mirroring `gate-failed` (retrying) vs
+`repairer-exhausted` (exhausted, repairer configured). `environment-degraded`
+is instead genuinely dual-purpose end to end: an environmental failure is
+the same failure mode whether the wall-clock bound has been reached yet or
+not, so the code does not change, only the phase (`retry_wait` →
+`needs_human`) does.
 
 `needs_human` is a status distinct from `needs_input`: it is the queue's own
 declaration that automation exhausted every option for this candidate — a
@@ -60,13 +73,54 @@ Operationally the two are identical: neither is ever auto-picked up by the
 worker loop (`parked()`), both are visible in `queue status`'s phase and
 reason-code roll-ups, and both are returned to `queued` with a fresh attempt
 budget by the same `resume` verb. `needs_human` additionally carries a
-`needs_human_evidence_ref` — a gate/finalization log path if one was durably
-recorded for this attempt, else the candidate's own ID — so a human or medic
+`needs_human_evidence_ref`, set by `parkHuman` to the first non-empty of, in
+order: the gate log path, the finalization log path, the candidate's
+workspace path, then finally the candidate's own ID — so a human or medic
 has something concrete to open without re-deriving it from `evidence`.
 
 Resubmitting the same SHA (e.g. with a fresh CI receipt) supersedes the prior
 active candidate and inherits its attempt count, so bounded retries cannot be
 reset by resubmission races.
+
+### BREAKING CHANGE for downstream consumers of the wire status (bump-gated)
+
+Before this change, every automation park (harness failure, exhausted
+attempt budget, environment stuck past its wall-clock bound) emitted
+`status`/`phase` = `needs_input` on the wire (`kitsoki queue status --json`,
+`.capsules/queue/state.json`). As of this change those same three cases emit
+`needs_human` instead; only an operator's own `queue park` verb still
+produces `needs_input`. This is a deliberate, intentional split — it is the
+entire point of the `needs_human` terminal state — but it is **not**
+backward compatible for any consumer that pattern-matches the literal string
+`needs_input` (or a hardcoded status union/allow-list) expecting it to cover
+every automation park.
+
+This engine repo has no such consumer. POG (the known downstream, pinned via
+`kitsoki.lock`) does, as of this writing:
+
+- `scripts/promotion-status.sh` — its parked-candidate branch does not
+  recognize `needs_human` and falls through to a generic message instead of
+  the explicit "operator action required: resume/override/reject" hint.
+- `scripts/feedback-autonomous-dispatch.sh` — its dispatcher match arm is
+  `retry_wait|needs_input`; a `needs_human` candidate will not match and the
+  dispatcher loops instead of taking its fast, explicit exit.
+- `scripts/pog-prune-capsule-workspaces.sh` — its `LIVE_PHASES` allow-list
+  does not include `needs_human`, so a needs_human candidate's continuation
+  tree (`.capsules/sync/cont-*`) — exactly the evidence a human needs to act
+  — becomes prunable.
+- `portal/src/server/stream-proposal-rpc.ts` — `needs_human` is not in its
+  status union, so it is coerced to `queued` with a misleading
+  "the Kitsoki worker owns the next queue phase" next-action string.
+- `portal/src/data/streams.ts` — routes a parked stream back to the portal
+  Inbox only on `needs_input`; a `needs_human` stream will not route there.
+
+**This is a blocking follow-up, not an oversight to be worked around here.**
+POG's `kitsoki.lock` must not be bumped past the commit that introduces
+`needs_human` until the consumers above are updated to treat `needs_human`
+as parked/human-actionable alongside `needs_input`. Nothing is broken today
+because POG still pins an engine revision that predates this change; this
+note exists so that stays true only until someone deliberately fixes the
+POG-side consumers, not by accident.
 
 ## External worker results: verify privately, then admit
 
@@ -163,7 +217,7 @@ materializes a conflict artifact and an integration instance:
   specific reason spelled out rather than a bare tag) → `needs_conflict_input`,
   with the integration instance and continuation retained on disk. Launch
   harness broken (including a broken embedded-fallback mechanism itself) →
-  `needs_input` immediately.
+  `needs_human` immediately.
 
 ## WIP preservation: the protected checkout never blocks and never loses data
 
