@@ -30,7 +30,7 @@ func NewHandler(service *Service, callerApplicationID string) host.Handler {
 			}
 			raw, err := json.Marshal(input)
 			if err != nil {
-				return host.Result{}, fmt.Errorf("host.application_job.submit: input must be JSON")
+				return host.Result{}, fmt.Errorf("host.application_job.submit: input must be JSON: %w", err)
 			}
 			result, err := service.Submit(ctx, callerApplicationID, template, raw)
 			return hostResult(result, err)
@@ -66,11 +66,11 @@ func hostResult(result Result, err error) (host.Result, error) {
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
-		return host.Result{}, fmt.Errorf("host.application_job: encode result")
+		return host.Result{}, fmt.Errorf("host.application_job: encode result: %w", err)
 	}
 	var data map[string]any
 	if err := json.Unmarshal(raw, &data); err != nil {
-		return host.Result{}, fmt.Errorf("host.application_job: encode result")
+		return host.Result{}, fmt.Errorf("host.application_job: decode result: %w", err)
 	}
 	return host.Result{Data: data}, nil
 }

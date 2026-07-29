@@ -35,7 +35,7 @@ func (b *Backend) ListReviewed(
 	}
 	reports, err := b.Ledger.ListReviewed(ctx, request.Scope, request.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("reviewed feedback ledger is unavailable")
+		return nil, fmt.Errorf("reviewed feedback ledger is unavailable: %w", err)
 	}
 	return reports, nil
 }
@@ -72,7 +72,7 @@ func (b *Backend) Dispatch(
 		RequestDigest: digest, JobID: jobID, Status: DispatchPending,
 	})
 	if err != nil {
-		return host.FeedbackDispatchReceipt{}, fmt.Errorf("reviewed feedback dispatch state is unavailable")
+		return host.FeedbackDispatchReceipt{}, fmt.Errorf("reviewed feedback dispatch state is unavailable: %w", err)
 	}
 	if state.RequestDigest != digest {
 		return host.FeedbackDispatchReceipt{}, fmt.Errorf(
@@ -130,7 +130,7 @@ func (b *Backend) Dispatch(
 	if err := b.Store.Complete(
 		ctx, request.Scope.ApplicationID, request.DispatchID, digest, dispatched.Receipts,
 	); err != nil {
-		return host.FeedbackDispatchReceipt{}, fmt.Errorf("reviewed feedback dispatch state is unavailable")
+		return host.FeedbackDispatchReceipt{}, fmt.Errorf("reviewed feedback dispatch state is unavailable: %w", err)
 	}
 	return host.FeedbackDispatchReceipt{
 		JobID: dispatched.JobID, Receipts: dispatched.Receipts,

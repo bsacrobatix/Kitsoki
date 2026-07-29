@@ -133,10 +133,18 @@ func (s *SQLiteDispatchStore) Claim(
 		if err != nil {
 			return DispatchState{}, fmt.Errorf("resume reviewed feedback dispatch: %w", err)
 		}
-		state, err = s.get(ctx, request.ScopeID, request.DispatchID)
+		// NOTE: `err` here is the one shadowed by the `resumed, err :=` above,
+		// so it dies with this block — check it now rather than relying on the
+		// outer `return state, err`, which would report success with the
+		// zero-valued state a failed get leaves behind.
+		resumedState, getErr := s.get(ctx, request.ScopeID, request.DispatchID)
+		if getErr != nil {
+			return DispatchState{}, fmt.Errorf("resume reviewed feedback dispatch: %w", getErr)
+		}
+		state = resumedState
 		state.Claimed = resumedRows == 1
 	}
-	return state, err
+	return state, nil
 }
 
 func (s *SQLiteDispatchStore) Complete(

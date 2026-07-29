@@ -117,7 +117,7 @@ func (s *Service) Submit(
 		}
 		return s.statusLocked(ctx, existing, record, "submit", true)
 	} else if !errors.Is(getErr, artifactjob.ErrNotFound) {
-		return Result{}, fmt.Errorf("application job replay lookup failed")
+		return Result{}, fmt.Errorf("application job replay lookup failed: %w", getErr)
 	}
 
 	job, err := s.Jobs.Register(ctx, artifactjob.RegisterRequest{
@@ -131,9 +131,11 @@ func (s *Service) Submit(
 		Owner:      "application-job:" + callerApplicationID,
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("register application job")
+		return Result{}, fmt.Errorf("register application job: %w", err)
 	}
-	record, err := s.Records.Register(ctx, Record{
+	// The registered record is intentionally discarded: BindChild below returns
+	// the authoritative one once the child dispatch is known.
+	_, err = s.Records.Register(ctx, Record{
 		JobRef:              jobRef,
 		CallerApplicationID: callerApplicationID,
 		TemplateID:          templateID,
@@ -148,7 +150,7 @@ func (s *Service) Submit(
 	})
 	if err != nil {
 		s.fail(ctx, jobRef, "mapping_unavailable")
-		return Result{}, fmt.Errorf("persist application job mapping")
+		return Result{}, fmt.Errorf("persist application job mapping: %w", err)
 	}
 	dispatched, err := s.Backend.Dispatch(ctx, DispatchRequest{
 		JobRef:              jobRef,
@@ -159,16 +161,24 @@ func (s *Service) Submit(
 	})
 	if err != nil || dispatched.RouteID == "" || dispatched.ChildID == "" {
 		s.fail(ctx, jobRef, "dispatch_failed")
-		return Result{}, fmt.Errorf("application job dispatch failed")
+		if err != nil {
+			return Result{}, fmt.Errorf("application job dispatch failed: %w", err)
+		}
+		// Backend reported success but returned an unusable binding; name which
+		// half is missing so the failure is diagnosable without the backend log.
+		return Result{}, fmt.Errorf(
+			"application job dispatch failed: backend returned route_id=%q child_id=%q",
+			dispatched.RouteID, dispatched.ChildID,
+		)
 	}
-	record, err = s.Records.BindChild(ctx, jobRef, dispatched)
+	record, err := s.Records.BindChild(ctx, jobRef, dispatched)
 	if err != nil {
 		_ = s.Backend.Cancel(ctx, Record{
 			TargetRouteID: dispatched.RouteID, TargetSessionID: dispatched.SessionID,
 			ChildJobID: dispatched.ChildID,
 		})
 		s.fail(ctx, jobRef, "mapping_unavailable")
-		return Result{}, fmt.Errorf("persist application job child mapping")
+		return Result{}, fmt.Errorf("persist application job child mapping: %w", err)
 	}
 	s.scheduleRuntimeBound(record)
 	return s.result(job, record, "submit", false, ""), nil
@@ -205,7 +215,7 @@ func (s *Service) Cancel(ctx context.Context, callerApplicationID, jobRef string
 		return s.result(job, record, "cancel", true, publicReason(job)), nil
 	}
 	if err := s.Backend.Cancel(ctx, record); err != nil {
-		return Result{}, fmt.Errorf("cancel application job")
+		return Result{}, fmt.Errorf("cancel application job: %w", err)
 	}
 	status := artifactjob.StatusCancelled
 	finished := s.now().UTC()
@@ -213,7 +223,7 @@ func (s *Service) Cancel(ctx context.Context, callerApplicationID, jobRef string
 		Status: &status, FinishedAt: &finished,
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("persist application job cancellation")
+		return Result{}, fmt.Errorf("persist application job cancellation: %w", err)
 	}
 	return s.result(job, record, "cancel", false, ""), nil
 }
@@ -254,7 +264,7 @@ func (s *Service) refreshLocked(
 	}
 	child, found, err := s.Backend.Status(ctx, record)
 	if err != nil {
-		return artifactjob.Job{}, Record{}, fmt.Errorf("load application job status")
+		return artifactjob.Job{}, Record{}, fmt.Errorf("load application job status: %w", err)
 	}
 	if !found {
 		status := artifactjob.StatusInterrupted
@@ -296,7 +306,7 @@ func (s *Service) refreshLocked(
 		record, err = s.Records.Complete(ctx, record.JobRef, artifacts, primary)
 		if err != nil {
 			s.fail(ctx, record.JobRef, "artifact_persistence_failed")
-			return artifactjob.Job{}, Record{}, fmt.Errorf("persist application job artifacts")
+			return artifactjob.Job{}, Record{}, fmt.Errorf("persist application job artifacts: %w", err)
 		}
 		status := artifactjob.StatusDone
 		finished := s.now().UTC()
@@ -305,7 +315,8 @@ func (s *Service) refreshLocked(
 		})
 		return job, record, err
 	default:
-		return artifactjob.Job{}, Record{}, fmt.Errorf("application job child returned an invalid status")
+		return artifactjob.Job{}, Record{}, fmt.Errorf(
+			"application job child returned an invalid status %q", child.Status)
 	}
 }
 
@@ -325,14 +336,14 @@ func (s *Service) loadOwned(
 		return artifactjob.Job{}, Record{}, fmt.Errorf("application job not found")
 	}
 	if err != nil {
-		return artifactjob.Job{}, Record{}, fmt.Errorf("load application job")
+		return artifactjob.Job{}, Record{}, fmt.Errorf("load application job: %w", err)
 	}
 	record, err := s.Records.Get(ctx, jobRef)
 	if errors.Is(err, ErrNotFound) {
 		return artifactjob.Job{}, Record{}, fmt.Errorf("application job mapping not found")
 	}
 	if err != nil {
-		return artifactjob.Job{}, Record{}, fmt.Errorf("load application job mapping")
+		return artifactjob.Job{}, Record{}, fmt.Errorf("load application job mapping: %w", err)
 	}
 	if job.AppID != callerApplicationID || record.CallerApplicationID != callerApplicationID {
 		return artifactjob.Job{}, Record{}, fmt.Errorf("application job not found")
@@ -458,7 +469,7 @@ func projectArtifacts(record Record, output map[string]any) ([]string, string, e
 func validatePublicInput(raw json.RawMessage, maxBytes int) (json.RawMessage, error) {
 	normalized, err := appplatform.NormalizeJSON(raw)
 	if err != nil {
-		return nil, fmt.Errorf("application job input must be valid JSON")
+		return nil, fmt.Errorf("application job input must be valid JSON: %w", err)
 	}
 	if len(normalized) > maxBytes {
 		return nil, fmt.Errorf("application job input exceeds configured bound")
