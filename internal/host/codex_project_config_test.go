@@ -1,4 +1,4 @@
-package codexcli
+package host
 
 import (
 	"os"
@@ -11,6 +11,13 @@ import (
 // TestProjectCodexConfigKeepsSlideyPortable guards the checked-in config that
 // Codex loads in preference to ~/.codex/config.toml. A developer-specific
 // launcher or workspace path makes Slidey fail before the MCP handshake.
+//
+// It lives in package host because agent_backend_codex.go is what actually
+// reads these config files (see codexConfigPaths). It previously sat in
+// internal/codexcli, a package whose MCP-scoping half duplicated
+// agent_backend_codex.go and was removed; this guard was the only part worth
+// keeping, so it moved to the live consumer rather than keeping a package
+// alive around it.
 func TestProjectCodexConfigKeepsSlideyPortable(t *testing.T) {
 	t.Parallel()
 
