@@ -268,6 +268,7 @@ func capsuleWorkspaceCommitCmd() *cobra.Command {
 			view.Summary = result.Summary
 			if !jsonOut {
 				fmt.Fprintln(cmd.OutOrStdout(), result.Summary)
+				return nil
 			}
 			return capsuleWorkspaceWrite(cmd, view, jsonOut)
 		}}
@@ -312,13 +313,19 @@ func capsuleWorkspaceReconcileCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return capsuleWorkspaceWrite(cmd, capsuleWorkspaceReconcileResult{
+				planned := capsuleWorkspaceReconcileResult{
 					Schema: "capsule-workspace-reconcile/v1", ID: in.ID, Generation: in.Generation,
 					Relation: string(drift.Relation), RegisteredHead: drift.RegisteredHead, GitHead: drift.GitHead,
 					Branch: drift.Branch, Dirty: drift.Dirty, Ahead: drift.Ahead, Behind: drift.Behind,
 					Adoptable: drift.Relation.Adoptable() && !drift.Dirty,
 					Summary:   drift.Explain(), Next: drift.Next(),
-				}, jsonOut)
+				}
+				if !jsonOut {
+					fmt.Fprintln(cmd.OutOrStdout(), planned.Summary)
+					fmt.Fprintln(cmd.OutOrStdout(), "next: "+planned.Next)
+					return nil
+				}
+				return capsuleWorkspaceWrite(cmd, planned, jsonOut)
 			}
 			adoption, err := m.AdoptHead(cmd.Context(), handle)
 			if err != nil {
@@ -337,6 +344,8 @@ func capsuleWorkspaceReconcileCmd() *cobra.Command {
 			}
 			if !jsonOut {
 				fmt.Fprintln(cmd.OutOrStdout(), result.Summary)
+				fmt.Fprintln(cmd.OutOrStdout(), "next: "+result.Next)
+				return nil
 			}
 			return capsuleWorkspaceWrite(cmd, result, jsonOut)
 		}}
