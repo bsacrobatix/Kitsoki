@@ -200,9 +200,6 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 		})
 	}
 
-	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
-	appendAgentCalledEvent(ctx, callStart, callID, question, policy.AgentCalledFields(calledPayload))
-
 	cliArgs := []string{
 		"-p",
 		"--session-id", sessionID,
@@ -223,6 +220,13 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
 	policy = policy.WithAllowed(tools)
+
+	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
+	// Emitted AFTER attachOperatorAsk so the recorded allowed_tools match the
+	// --allowed-tools the CLI actually receives (agent_ask/agent_decide already
+	// order it this way); emitting earlier silently omits mcp__operator__ask.
+	appendAgentCalledEvent(ctx, callStart, callID, question, policy.AgentCalledFields(calledPayload))
+
 	if contractServers := attachStudioMCPServer(effectiveMCPServers(args, agent), tools); len(contractServers) > 0 {
 		contractMCPPath, contractMCPCleanup, mErr := writeMCPConfigTempfile(contractServers, "kitsoki-converse-contract-mcp")
 		if mErr != nil {
@@ -421,9 +425,6 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 		})
 	}
 
-	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
-	appendAgentCalledEvent(ctx, callStart, callID, question, policy.AgentCalledFields(calledPayload))
-
 	chat, err := cs.GetOrEnsure(ctx, chatID)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.agent.converse: get chat %s: %v", chatID, err)}, nil
@@ -494,6 +495,13 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
 	policy = policy.WithAllowed(tools)
+
+	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
+	// Emitted AFTER attachOperatorAsk so the recorded allowed_tools match the
+	// --allowed-tools the CLI actually receives (agent_ask/agent_decide already
+	// order it this way); emitting earlier silently omits mcp__operator__ask.
+	appendAgentCalledEvent(ctx, callStart, callID, question, policy.AgentCalledFields(calledPayload))
+
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	cliArgs = appendDisallowedToolsFlag(cliArgs, disallowedTools)
 

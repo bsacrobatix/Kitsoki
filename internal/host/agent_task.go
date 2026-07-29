@@ -222,7 +222,6 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	// path only; replay writes the recorded transcript via the cassette path.)
 	ctx = WithCallID(ctx, callID)
 
-	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
 	// The rendered context prompt is recorded as a reference (inline when
 	// small, else a sidecar file); see docs/tracing/trace-format.md.
 	var taskPromptRef string
@@ -230,14 +229,6 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 		taskPromptRef, _ = cm["prompt"].(string)
 	}
 	tOverlay, tDefaulted, tOverridden := promptTraceProvenance(ctx, taskPromptRef)
-	appendAgentCalledEvent(ctx, callStart, callID, contextPrompt, policy.AgentCalledFields(AgentCalledPayload{
-		Verb:           "task",
-		Agent:          agentName,
-		Model:          agent.Model,
-		PromptOverlay:  tOverlay,
-		SpecDefaulted:  tDefaulted,
-		SpecOverridden: tOverridden,
-	}))
 
 	slog.InfoContext(ctx, "task.start",
 		"agent", agentName,
@@ -288,6 +279,20 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	baseCLIArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, baseCLIArgs, tools)
 	defer opAskCleanup()
 	policy = policy.WithAllowed(tools)
+
+	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
+	// Emitted AFTER the tool list is final (mcp__validator__submit above,
+	// attachOperatorAsk here) so the recorded allowed_tools match the
+	// --allowedTools the CLI actually receives; agent_ask/agent_decide already
+	// order it this way.
+	appendAgentCalledEvent(ctx, callStart, callID, contextPrompt, policy.AgentCalledFields(AgentCalledPayload{
+		Verb:           "task",
+		Agent:          agentName,
+		Model:          agent.Model,
+		PromptOverlay:  tOverlay,
+		SpecDefaulted:  tDefaulted,
+		SpecOverridden: tOverridden,
+	}))
 	// Read-only floor: route Bash (if requested) through the kitsoki-bash MCP
 	// wrapper under a read-only profile so the subprocess can only run read-only
 	// commands; a mutating command is denied by the profile (the gate's operator
