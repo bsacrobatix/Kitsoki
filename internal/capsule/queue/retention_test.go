@@ -107,7 +107,7 @@ func TestCompactTerminalHistoryNeverPrunesParkedOrPending(t *testing.T) {
 	}
 	// Parked and every non-terminal ("pending") phase, none of them with a
 	// Completed time (they haven't finished).
-	pendingStatuses := []Status{NeedsInput, NeedsConflictInput, Queued, Preparing, Gating, AwaitingApproval, ReadyToFinalize, RetryWait, Reprepare}
+	pendingStatuses := []Status{NeedsInput, NeedsConflictInput, NeedsHuman, Queued, Preparing, Gating, AwaitingApproval, ReadyToFinalize, RetryWait, Reprepare}
 	var wantAlwaysKept []string
 	for i, st := range pendingStatuses {
 		id := fmt.Sprintf("pending-%d-%s", i, st)

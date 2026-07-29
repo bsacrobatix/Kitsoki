@@ -143,7 +143,9 @@ func (s Store) Park(op Op) (Candidate, error) {
 			return fmt.Errorf("queue: cannot park %s candidate %s", c.phase(), c.ID)
 		}
 		c.Phase, c.Status = NeedsInput, NeedsInput
-		c.RetryReason = first(op.Reason, "parked_by_operator")
+		// The code names *who/how* (a human explicitly parked this), never
+		// what the operator happened to type as their own reason.
+		c.RetryReason, c.ReasonCode = first(op.Reason, "parked_by_operator"), ReasonOperatorParked
 		c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
 		c.ParkedAt, c.ParkedBy = op.at(), op.actor()
 		return nil
@@ -156,7 +158,7 @@ func (s Store) Park(op Op) (Candidate, error) {
 func (s Store) Resume(op Op) (Candidate, error) {
 	return s.operate(op, "resume", func(_ *State, c *Candidate) error {
 		if !parked(c.phase()) && c.phase() != RetryWait {
-			return fmt.Errorf("queue: resume requires needs_input, needs_conflict_input, or retry_wait; candidate %s is %s", c.ID, c.phase())
+			return fmt.Errorf("queue: resume requires needs_input, needs_conflict_input, needs_human, or retry_wait; candidate %s is %s", c.ID, c.phase())
 		}
 		if c.Attempt > 0 {
 			c.Evidence = append(c.Evidence, fmt.Sprintf("queue:attempt budget reset from %d by %s", c.Attempt, op.actor()))
@@ -165,6 +167,7 @@ func (s Store) Resume(op Op) (Candidate, error) {
 		c.Attempt = 0
 		c.RetryAt, c.ParkedAt = time.Time{}, time.Time{}
 		c.ParkedBy, c.RetryReason, c.Failure, c.ConflictContinuation = "", "", "", ""
+		c.ReasonCode, c.NeedsHumanEvidenceRef = "", ""
 		c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
 		c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
 		return nil
@@ -208,6 +211,7 @@ func (s Store) Override(op Op) (Candidate, error) {
 			c.Attempt = 0
 			c.RetryAt, c.ParkedAt = time.Time{}, time.Time{}
 			c.ParkedBy, c.RetryReason, c.Failure, c.ConflictContinuation = "", "", "", ""
+			c.ReasonCode, c.NeedsHumanEvidenceRef = "", ""
 			// Resume resets this same environmental bookkeeping (see above);
 			// Override must match it. Left stale, a candidate overridden out
 			// of a parked environmental streak would carry a nonzero

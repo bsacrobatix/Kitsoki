@@ -62,6 +62,7 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 					c.Failure = "worker lease expired; preserved attempt evidence requires reprepare"
 				}
 				c.WorkerID, c.LeaseExpiresAt = "", time.Time{}
+				c.ReasonCode = ReasonLeaseLost
 				dirty = true
 			}
 		}
@@ -88,6 +89,7 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 			pick.Attempt++
 			pick.Started = n
 			pick.Failure = ""
+			pick.ReasonCode = ""
 			pick.RetryAt = time.Time{}
 			claimed, ok = *pick, true
 			dirty = true
@@ -412,7 +414,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 			cur.Evidence = append(cur.Evidence, err.Error())
 			var harness HarnessError
 			if errors.As(err, &harness) {
-				w.park(cur, "finalization_harness_failure")
+				w.parkHuman(cur, "finalization_harness_failure", ReasonHarnessFailure)
 				return
 			}
 			var envErr EnvError
@@ -581,11 +583,13 @@ func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	c.Evidence = append(c.Evidence, err.Error())
 	var harness HarnessError
 	if errors.As(err, &harness) {
-		w.park(c, "resolver_harness_failure")
+		w.parkHuman(c, "resolver_harness_failure", ReasonHarnessFailure)
 		return
 	}
 	if strings.Contains(err.Error(), "continuation") {
 		c.Phase, c.Status, c.ConflictContinuation = NeedsConflictInput, NeedsConflictInput, err.Error()
+		c.RetryReason, c.ReasonCode = "merge_conflict_unresolved", ReasonMergeConflict
+		c.ParkedAt, c.ParkedBy = now(w.Deps), "queue-worker"
 		return
 	}
 	var envErr EnvError
@@ -599,7 +603,7 @@ func (w Worker) failGate(state *State, c *Candidate, err error) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
 	var harness HarnessError
 	if errors.As(err, &harness) {
-		w.park(c, "gate_harness_failure")
+		w.parkHuman(c, "gate_harness_failure", ReasonHarnessFailure)
 		return
 	}
 	// A remote gate can fail environmentally (worker died, transport lost)
@@ -653,13 +657,13 @@ func (w Worker) parkNoVerdict(c *Candidate, stage, cause string) {
 // train, and never spin unbounded.
 func (w Worker) retryOrPark(state *State, c *Candidate, reason string) {
 	if c.Attempt >= w.Deps.maxAttempts() {
-		w.park(c, reason)
-		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:max attempts (%d) exhausted; parked as needs_input", c.Attempt))
-		c.RetryReason = "max_attempts_exhausted"
+		code := exhaustionReasonCode(reason, w.Deps.Repairer != nil)
+		w.parkHuman(c, "max_attempts_exhausted", code)
+		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:max attempts (%d) exhausted after %s; parked as needs_human (%s)", c.Attempt, reason, code))
 		return
 	}
 	n := now(w.Deps)
-	c.Phase, c.Status, c.RetryReason = RetryWait, RetryWait, reason
+	c.Phase, c.Status, c.RetryReason, c.ReasonCode = RetryWait, RetryWait, reason, reasonCodeForStage(reason)
 	c.RetryAt = n.Add(backoff(w.Deps.retryDelay(), w.Deps.maxRetryDelay(), c.Attempt))
 	c.Position = nextPosition(state.Candidates)
 	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:attempt %d/%d failed (%s); retry_at=%s position=%d", c.Attempt, w.Deps.maxAttempts(), reason, c.RetryAt.Format(time.RFC3339), c.Position))
@@ -716,11 +720,11 @@ func (w Worker) retryOrParkEnv(c *Candidate, reason string, cause error) {
 	}
 
 	if n.Sub(c.FirstEnvFailureAt) >= w.Deps.maxEnvDuration() {
-		w.park(c, reason+"_environment_degraded")
-		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environment degraded for %s since %s; parked as needs_input", n.Sub(c.FirstEnvFailureAt).Round(time.Second), c.FirstEnvFailureAt.Format(time.RFC3339)))
+		w.parkHuman(c, reason+"_environment_degraded", ReasonEnvironmentDegraded)
+		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environment degraded for %s since %s; parked as needs_human", n.Sub(c.FirstEnvFailureAt).Round(time.Second), c.FirstEnvFailureAt.Format(time.RFC3339)))
 		return
 	}
-	c.Phase, c.Status, c.RetryReason = RetryWait, RetryWait, reason
+	c.Phase, c.Status, c.RetryReason, c.ReasonCode = RetryWait, RetryWait, reason, reasonCodeForStage(reason)
 	c.RetryAt = n.Add(w.Deps.envRetryDelay())
 	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environmental failure (%s), retry %d, retry_at=%s", reason, c.EnvRetries, c.RetryAt.Format(time.RFC3339)))
 }
@@ -741,9 +745,25 @@ func envFailureSignature(cause error) string {
 
 func (w Worker) park(c *Candidate, reason string) {
 	c.Phase, c.Status, c.RetryReason = NeedsInput, NeedsInput, reason
+	c.ReasonCode = reasonCodeForStage(reason)
 	c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
-	c.ParkedAt = now(w.Deps)
-	c.ParkedBy = "queue-worker"
+	c.ParkedAt, c.ParkedBy = now(w.Deps), "queue-worker"
+}
+
+// parkHuman is the queue's own declaration that automation is out of options
+// for c: a broken harness, an exhausted bounded attempt budget, or an
+// environment that stayed degraded past its wall-clock bound. It is the only
+// producer of the NeedsHuman status (see its doc) and always stamps the
+// typed ReasonCode, an evidence pointer (a log path if one is durably
+// recorded, else this candidate's own ID), and a timestamp — the three
+// things a human or a future medic needs without parsing Evidence prose.
+// Otherwise it is identical to a plain park: never auto-retried (see
+// parked), resumable by Store.Resume.
+func (w Worker) parkHuman(c *Candidate, reason string, code ReasonCode) {
+	c.Phase, c.Status, c.RetryReason, c.ReasonCode = NeedsHuman, NeedsHuman, reason, code
+	c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
+	c.ParkedAt, c.ParkedBy = now(w.Deps), "queue-worker"
+	c.NeedsHumanEvidenceRef = first(c.GateLog, c.FinalizationLog, c.WorkspacePath, c.ID)
 }
 
 func backoff(base, max time.Duration, attempt int) time.Duration {

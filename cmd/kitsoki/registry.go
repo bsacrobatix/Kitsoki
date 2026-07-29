@@ -1855,7 +1855,7 @@ func queueGateStatus(status queue.Status) string {
 	switch status {
 	case queue.ReadyToFinalize, queue.Finalizing, queue.Landed:
 		return "passed"
-	case queue.NeedsInput, queue.NeedsConflictInput, queue.Rejected:
+	case queue.NeedsInput, queue.NeedsConflictInput, queue.NeedsHuman, queue.Rejected:
 		return "failed"
 	case queue.Gating:
 		return "running"
@@ -1870,7 +1870,7 @@ func queueNextAction(status queue.Status) string {
 		return "approve"
 	case queue.ReadyToFinalize:
 		return "finalize"
-	case queue.NeedsInput, queue.NeedsConflictInput, queue.Rejected:
+	case queue.NeedsInput, queue.NeedsConflictInput, queue.NeedsHuman, queue.Rejected:
 		return "review"
 	case queue.RetryWait:
 		return "retry"

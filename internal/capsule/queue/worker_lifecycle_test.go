@@ -347,7 +347,7 @@ func TestWltFailGateHarnessErrorParksImmediately(t *testing.T) {
 	}
 	cand := &state.Candidates[0]
 	w.failGate(&state, cand, Harness(fmt.Errorf("gate harness could not launch")))
-	if cand.Phase != NeedsInput || cand.Status != NeedsInput || cand.RetryReason != "gate_harness_failure" {
+	if cand.Phase != NeedsHuman || cand.Status != NeedsHuman || cand.RetryReason != "gate_harness_failure" || cand.ReasonCode != ReasonHarnessFailure {
 		t.Fatalf("cand=%#v", cand)
 	}
 	if !cand.LeaseExpiresAt.IsZero() || cand.WorkerID != "" || !cand.RetryAt.IsZero() {
@@ -367,7 +367,7 @@ func TestWltFailGateRetryableFailureSetsBackoffAndRetryReason(t *testing.T) {
 	cand := &state.Candidates[0]
 	cand.Attempt = 1
 	w.failGate(&state, cand, fmt.Errorf("deterministic gate failed"))
-	if cand.Phase != RetryWait || cand.RetryReason != "gate_failed" {
+	if cand.Phase != RetryWait || cand.RetryReason != "gate_failed" || cand.ReasonCode != ReasonGateFailed {
 		t.Fatalf("cand=%#v", cand)
 	}
 	if !cand.RetryAt.Equal(clock.Add(time.Minute)) {
@@ -386,7 +386,9 @@ func TestWltFailGateExhaustedAttemptsParksAsNeedsInput(t *testing.T) {
 	cand := &state.Candidates[0]
 	cand.Attempt = 2
 	w.failGate(&state, cand, fmt.Errorf("deterministic gate failed"))
-	if cand.Phase != NeedsInput || cand.RetryReason != "max_attempts_exhausted" {
+	// No Repairer configured, so exhaustion stays ReasonGateFailed rather
+	// than escalating to ReasonRepairerExhausted.
+	if cand.Phase != NeedsHuman || cand.RetryReason != "max_attempts_exhausted" || cand.ReasonCode != ReasonGateFailed {
 		t.Fatalf("cand=%#v", cand)
 	}
 	if !strings.Contains(strings.Join(cand.Evidence, " "), "max attempts (2) exhausted") {
@@ -418,7 +420,7 @@ func TestWltGateHarnessErrorParksThroughFullPrepareFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Candidates[0].Phase != NeedsInput || state.Candidates[0].RetryReason != "gate_harness_failure" {
+	if state.Candidates[0].Phase != NeedsHuman || state.Candidates[0].RetryReason != "gate_harness_failure" || state.Candidates[0].ReasonCode != ReasonHarnessFailure {
 		t.Fatalf("candidate=%#v", state.Candidates[0])
 	}
 }
@@ -544,7 +546,7 @@ func TestWltFinalizeHarnessErrorParksImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := wltGet(t, store, c.ID)
-	if got.Phase != NeedsInput || got.RetryReason != "finalization_harness_failure" {
+	if got.Phase != NeedsHuman || got.RetryReason != "finalization_harness_failure" || got.ReasonCode != ReasonHarnessFailure {
 		t.Fatalf("candidate=%#v", got)
 	}
 }

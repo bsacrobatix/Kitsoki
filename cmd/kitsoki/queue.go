@@ -343,6 +343,9 @@ func queueSummaryLine(s queue.StatusSummary) string {
 	}
 	sort.Strings(phases)
 	line := fmt.Sprintf("train_depth=%d parked=%d", s.TrainDepth, s.ParkedCount)
+	if s.NeedsHumanCount > 0 {
+		line += fmt.Sprintf(" needs_human=%d", s.NeedsHumanCount)
+	}
 	if s.OldestParkedAge != "" {
 		line += " oldest_parked=" + s.OldestParkedAge
 	}

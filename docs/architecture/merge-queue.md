@@ -9,8 +9,9 @@ conflict resolution. The design goal is a single invariant:
 
 > **The queue can never reach a state a human cannot exit, and it never loses
 > data.** Every non-terminal candidate is either making progress, waiting on a
-> durable timer clearable by `kick`, or parked in `needs_input` with an
-> audited evidence trail and `resume` / `override` / `reject` available.
+> durable timer clearable by `kick`, or parked — in `needs_input`,
+> `needs_conflict_input`, or `needs_human` — with an audited evidence trail
+> and `resume` / `override` / `reject` available.
 
 ## Ordering and the never-stuck train
 
@@ -20,13 +21,48 @@ itself, by `emergency_sequence`), then `position`. A candidate that fails its
 gate or speculation is requeued **to the back of the line** in `retry_wait`
 with a durable `retry_at` under exponential backoff (`RetryDelay · 2^(n−1)`,
 capped at `MaxRetryDelay`; defaults 5m/30m). After `MaxAttempts` (default 5)
-it parks as `needs_input` instead of spinning. A failing candidate therefore
+it parks as `needs_human` instead of spinning: the queue's own declaration
+that automation is out of options, not an operator's own park (see "Typed
+failure reasons and `needs_human`" below). A failing candidate therefore
 delays only itself; the finalization head skips parked and timer-waiting
 candidates, and the protected base CAS remains the correctness guard.
 
-Failures of the queue's own machinery — a resolver or gate harness that could
-not launch — are classified separately (`queue.Harness(err)`) and park the
-candidate immediately as `needs_input` without burning bounded retry attempts.
+Failures of the queue's own machinery — a resolver, gate, or finalizer
+harness that could not launch — are classified separately
+(`queue.Harness(err)`) and park the candidate immediately as `needs_human`
+without burning bounded retry attempts.
+
+## Typed failure reasons and `needs_human`
+
+Every `retry_wait`/parked candidate carries two things together: `retry_reason`
+(a free-text stage tag, unchanged — humans and `queue sweep`'s substring
+matching still read it) and `reason_code`, a small closed-set enum
+(`queue.ReasonCode`) an operator or a medic can switch on instead of parsing
+prose. The codes: `gate-failed`, `merge-conflict`, `lease-lost`,
+`seal-mismatch` (reserved), `resolver-exhausted`, `repairer-exhausted`,
+`finalization-failed`, `budget-exhausted` (generic fallback),
+`environment-degraded`, `harness-failure`, `operator-parked`, and
+`legacy-freeform` for any pre-existing record that has a `retry_reason` but
+no code (every `state.json` written before this enum existed loads cleanly
+and is classified this way — see `normalize`).
+
+`needs_human` is a status distinct from `needs_input`: it is the queue's own
+declaration that automation exhausted every option for this candidate — a
+broken harness, an exhausted bounded attempt budget (`repairer-exhausted` when
+a `Repairer` was configured and still couldn't turn the gate green,
+`resolver-exhausted` for a preparation that never got there, `gate-failed` /
+`finalization-failed` when there was nothing more specific to say, or the
+generic `budget-exhausted` fallback), or an environment that stayed degraded
+past its wall-clock bound (`environment-degraded`). `needs_input` remains
+exactly what an operator's own `queue park` verb produces
+(`operator-parked`), independent of whatever free-text reason they typed.
+Operationally the two are identical: neither is ever auto-picked up by the
+worker loop (`parked()`), both are visible in `queue status`'s phase and
+reason-code roll-ups, and both are returned to `queued` with a fresh attempt
+budget by the same `resume` verb. `needs_human` additionally carries a
+`needs_human_evidence_ref` — a gate/finalization log path if one was durably
+recorded for this attempt, else the candidate's own ID — so a human or medic
+has something concrete to open without re-deriving it from `evidence`.
 
 Resubmitting the same SHA (e.g. with a fresh CI receipt) supersedes the prior
 active candidate and inherits its attempt count, so bounded retries cannot be

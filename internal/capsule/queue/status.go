@@ -8,14 +8,26 @@ import "time"
 type StatusSummary struct {
 	PhaseCounts       map[Status]int `json:"phase_counts"`
 	RetryReasonCounts map[string]int `json:"retry_reason_counts,omitempty"`
-	TrainDepth        int            `json:"train_depth"`
-	ParkedCount       int            `json:"parked_count"`
-	OldestParkedAge   string         `json:"oldest_parked_age,omitempty"`
+	// ReasonCodeCounts rolls up the same RetryWait/parked population as
+	// RetryReasonCounts, keyed by the typed ReasonCode instead of the raw
+	// free-text string — the stable, closed-set view an operator or medic
+	// can switch on. Zero-value (unset) ReasonCode never contributes an
+	// entry.
+	ReasonCodeCounts map[ReasonCode]int `json:"reason_code_counts,omitempty"`
+	TrainDepth       int                `json:"train_depth"`
+	ParkedCount      int                `json:"parked_count"`
+	// NeedsHumanCount is ParkedCount's subset that is specifically
+	// NeedsHuman — automation's own declaration that it is out of options,
+	// as opposed to an operator's deliberate NeedsInput park or an
+	// unresolved NeedsConflictInput. Broken out so it is visible at a
+	// glance in `queue status` rather than requiring a PhaseCounts lookup.
+	NeedsHumanCount int    `json:"needs_human_count,omitempty"`
+	OldestParkedAge string `json:"oldest_parked_age,omitempty"`
 }
 
 // Summarize computes a StatusSummary as of at.
 func Summarize(state State, at time.Time) StatusSummary {
-	summary := StatusSummary{PhaseCounts: map[Status]int{}, RetryReasonCounts: map[string]int{}}
+	summary := StatusSummary{PhaseCounts: map[Status]int{}, RetryReasonCounts: map[string]int{}, ReasonCodeCounts: map[ReasonCode]int{}}
 	var oldestParked time.Time
 	for _, c := range state.Candidates {
 		phase := c.phase()
@@ -25,12 +37,18 @@ func Summarize(state State, at time.Time) StatusSummary {
 		}
 		if parked(phase) {
 			summary.ParkedCount++
+			if phase == NeedsHuman {
+				summary.NeedsHumanCount++
+			}
 			if !c.ParkedAt.IsZero() && (oldestParked.IsZero() || c.ParkedAt.Before(oldestParked)) {
 				oldestParked = c.ParkedAt
 			}
 		}
 		if c.RetryReason != "" && (phase == RetryWait || parked(phase)) {
 			summary.RetryReasonCounts[c.RetryReason]++
+		}
+		if c.ReasonCode != "" && (phase == RetryWait || parked(phase)) {
+			summary.ReasonCodeCounts[c.ReasonCode]++
 		}
 	}
 	if !oldestParked.IsZero() {

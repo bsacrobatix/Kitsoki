@@ -61,8 +61,10 @@ func TestFailedCandidateBacksOffExponentiallyAndParksAtMaxAttempts(t *testing.T)
 		}
 	}
 	c := mustGet(t, store, first.ID)
-	if c.phase() != NeedsInput || c.RetryReason != "max_attempts_exhausted" {
-		t.Fatalf("exhausted candidate: phase=%s reason=%s", c.phase(), c.RetryReason)
+	// No Repairer configured for a gate failure, so exhaustion stays
+	// ReasonGateFailed rather than escalating to ReasonRepairerExhausted.
+	if c.phase() != NeedsHuman || c.RetryReason != "max_attempts_exhausted" || c.ReasonCode != ReasonGateFailed {
+		t.Fatalf("exhausted candidate: phase=%s reason=%s code=%s", c.phase(), c.RetryReason, c.ReasonCode)
 	}
 }
 
@@ -155,7 +157,7 @@ func TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount(t *testing.
 			t.Fatalf("iteration %d: expected worker to make progress", i)
 		}
 		c = mustGet(t, store, candidate.ID)
-		if c.phase() == NeedsInput {
+		if c.phase() == NeedsHuman {
 			break
 		}
 		if c.Attempt != 0 {
@@ -163,11 +165,13 @@ func TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount(t *testing.
 		}
 		clock = c.RetryAt.Add(time.Second)
 	}
-	if c.phase() != NeedsInput {
+	// Environmental exhaustion is automation giving up, not an operator's
+	// own park: needs_human, not needs_input.
+	if c.phase() != NeedsHuman {
 		t.Fatalf("candidate never parked after the wall-clock bound: phase=%s", c.phase())
 	}
-	if !strings.Contains(c.RetryReason, "environment_degraded") {
-		t.Fatalf("retry reason=%q, want it to identify environment degradation, not max attempts", c.RetryReason)
+	if !strings.Contains(c.RetryReason, "environment_degraded") || c.ReasonCode != ReasonEnvironmentDegraded {
+		t.Fatalf("retry reason=%q code=%q, want it to identify environment degradation, not max attempts", c.RetryReason, c.ReasonCode)
 	}
 	if c.Attempt != 0 {
 		t.Fatalf("parked candidate burned the product attempt budget: %d", c.Attempt)
@@ -274,8 +278,10 @@ func TestResumeRestoresParkedCandidateWithFreshAttemptBudget(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	drain(t, store, ProcessDeps{Integration: specIntegration(), Gate: failingGate(), MaxAttempts: 1})
 	c := mustGet(t, store, first.ID)
-	if c.phase() != NeedsInput {
-		t.Fatalf("precondition: %s", c.phase())
+	// The attempt budget exhausted itself (no Repairer configured), so the
+	// candidate parked as needs_human, not an operator's own needs_input.
+	if c.phase() != NeedsHuman || c.ReasonCode != ReasonGateFailed {
+		t.Fatalf("precondition: phase=%s code=%s", c.phase(), c.ReasonCode)
 	}
 	resumed, err := store.Resume(Op{ID: first.ID, Actor: "brad"})
 	if err != nil {
@@ -283,6 +289,9 @@ func TestResumeRestoresParkedCandidateWithFreshAttemptBudget(t *testing.T) {
 	}
 	if resumed.phase() != Queued || resumed.Attempt != 0 || !resumed.RetryAt.IsZero() {
 		t.Fatalf("resume: %#v", resumed)
+	}
+	if resumed.ReasonCode != "" || resumed.NeedsHumanEvidenceRef != "" {
+		t.Fatalf("resume did not clear the needs_human classification: %#v", resumed)
 	}
 	// After a repair, the candidate lands.
 	state, err := store.Process(context.Background(), ProcessDeps{Integration: specIntegration(), Gate: passingGate{}})
@@ -330,7 +339,7 @@ func TestOverrideLandsParkedCandidateWithoutGateAndIsAudited(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	deps := ProcessDeps{Integration: specIntegration(), Gate: failingGate(), MaxAttempts: 1}
 	drain(t, store, deps)
-	if mustGet(t, store, first.ID).phase() != NeedsInput {
+	if mustGet(t, store, first.ID).phase() != NeedsHuman {
 		t.Fatal("precondition failed")
 	}
 	if _, err := store.Override(Op{ID: first.ID, Actor: "brad", Reason: "hotfix outage"}); err != nil {
@@ -425,7 +434,7 @@ func TestHarnessFailureParksImmediatelyWithoutBurningRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	byID := index(state)
-	if byID[first.ID].phase() != NeedsInput || byID[first.ID].RetryReason != "resolver_harness_failure" {
+	if byID[first.ID].phase() != NeedsHuman || byID[first.ID].RetryReason != "resolver_harness_failure" || byID[first.ID].ReasonCode != ReasonHarnessFailure {
 		t.Fatalf("harness failure handling: %#v", byID[first.ID])
 	}
 	if byID[second.ID].phase() != Landed {

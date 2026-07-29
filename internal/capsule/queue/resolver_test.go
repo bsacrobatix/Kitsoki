@@ -237,7 +237,8 @@ func TestEmbeddedGitOpsStoryUsedWhenProjectLacksOne(t *testing.T) {
 
 // A broken embedded-fallback mechanism itself (not merely "no story found")
 // is a harness failure, not a silent no-op: it parks immediately as
-// needs_input rather than burning a retry on a broken launch path.
+// needs_human (automation is out of options, not an operator's own park)
+// rather than burning a retry on a broken launch path.
 func TestBrokenEmbeddedFallbackMechanismIsHarnessFailure(t *testing.T) {
 	store, root, _ := conflictingCandidate(t)
 	broken := func(context.Context) (string, error) {
@@ -252,8 +253,8 @@ func TestBrokenEmbeddedFallbackMechanismIsHarnessFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := state.Candidates[0]
-	if c.phase() != NeedsInput || c.RetryReason != "resolver_harness_failure" {
-		t.Fatalf("harness failure: phase=%s reason=%s", c.phase(), c.RetryReason)
+	if c.phase() != NeedsHuman || c.RetryReason != "resolver_harness_failure" || c.ReasonCode != ReasonHarnessFailure {
+		t.Fatalf("harness failure: phase=%s reason=%s code=%s", c.phase(), c.RetryReason, c.ReasonCode)
 	}
 }
 
@@ -280,7 +281,7 @@ func TestDefaultGitOpsEmbeddedResolverUsesRealEmbeddedLibrary(t *testing.T) {
 	}
 }
 
-// A present-but-broken resolver harness parks immediately as needs_input:
+// A present-but-broken resolver harness parks immediately as needs_human:
 // burning bounded retries on a broken launch path would only delay the train.
 func TestBrokenGitOpsHarnessParksAsNeedsInputImmediately(t *testing.T) {
 	store, root, _ := conflictingCandidate(t)
@@ -306,8 +307,8 @@ func TestBrokenGitOpsHarnessParksAsNeedsInputImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := state.Candidates[0]
-	if c.phase() != NeedsInput || c.RetryReason != "resolver_harness_failure" {
-		t.Fatalf("harness failure: phase=%s reason=%s attempt=%d", c.phase(), c.RetryReason, c.Attempt)
+	if c.phase() != NeedsHuman || c.RetryReason != "resolver_harness_failure" || c.ReasonCode != ReasonHarnessFailure {
+		t.Fatalf("harness failure: phase=%s reason=%s code=%s attempt=%d", c.phase(), c.RetryReason, c.ReasonCode, c.Attempt)
 	}
 }
 

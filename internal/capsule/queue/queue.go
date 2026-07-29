@@ -66,9 +66,18 @@ const (
 	Reprepare          Status = "reprepare"
 	NeedsConflictInput Status = "needs_conflict_input"
 	NeedsInput         Status = "needs_input"
-	RetryWait          Status = "retry_wait"
-	Landed             Status = "landed"
-	Rejected           Status = "rejected"
+	// NeedsHuman is the queue's own declaration that automation is out of
+	// options for this candidate: a broken harness, an exhausted bounded
+	// attempt budget, or an environment that stayed degraded past its
+	// wall-clock bound (see Worker.parkHuman). It is never chosen by a
+	// human — that is what NeedsInput (the operator's own `queue park`
+	// verb) remains for — and it always carries a ReasonCode. Otherwise it
+	// behaves exactly like NeedsInput/NeedsConflictInput: never auto-picked
+	// up by the worker loop (see parked), resumable by Store.Resume.
+	NeedsHuman Status = "needs_human"
+	RetryWait  Status = "retry_wait"
+	Landed     Status = "landed"
+	Rejected   Status = "rejected"
 
 	// Running and Ejected retain source compatibility with v1 callers.
 	Running Status = "running"
@@ -86,76 +95,86 @@ const (
 )
 
 type Candidate struct {
-	ID                       string             `json:"id"`
-	ProjectID                string             `json:"project_id"`
-	TargetRef                string             `json:"target_ref"`
-	TargetBaseSHAAtAdmission string             `json:"target_base_sha_at_admission,omitempty"`
-	TargetPolicy             TargetPolicy       `json:"target_policy"`
-	RequiredGateTier         string             `json:"required_gate_tier,omitempty"`
-	Sequence                 uint64             `json:"sequence"`
-	Branch                   string             `json:"branch"`
-	SHA                      string             `json:"sha"`
-	Admission                Admission          `json:"admission"`
-	ReceiptID                string             `json:"receipt_id"`
-	ReceiptRef               string             `json:"receipt_ref,omitempty"`
-	RunRecordRef             string             `json:"run_record_ref,omitempty"`
-	ReceiptDigest            string             `json:"receipt_digest,omitempty"`
-	Backend                  string             `json:"backend"`
-	Paths                    []string           `json:"paths,omitempty"`
-	Position                 int                `json:"position"`
-	Status                   Status             `json:"status"`
-	Phase                    Status             `json:"phase,omitempty"`
-	Submitted                time.Time          `json:"submitted_at"`
-	Started                  time.Time          `json:"started_at,omitempty"`
-	PhaseStartedAt           time.Time          `json:"phase_started_at,omitempty"`
-	Completed                time.Time          `json:"completed_at,omitempty"`
-	WorkerID                 string             `json:"worker_id,omitempty"`
-	LeaseExpiresAt           time.Time          `json:"lease_expires_at,omitempty"`
-	Attempt                  int                `json:"attempt,omitempty"`
-	RetryAt                  time.Time          `json:"retry_at,omitempty"`
-	BaseSHA                  string             `json:"base_sha,omitempty"`
-	TreeSHA                  string             `json:"tree_sha,omitempty"`
-	GateVersion              string             `json:"gate_version,omitempty"`
-	GatePolicyDigest         string             `json:"gate_policy_digest,omitempty"`
-	DependencyFingerprint    string             `json:"dependency_fingerprint,omitempty"`
-	RuntimeConfigDigest      string             `json:"runtime_config_digest,omitempty"`
-	IntegrationRef           string             `json:"integration_ref,omitempty"`
-	WorkspaceID              string             `json:"workspace_id,omitempty"`
-	WorkspacePath            string             `json:"workspace_path,omitempty"`
-	ConflictContinuation     string             `json:"conflict_continuation,omitempty"`
-	GateLog                  string             `json:"gate_log,omitempty"`
-	GateEvidence             []string           `json:"gate_evidence,omitempty"`
-	FinalizationLog          string             `json:"finalization_log,omitempty"`
-	ResultMainSHA            string             `json:"result_main_sha,omitempty"`
-	Failure                  string             `json:"failure,omitempty"`
-	SpeculativeSHA           string             `json:"speculative_sha,omitempty"` // v1 compatibility
-	ValidatedSHA             string             `json:"validated_sha,omitempty"`   // v1 compatibility
-	Evidence                 []string           `json:"evidence,omitempty"`
-	RetryReason              string             `json:"retry_reason,omitempty"`
-	EjectionReason           string             `json:"ejection_reason,omitempty"`
-	EmergencySequence        uint64             `json:"emergency_sequence,omitempty"`
-	ParkedAt                 time.Time          `json:"parked_at,omitempty"`
-	ParkedBy                 string             `json:"parked_by,omitempty"`
-	OverrideGate             bool               `json:"override_gate,omitempty"`
-	OverrideBy               string             `json:"override_by,omitempty"`
-	OverrideReason           string             `json:"override_reason,omitempty"`
-	FinalizationPolicy       FinalizationPolicy `json:"finalization_policy,omitempty"`
-	ManifestDigest           string             `json:"manifest_digest,omitempty"`
-	RuntimeInstance          string             `json:"runtime_instance,omitempty"`
-	RuntimeReceipt           string             `json:"runtime_receipt,omitempty"`
-	RequiredReceiptIDs       []string           `json:"required_receipt_ids,omitempty"`
-	SourceAnchorID           string             `json:"source_anchor_id,omitempty"`
-	Approval                 *Approval          `json:"approval,omitempty"`
-	EnvRetries               int                `json:"env_retries,omitempty"`
-	FirstEnvFailureAt        time.Time          `json:"first_env_failure_at,omitempty"`
+	ID                       string       `json:"id"`
+	ProjectID                string       `json:"project_id"`
+	TargetRef                string       `json:"target_ref"`
+	TargetBaseSHAAtAdmission string       `json:"target_base_sha_at_admission,omitempty"`
+	TargetPolicy             TargetPolicy `json:"target_policy"`
+	RequiredGateTier         string       `json:"required_gate_tier,omitempty"`
+	Sequence                 uint64       `json:"sequence"`
+	Branch                   string       `json:"branch"`
+	SHA                      string       `json:"sha"`
+	Admission                Admission    `json:"admission"`
+	ReceiptID                string       `json:"receipt_id"`
+	ReceiptRef               string       `json:"receipt_ref,omitempty"`
+	RunRecordRef             string       `json:"run_record_ref,omitempty"`
+	ReceiptDigest            string       `json:"receipt_digest,omitempty"`
+	Backend                  string       `json:"backend"`
+	Paths                    []string     `json:"paths,omitempty"`
+	Position                 int          `json:"position"`
+	Status                   Status       `json:"status"`
+	Phase                    Status       `json:"phase,omitempty"`
+	Submitted                time.Time    `json:"submitted_at"`
+	Started                  time.Time    `json:"started_at,omitempty"`
+	PhaseStartedAt           time.Time    `json:"phase_started_at,omitempty"`
+	Completed                time.Time    `json:"completed_at,omitempty"`
+	WorkerID                 string       `json:"worker_id,omitempty"`
+	LeaseExpiresAt           time.Time    `json:"lease_expires_at,omitempty"`
+	Attempt                  int          `json:"attempt,omitempty"`
+	RetryAt                  time.Time    `json:"retry_at,omitempty"`
+	BaseSHA                  string       `json:"base_sha,omitempty"`
+	TreeSHA                  string       `json:"tree_sha,omitempty"`
+	GateVersion              string       `json:"gate_version,omitempty"`
+	GatePolicyDigest         string       `json:"gate_policy_digest,omitempty"`
+	DependencyFingerprint    string       `json:"dependency_fingerprint,omitempty"`
+	RuntimeConfigDigest      string       `json:"runtime_config_digest,omitempty"`
+	IntegrationRef           string       `json:"integration_ref,omitempty"`
+	WorkspaceID              string       `json:"workspace_id,omitempty"`
+	WorkspacePath            string       `json:"workspace_path,omitempty"`
+	ConflictContinuation     string       `json:"conflict_continuation,omitempty"`
+	GateLog                  string       `json:"gate_log,omitempty"`
+	GateEvidence             []string     `json:"gate_evidence,omitempty"`
+	FinalizationLog          string       `json:"finalization_log,omitempty"`
+	ResultMainSHA            string       `json:"result_main_sha,omitempty"`
+	Failure                  string       `json:"failure,omitempty"`
+	SpeculativeSHA           string       `json:"speculative_sha,omitempty"` // v1 compatibility
+	ValidatedSHA             string       `json:"validated_sha,omitempty"`   // v1 compatibility
+	Evidence                 []string     `json:"evidence,omitempty"`
+	RetryReason              string       `json:"retry_reason,omitempty"`
+	// ReasonCode is RetryReason's typed, closed-set classification (see
+	// ReasonCode's doc). It is carried alongside RetryReason, never instead
+	// of it. A durable record written before this field existed loads with
+	// RetryReason set and ReasonCode empty; normalize stamps
+	// ReasonLegacyFreeform onto it so every candidate that has ever parked
+	// or retried carries some code once loaded through Store.
+	ReasonCode ReasonCode `json:"reason_code,omitempty"`
+	// NeedsHumanEvidenceRef is the needs_human evidence pointer: a log path,
+	// gate output reference, or (failing either) this candidate's own ID —
+	// set whenever Worker.parkHuman moves a candidate to NeedsHuman, so a
+	// human or medic has something concrete to open without re-deriving it
+	// from Evidence.
+	NeedsHumanEvidenceRef string             `json:"needs_human_evidence_ref,omitempty"`
+	EjectionReason        string             `json:"ejection_reason,omitempty"`
+	EmergencySequence     uint64             `json:"emergency_sequence,omitempty"`
+	ParkedAt              time.Time          `json:"parked_at,omitempty"`
+	ParkedBy              string             `json:"parked_by,omitempty"`
+	OverrideGate          bool               `json:"override_gate,omitempty"`
+	OverrideBy            string             `json:"override_by,omitempty"`
+	OverrideReason        string             `json:"override_reason,omitempty"`
+	FinalizationPolicy    FinalizationPolicy `json:"finalization_policy,omitempty"`
+	ManifestDigest        string             `json:"manifest_digest,omitempty"`
+	RuntimeInstance       string             `json:"runtime_instance,omitempty"`
+	RuntimeReceipt        string             `json:"runtime_receipt,omitempty"`
+	RequiredReceiptIDs    []string           `json:"required_receipt_ids,omitempty"`
+	SourceAnchorID        string             `json:"source_anchor_id,omitempty"`
+	Approval              *Approval          `json:"approval,omitempty"`
+	EnvRetries            int                `json:"env_retries,omitempty"`
+	FirstEnvFailureAt     time.Time          `json:"first_env_failure_at,omitempty"`
 	// EnvFailureSignature is the exact message of the most recent
 	// environmental failure, and EnvRepeatStreak counts how many consecutive
 	// environmental failures (including the current one) matched it exactly.
 	// See ProcessDeps.MaxEnvRepeat: an unbroken streak of identical messages
-	// parks the candidate well before MaxEnvDuration's wall-clock bound would,
-	// because an unchanged message is proof the condition is not transient. A
-	// changed message resets the streak to 1 and keeps the lenient
-	// wall-clock-bounded retry policy.
+	// parks the candidate well before MaxEnvDuration's wall-clock bound would.
 	EnvFailureSignature string `json:"env_failure_signature,omitempty"`
 	EnvRepeatStreak     int    `json:"env_repeat_streak,omitempty"`
 }
@@ -554,8 +573,10 @@ func nextSequence(cs []Candidate) uint64 {
 func terminal(p Status) bool { return p == Landed || p == Rejected }
 
 // parked candidates wait on explicit human input; they are skipped by workers
-// and never block later candidates from preparing or finalizing.
-func parked(p Status) bool { return p == NeedsInput || p == NeedsConflictInput }
+// and never block later candidates from preparing or finalizing. NeedsHuman
+// is included: it is exactly as parked as NeedsInput/NeedsConflictInput, the
+// only difference being who/what put it there (see Status.NeedsHuman's doc).
+func parked(p Status) bool { return p == NeedsInput || p == NeedsConflictInput || p == NeedsHuman }
 
 // before reports whether a orders ahead of b for claiming and finalization:
 // the emergency lane first (FIFO within itself), then durable Position.
@@ -791,6 +812,14 @@ func normalize(state State) State {
 			c.RequiredGateTier = RequiredGateTierForTarget(c.TargetRef)
 		}
 		c.RequiredReceiptIDs = cleanStrings(c.RequiredReceiptIDs)
+		// Backward compatibility: a durable record written before ReasonCode
+		// existed carries a free-text RetryReason with no code at all. Map
+		// it to ReasonLegacyFreeform on load rather than leaving it
+		// unclassified — every candidate that has ever parked or retried
+		// carries some code once loaded through Store, old or new.
+		if c.RetryReason != "" && c.ReasonCode == "" {
+			c.ReasonCode = ReasonLegacyFreeform
+		}
 	}
 	state.Schema = Schema
 	sort.SliceStable(state.Candidates, func(i, j int) bool { return state.Candidates[i].Sequence < state.Candidates[j].Sequence })
@@ -1042,6 +1071,8 @@ func StatusLine(c Candidate, at time.Time) string {
 	switch c.phase() {
 	case NeedsConflictInput:
 		next = "conflict input"
+	case NeedsHuman:
+		next = "human required"
 	case RetryWait:
 		next = "retry"
 	case ReadyToFinalize:

@@ -291,7 +291,7 @@ func (s *Store) Add(id string, q queue.Candidate) (Wave, error) {
 	})
 }
 func parked(status queue.Status) bool {
-	return status == queue.NeedsInput || status == queue.NeedsConflictInput || status == queue.Rejected
+	return status == queue.NeedsInput || status == queue.NeedsConflictInput || status == queue.NeedsHuman || status == queue.Rejected
 }
 func targets(ms []Member) []Target {
 	seen := map[string]Target{}

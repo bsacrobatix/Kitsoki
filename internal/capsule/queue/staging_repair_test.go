@@ -168,8 +168,12 @@ func TestWorkerParksCandidateWhenShellRepairerCannotFixRedGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := state.Candidates[0]
-	if c.phase() != NeedsInput {
-		t.Fatalf("candidate=%#v, want parked as needs_input once the unrepairable red gate exhausts its one attempt", c)
+	// A Repairer was configured and still could not turn the gate green
+	// within the attempt budget: needs_human with the more specific
+	// ReasonRepairerExhausted code, not the generic ReasonGateFailed a
+	// repair-free exhaustion would carry.
+	if c.phase() != NeedsHuman || c.ReasonCode != ReasonRepairerExhausted {
+		t.Fatalf("candidate=%#v, want parked as needs_human (repairer-exhausted) once the unrepairable red gate exhausts its one attempt", c)
 	}
 	if !hasEvidence(c, "queue:repair:") {
 		t.Fatalf("evidence missing the failed repair attempt: %v", c.Evidence)
