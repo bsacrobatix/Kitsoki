@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,7 +21,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueImportCapsuleSourceCmd(), queueCapsulePromotionExecutorCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd(), queueSweepCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueImportCapsuleSourceCmd(), queueCapsulePromotionExecutorCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueGateRunCmd(), queueMigrateCmd(), queueSweepCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -35,6 +36,66 @@ func queueCmd() *cobra.Command {
 		}),
 	)
 	return cmd
+}
+
+// queueGateRunCmd is the cheap workstation-wide admission wrapper for direct
+// implementation checks. It shares the exact FileGateCapacity authority used
+// by queue workers and passes its open slot to nested invocations.
+func queueGateRunCmd() *cobra.Command {
+	var capacityRoot, capacityPool, gateTier, project string
+	var capacity int
+	cmd := &cobra.Command{
+		Use:   "gate-run [flags] -- <command> [args...]",
+		Short: "Run one direct deterministic gate under shared host capacity",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			absProject, err := filepath.Abs(project)
+			if err != nil {
+				return fmt.Errorf("queue gate-run: resolve project: %w", err)
+			}
+			tier := strings.TrimSpace(gateTier)
+			if tier == "" || strings.ContainsAny(tier, "\x00\n\r/\\") {
+				return fmt.Errorf("queue gate-run: --gate-tier is required")
+			}
+			lease, err := (queue.FileGateCapacity{Root: capacityRoot, Pool: capacityPool, Max: capacity}).AcquireLease(cmd.Context(), queue.GateAdmissionRequest{
+				ProjectID: absProject,
+				Tier:      tier,
+				WorkerID:  "direct-gate",
+			})
+			if err != nil {
+				return fmt.Errorf("queue gate-run: acquire capacity: %w", err)
+			}
+			defer lease.Release()
+			child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)
+			child.Dir = absProject
+			child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+			child.Env = commandEnv("KITSOKI_GATE_TIER", tier)
+			if err := lease.ConfigureCommand(child); err != nil {
+				return err
+			}
+			if err := child.Run(); err != nil {
+				return fmt.Errorf("queue gate-run: %s: %w", args[0], err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root used as the command working directory")
+	cmd.Flags().StringVar(&capacityRoot, "capacity-root", queue.DefaultGateCapacityRoot(), "absolute shared gate-capacity authority root")
+	cmd.Flags().StringVar(&capacityPool, "capacity-pool", "default", "operator-owned physical resource pool shared across repositories")
+	cmd.Flags().IntVar(&capacity, "capacity", 1, "maximum concurrent gates in the physical capacity pool")
+	cmd.Flags().StringVar(&gateTier, "gate-tier", "change", "landing tier identity exported as KITSOKI_GATE_TIER")
+	return cmd
+}
+
+func commandEnv(name, value string) []string {
+	prefix := name + "="
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, item := range os.Environ() {
+		if !strings.HasPrefix(item, prefix) {
+			env = append(env, item)
+		}
+	}
+	return append(env, prefix+value)
 }
 
 func queueApproveCmd() *cobra.Command {
@@ -336,9 +397,12 @@ func queueWorkerCmd() *cobra.Command {
 		}
 		deps.GateTimeout = gateTimeout
 		if strings.TrimSpace(executorName) != "" {
-			pipeline := executorPipeline
-			if strings.TrimSpace(pipeline) == "" {
+			pipeline := strings.TrimSpace(executorPipeline)
+			if pipeline == "" {
 				pipeline = deps.GateTier
+			}
+			if pipeline != deps.GateTier {
+				return fmt.Errorf("queue worker: --executor-pipeline %q must equal effective --gate-tier %q for target %q", pipeline, deps.GateTier, target)
 			}
 			deps.Gate = queue.ExecutorGate{ProjectRoot: project, Executor: executorName, Pipeline: pipeline}
 			deps.GateVersion = fmt.Sprintf("executor:%s:%s", executorName, pipeline)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -99,6 +100,47 @@ func TestQueueWorkerFlagsDefaultToDerivedTierAndSharedCapacity(t *testing.T) {
 	require.Equal(t, "full", queueGateTier("main"))
 	require.Equal(t, "release", queueGateTier("deploy/prod"))
 	require.Equal(t, "change", queueGateTier("staging/local"))
+}
+
+func TestQueueWorkerRejectsExecutorPipelineTierMismatchAtStartup(t *testing.T) {
+	cmd := queueWorkerCmd()
+	cmd.SetArgs([]string{
+		"--project", t.TempDir(),
+		"--executor", "capsule",
+		"--executor-pipeline", "change",
+		"--target", "main",
+		"--capacity-root", t.TempDir(),
+		"--capacity-pool", "test",
+		"--once",
+	})
+	err := cmd.Execute()
+	require.ErrorContains(t, err, `--executor-pipeline "change" must equal effective --gate-tier "full"`)
+}
+
+func TestQueueGateRunIsReentrantAcrossNestedCLIProcesses(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "kitsoki")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build nested CLI: %v\n%s", err, out)
+	}
+	capacityRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := queueGateRunCmd()
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{
+		"--project", t.TempDir(),
+		"--capacity-root", capacityRoot,
+		"--capacity-pool", "nested-cli",
+		"--gate-tier", "full",
+		"--", bin, "queue", "gate-run",
+		"--project", ".",
+		"--capacity-root", capacityRoot,
+		"--capacity-pool", "nested-cli",
+		"--gate-tier", "full",
+		"--", "sh", "-c", `test "$KITSOKI_GATE_TIER" = full`,
+	})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestQueueSummaryLineFormatsPhasesAndRetryReasons(t *testing.T) {

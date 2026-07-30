@@ -1,0 +1,36 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.work_queue_worker:
+    by_call:
+      claim_fixer:
+        data:
+          claimed: true
+          work_ref: wq-fix-wrong-kind
+          queue: delivery-fixer
+          payload: { candidate_id: queue-wrong-kind, project: /repo, workdir: /workspace, failure_context: "gate failed" }
+          fence: 19
+          attempt: 1
+      fail_fixer:
+        data: { work_ref: wq-fix-wrong-kind, queue: delivery-fixer, status: failed, fence: 19, attempt: 1 }
+  host.agent.task:
+    by_call:
+      run_fixer:
+        delay: "10ms"
+        data:
+          submitted:
+            passed: true
+            summary: "Claims success with an unsupported archive."
+            trace_ref: trace-fixer-wrong-kind
+            bundle_ref: bundles/fix.tar
+            bundle_digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            bundle_kind: archive
+
+turns:
+  - intent: { name: work_fixer }
+    advance_clock: "100ms"
+    expect_state: worker_failed
+
+expect_no_errors: true

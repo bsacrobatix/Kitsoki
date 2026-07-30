@@ -7,8 +7,19 @@
     "passed": { "type": "boolean" },
     "summary": { "type": "string", "minLength": 1 },
     "trace_ref": { "type": "string", "minLength": 1 },
-    "bundle_ref": { "type": "string" },
-    "bundle_digest": { "type": "string" },
-    "bundle_kind": { "type": "string" }
-  }
+    "bundle_ref": { "type": "string", "minLength": 1 },
+    "bundle_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "bundle_kind": { "type": "string", "const": "git-bundle" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "passed": { "const": true } },
+        "required": ["passed"]
+      },
+      "then": {
+        "required": ["bundle_ref", "bundle_digest", "bundle_kind"]
+      }
+    }
+  ]
 }

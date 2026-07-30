@@ -175,6 +175,7 @@ type OperatingSystemServices struct {
 	Codeact    *WorkspaceCodeactService
 	Gates      *GateRunner
 	HostRun    HostRunPolicy
+	QueueRoot  string
 }
 
 // NewOperatingSystemServices constructs the production authority graph.  It
@@ -360,7 +361,7 @@ func (srv *Server) registerOperatingSystemTools() {
 	RegisterManagedWorkspaceTools(srv.mcpSrv, os.Workspaces, os.Guard)
 	RegisterWorkspaceCodeactTool(srv.mcpSrv, os.Codeact)
 	RegisterGateTools(srv.mcpSrv, os.Gates)
-	RegisterQueueTools(srv.mcpSrv, queue.Store{ProjectRoot: os.Workspaces.projectRoot()})
+	RegisterQueueTools(srv.mcpSrv, queue.Store{ProjectRoot: os.Workspaces.projectRoot(), QueueRoot: os.QueueRoot})
 	srv.registerDiagnoseExplainTools()
 }
 

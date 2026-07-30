@@ -262,6 +262,7 @@ queue directory:
   --project /opt/pog/source \
   --queue-root /var/lib/kitsoki-queue-admission/pog/queue \
   --target staging/local \
+  --gate-tier change \
   --executor vm-pool \
   --executor-pipeline change
 ```
@@ -269,6 +270,14 @@ queue directory:
 The same `--queue-root` is available on submit, external submit, process,
 migrate, sweep, approval, and operator verbs. Do not copy or mirror
 `state.json` into the project checkout: the external authority is canonical.
+
+Protected workers must pass the effective tier in argv. Executor-backed
+workers refuse to start when `--executor-pipeline` differs from
+`--gate-tier`; a local `--gate` is opaque shell text, so its tier is exported
+to the command as `KITSOKI_GATE_TIER` and cannot be inferred from that text.
+Direct implementation checks should use `kitsoki queue gate-run --gate-tier
+<tier> -- <command>` so they share the same host capacity pool. Nested
+gate-run calls borrow the inherited open slot and do not deadlock.
 
 ### Hosted `integration/current` drain worker
 

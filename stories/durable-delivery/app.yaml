@@ -37,7 +37,9 @@ world:
   reviewer_work_ref: { type: string, default: "" }
   reviewer_status: { type: string, default: "" }
   next_stage_action: { type: string, default: "" }
-  claimed: { type: bool, default: false }
+  # Tri-state: "" before claim bind, then true/false. The empty value keeps
+  # guarded post-bind routing from firing with stale/default state.
+  claimed: { type: string, default: "" }
   work_ref: { type: string, default: "" }
   work_queue: { type: string, default: "" }
   work_payload: { type: object, default: {} }
@@ -63,6 +65,14 @@ intents:
     priority: 80
   route:
     description: "(internal) route a refreshed durable task."
+    examples: []
+    priority: 1
+  claim_work:
+    description: "(internal) execute a successfully claimed durable task."
+    examples: []
+    priority: 1
+  no_work:
+    description: "(internal) return an empty worker poll to idle."
     examples: []
     priority: 1
   work_fixer:
@@ -113,8 +123,9 @@ states:
               bind:
                 fixer_work_ref: work_ref
       work_fixer:
-        - target: fixer_running
+        - target: fixer_claimed
           effects:
+            - set: { claimed: "", work_ref: "", work_payload: {}, fence: 0, attempt: 0 }
             - invoke: host.work_queue_worker
               id: claim_fixer
               with: { op: claim, queue: delivery-fixer }
@@ -126,8 +137,9 @@ states:
                 fence: fence
                 attempt: attempt
       work_reviewer:
-        - target: reviewer_running
+        - target: reviewer_claimed
           effects:
+            - set: { claimed: "", work_ref: "", work_payload: {}, fence: 0, attempt: 0 }
             - invoke: host.work_queue_worker
               id: claim_reviewer
               with: { op: claim, queue: delivery-reviewer }
@@ -139,6 +151,32 @@ states:
                 fence: fence
                 attempt: attempt
       look: [{ target: . }]
+
+  fixer_claimed:
+    view:
+      - heading: "Fixer claim resolved"
+      - prose: "Routing the durable claim result."
+    on_enter:
+      - when: "world.claimed == true"
+        emit_intent: claim_work
+      - when: "world.claimed == false"
+        emit_intent: no_work
+    on:
+      claim_work: [{ target: fixer_running }]
+      no_work: [{ target: idle }]
+
+  reviewer_claimed:
+    view:
+      - heading: "Reviewer claim resolved"
+      - prose: "Routing the durable claim result."
+    on_enter:
+      - when: "world.claimed == true"
+        emit_intent: claim_work
+      - when: "world.claimed == false"
+        emit_intent: no_work
+    on:
+      claim_work: [{ target: reviewer_running }]
+      no_work: [{ target: idle }]
 
   waiting_fixer:
     view:
@@ -237,7 +275,7 @@ states:
         on_complete:
           - set:
               task_result: "{{ world.last_job_result.submitted }}"
-          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed && world.last_job_result.submitted.bundle_ref != '' && len(world.last_job_result.submitted.bundle_digest) == 71 && hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') && world.last_job_result.submitted.bundle_kind == 'git-bundle'"
             invoke: host.work_queue_worker
             id: complete_fixer
             with:
@@ -254,7 +292,7 @@ states:
                 bundle_ref: "{{ world.last_job_result.submitted.bundle_ref }}"
                 bundle_digest: "{{ world.last_job_result.submitted.bundle_digest }}"
                 bundle_kind: "{{ world.last_job_result.submitted.bundle_kind }}"
-          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed || world.last_job_result.submitted.bundle_ref == '' || len(world.last_job_result.submitted.bundle_digest) != 71 || !hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') || world.last_job_result.submitted.bundle_kind != 'git-bundle'"
             invoke: host.work_queue_worker
             id: fail_fixer
             with:
@@ -270,9 +308,9 @@ states:
                 attempt: "{{ world.attempt }}"
                 fence: "{{ world.fence }}"
                 trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
-          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed && world.last_job_result.submitted.bundle_ref != '' && len(world.last_job_result.submitted.bundle_digest) == 71 && hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') && world.last_job_result.submitted.bundle_kind == 'git-bundle'"
             target: worker_done
-          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed || world.last_job_result.submitted.bundle_ref == '' || len(world.last_job_result.submitted.bundle_digest) != 71 || !hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') || world.last_job_result.submitted.bundle_kind != 'git-bundle'"
             target: worker_failed
 
   reviewer_running:
@@ -295,7 +333,7 @@ states:
         on_complete:
           - set:
               task_result: "{{ world.last_job_result.submitted }}"
-          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed && world.last_job_result.submitted.bundle_ref != '' && len(world.last_job_result.submitted.bundle_digest) == 71 && hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') && world.last_job_result.submitted.bundle_kind == 'git-bundle'"
             invoke: host.work_queue_worker
             id: complete_reviewer
             with:
@@ -309,7 +347,7 @@ states:
                 attempt: "{{ world.attempt }}"
                 fence: "{{ world.fence }}"
                 trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
-          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed || world.last_job_result.submitted.bundle_ref == '' || len(world.last_job_result.submitted.bundle_digest) != 71 || !hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') || world.last_job_result.submitted.bundle_kind != 'git-bundle'"
             invoke: host.work_queue_worker
             id: fail_reviewer
             with:
@@ -325,9 +363,9 @@ states:
                 attempt: "{{ world.attempt }}"
                 fence: "{{ world.fence }}"
                 trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
-          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed && world.last_job_result.submitted.bundle_ref != '' && len(world.last_job_result.submitted.bundle_digest) == 71 && hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') && world.last_job_result.submitted.bundle_kind == 'git-bundle'"
             target: worker_done
-          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed || world.last_job_result.submitted.bundle_ref == '' || len(world.last_job_result.submitted.bundle_digest) != 71 || !hasPrefix(world.last_job_result.submitted.bundle_digest, 'sha256:') || world.last_job_result.submitted.bundle_kind != 'git-bundle'"
             target: worker_failed
 
   worker_done:

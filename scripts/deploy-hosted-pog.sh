@@ -229,7 +229,8 @@ test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq "ExecStart=$hosted_engine queue worker" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq -- "--queue-root $hosted_queue_root" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq -- '--executor vm-pool' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
-grep -Fq -- '--executor-pipeline change' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq -- '--gate-tier full' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq -- '--executor-pipeline full' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 ! grep -Fq -- '--gate ' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq "Environment=KITSOKI_SOURCE_DIR=$hosted_source" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
@@ -240,7 +241,8 @@ if [ "$queue_pid" -gt 0 ]; then
 	queue_exec_start="$(systemctl show --property ExecStart --value kitsoki-queue-worker.service)"
 	grep -Fq -- "--queue-root $hosted_queue_root" <<<"$queue_exec_start"
 	grep -Fq -- '--executor vm-pool' <<<"$queue_exec_start"
-	grep -Fq -- '--executor-pipeline change' <<<"$queue_exec_start"
+	grep -Fq -- '--gate-tier full' <<<"$queue_exec_start"
+	grep -Fq -- '--executor-pipeline full' <<<"$queue_exec_start"
 	! grep -Fq -- '--gate ' <<<"$queue_exec_start"
 fi
 health="$(curl -fsS http://127.0.0.1:7777/api/portal-health)"

@@ -173,6 +173,7 @@ func mcpCmd() *cobra.Command {
 		issueSink               string
 		readOnly                bool
 		operatingProfile        string
+		queueRoot               string
 		graphCatalogs           []string
 		graphScopes             []string
 		graphSteward            bool
@@ -315,6 +316,7 @@ docs land):
 			if osErr != nil {
 				return fmt.Errorf("mcp: configure operating-system profile %q: %w", operatingProfile, osErr)
 			}
+			operatingServices.QueueRoot = strings.TrimSpace(queueRoot)
 
 			// Wire issue.create to file via host.gh.ticket.create and write
 			// rendered assets under the default artifacts dir. The default sink is
@@ -370,6 +372,8 @@ docs land):
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	cmd.Flags().StringVar(&operatingProfile, "operating-profile", string(studio.DefaultStudioOperatingProfile),
 		"Studio operating-system profile: strict (default), legacy (explicit compatibility), or escape (audited exception)")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "",
+		"exact external merge-queue authority directory exposed by queue.* tools (default <project>/.capsules/queue)")
 	cmd.Flags().StringArrayVar(&graphCatalogs, "catalog", nil,
 		"[alias=]path to a bound catalog for the mounted graph.*/feedback.* tool family; repeatable, first is default (mirrors `kitsoki mcp-graph --catalog`; omit to leave the family catalog-less, degrading every call to NO_CATALOG)")
 	cmd.Flags().StringArrayVar(&graphScopes, "graph-scope", nil,

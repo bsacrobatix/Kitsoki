@@ -902,8 +902,18 @@ func (scrubbedShellRunner) Run(ctx context.Context, dir, program string, args ..
 		}
 		cmd.Env = append(cmd.Env, item)
 	}
+	if tier, _ := ctx.Value(gateTierContextKey{}).(string); strings.TrimSpace(tier) != "" {
+		cmd.Env = setEnv(cmd.Env, "KITSOKI_GATE_TIER", strings.TrimSpace(tier))
+	}
+	if lease := gateCapacityLeaseFromContext(ctx); lease != nil {
+		if err := lease.ConfigureCommand(cmd); err != nil {
+			return nil, err
+		}
+	}
 	return cmd.CombinedOutput()
 }
+
+type gateTierContextKey struct{}
 
 func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
 	root, err := s.root()

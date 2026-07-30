@@ -192,10 +192,11 @@ func TestNewStarlarkRunHandler_CtxHostQueueVerbAllowListed(t *testing.T) {
 func TestNewStarlarkRunHandler_CtxHostDeliveryLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	project := filepath.Join(dir, "proj")
+	queueRoot := filepath.Join(dir, "shared-queue")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	seeded, err := queue.Store{ProjectRoot: project}.Submit(queue.Submit{
+	seeded, err := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}.Submit(queue.Submit{
 		Branch: "delivery", SHA: strings.Repeat("c", 40),
 		Admission: queue.EmergencySkipTestsAdmission,
 	})
@@ -205,14 +206,14 @@ func TestNewStarlarkRunHandler_CtxHostDeliveryLifecycle(t *testing.T) {
 	script := filepath.Join(dir, "glue.star")
 	if err := os.WriteFile(script, []byte(
 		"def main(ctx):\n"+
-			"    cancelled = ctx.host.call(\"host.queue.cancel\", {\"project\": ctx.inputs[\"project\"], \"id\": ctx.inputs[\"id\"]})\n"+
-			"    retried = ctx.host.call(\"host.queue.retry\", {\"project\": ctx.inputs[\"project\"], \"id\": ctx.inputs[\"id\"]})\n"+
+			"    cancelled = ctx.host.call(\"host.queue.cancel\", {\"project\": ctx.inputs[\"project\"], \"queue_root\": ctx.inputs[\"queue_root\"], \"id\": ctx.inputs[\"id\"]})\n"+
+			"    retried = ctx.host.call(\"host.queue.retry\", {\"project\": ctx.inputs[\"project\"], \"queue_root\": ctx.inputs[\"queue_root\"], \"id\": ctx.inputs[\"id\"]})\n"+
 			"    return {\"cancel_action\": cancelled[\"next_action\"], \"retry_action\": retried[\"next_action\"]}\n",
 	), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(script+".yaml", []byte(
-		"inputs:\n  project: { type: string }\n  id: { type: string }\noutputs:\n  cancel_action: { type: string }\n  retry_action: { type: string }\n",
+		"inputs:\n  project: { type: string }\n  queue_root: { type: string }\n  id: { type: string }\noutputs:\n  cancel_action: { type: string }\n  retry_action: { type: string }\n",
 	), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +221,7 @@ func TestNewStarlarkRunHandler_CtxHostDeliveryLifecycle(t *testing.T) {
 	RegisterBuiltins(reg)
 	res, err := NewStarlarkRunHandler(reg)(context.Background(), map[string]any{
 		"script": script,
-		"inputs": map[string]any{"project": project, "id": seeded.ID},
+		"inputs": map[string]any{"project": project, "queue_root": queueRoot, "id": seeded.ID},
 		"capabilities": starlarkTestHostCapabilities(
 			"host.queue.cancel", "host.queue.retry",
 		),

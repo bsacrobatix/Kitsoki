@@ -19,15 +19,22 @@ import (
 
 // QueueStatusInput selects the whole queue (empty id) or one candidate.
 type QueueStatusInput struct {
-	ID string `json:"id,omitempty"`
+	ID        string `json:"id,omitempty"`
+	QueueRoot string `json:"queue_root,omitempty"`
 }
 
 // QueueOpInput identifies a candidate plus the human context of the operator
 // action. Actor and reason are recorded in the candidate's durable evidence.
 type QueueOpInput struct {
-	ID     string `json:"id"`
-	Actor  string `json:"actor,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	ID        string `json:"id"`
+	Actor     string `json:"actor,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	QueueRoot string `json:"queue_root,omitempty"`
+}
+
+type QueueSubmitInput struct {
+	delivery.SubmitRequest
+	QueueRoot string `json:"queue_root,omitempty"`
 }
 
 // QueueOpResult is the candidate as it stands after the operator verb applied.
@@ -39,8 +46,16 @@ type queueToolHandlers struct {
 	store queue.Store
 }
 
+func (h queueToolHandlers) storeFor(queueRoot string) queue.Store {
+	store := h.store
+	if strings.TrimSpace(queueRoot) != "" {
+		store.QueueRoot = strings.TrimSpace(queueRoot)
+	}
+	return store
+}
+
 func (h queueToolHandlers) status(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueStatusInput) (*mcpsdk.CallToolResult, any, error) {
-	service := delivery.New(h.store)
+	service := delivery.New(h.storeFor(input.QueueRoot))
 	if id := strings.TrimSpace(input.ID); id != "" {
 		result, err := service.Get(id)
 		if err != nil {
@@ -55,8 +70,8 @@ func (h queueToolHandlers) status(_ context.Context, _ *mcpsdk.CallToolRequest, 
 	return nil, result, nil
 }
 
-func (h queueToolHandlers) submit(ctx context.Context, _ *mcpsdk.CallToolRequest, input delivery.SubmitRequest) (*mcpsdk.CallToolResult, any, error) {
-	result, err := delivery.New(h.store).Submit(ctx, input)
+func (h queueToolHandlers) submit(ctx context.Context, _ *mcpsdk.CallToolRequest, input QueueSubmitInput) (*mcpsdk.CallToolResult, any, error) {
+	result, err := delivery.New(h.storeFor(input.QueueRoot)).Submit(ctx, input.SubmitRequest)
 	if err != nil {
 		return queueToolError(err), nil, nil
 	}
@@ -67,7 +82,7 @@ func (h queueToolHandlers) get(_ context.Context, _ *mcpsdk.CallToolRequest, inp
 	if strings.TrimSpace(input.ID) == "" {
 		return buildToolError(ErrBadRequest, "queue: candidate id is required"), nil, nil
 	}
-	result, err := delivery.New(h.store).Get(input.ID)
+	result, err := delivery.New(h.storeFor(input.QueueRoot)).Get(input.ID)
 	if err != nil {
 		return queueToolError(err), nil, nil
 	}
@@ -81,7 +96,7 @@ func (h queueToolHandlers) deliveryOperate(
 	if strings.TrimSpace(input.ID) == "" {
 		return buildToolError(ErrBadRequest, "queue: candidate id is required"), nil, nil
 	}
-	result, err := verb(delivery.New(h.store), queue.Op{ID: input.ID, Actor: input.Actor, Reason: input.Reason})
+	result, err := verb(delivery.New(h.storeFor(input.QueueRoot)), queue.Op{ID: input.ID, Actor: input.Actor, Reason: input.Reason})
 	if err != nil {
 		return queueToolError(err), nil, nil
 	}
@@ -96,11 +111,11 @@ func (h queueToolHandlers) cancel(_ context.Context, _ *mcpsdk.CallToolRequest, 
 	return h.deliveryOperate(delivery.Service.Cancel, input)
 }
 
-func (h queueToolHandlers) operate(verb func(queue.Op) (queue.Candidate, error), input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
+func (h queueToolHandlers) operate(verb func(queue.Store, queue.Op) (queue.Candidate, error), input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
 	if strings.TrimSpace(input.ID) == "" {
 		return buildToolError(ErrBadRequest, "queue: candidate id is required"), nil, nil
 	}
-	candidate, err := verb(queue.Op{ID: input.ID, Actor: input.Actor, Reason: input.Reason})
+	candidate, err := verb(h.storeFor(input.QueueRoot), queue.Op{ID: input.ID, Actor: input.Actor, Reason: input.Reason})
 	if err != nil {
 		return queueToolError(err), nil, nil
 	}
@@ -108,19 +123,19 @@ func (h queueToolHandlers) operate(verb func(queue.Op) (queue.Candidate, error),
 }
 
 func (h queueToolHandlers) kick(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
-	return h.operate(h.store.Kick, input)
+	return h.operate(queue.Store.Kick, input)
 }
 func (h queueToolHandlers) park(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
-	return h.operate(h.store.Park, input)
+	return h.operate(queue.Store.Park, input)
 }
 func (h queueToolHandlers) resume(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
-	return h.operate(h.store.Resume, input)
+	return h.operate(queue.Store.Resume, input)
 }
 func (h queueToolHandlers) emergency(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
-	return h.operate(h.store.MarkEmergency, input)
+	return h.operate(queue.Store.MarkEmergency, input)
 }
 func (h queueToolHandlers) override(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
-	return h.operate(h.store.Override, input)
+	return h.operate(queue.Store.Override, input)
 }
 func (h queueToolHandlers) reject(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
 	return h.deliveryOperate(delivery.Service.Reject, input)

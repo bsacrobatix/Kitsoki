@@ -32,6 +32,9 @@ host_handlers:
             passed: true
             summary: "Tests and policy remain at least as strong."
             trace_ref: trace-reviewer-1
+            bundle_ref: bundles/fix-1.bundle
+            bundle_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            bundle_kind: git-bundle
 
 turns:
   - intent: { name: work_reviewer }
@@ -44,5 +47,8 @@ turns:
         passed: true
         summary: "Tests and policy remain at least as strong."
         trace_ref: trace-reviewer-1
+        bundle_ref: bundles/fix-1.bundle
+        bundle_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        bundle_kind: git-bundle
 
 expect_no_errors: true

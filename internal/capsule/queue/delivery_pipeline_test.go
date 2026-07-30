@@ -3,7 +3,10 @@ package queue
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +50,137 @@ func TestFileGateCapacitySharesPhysicalPoolAcrossProjects(t *testing.T) {
 	if got := peak.Load(); got > 2 {
 		t.Fatalf("cross-repository gates exceeded pool: %d", got)
 	}
+}
+
+func TestFileGateCapacityCrashHelper(t *testing.T) {
+	if os.Getenv("KITSOKI_TEST_CAPACITY_CRASH_HELPER") != "1" {
+		return
+	}
+	capacity := FileGateCapacity{
+		Root: os.Getenv("KITSOKI_TEST_CAPACITY_ROOT"),
+		Pool: os.Getenv("KITSOKI_TEST_CAPACITY_POOL"),
+		Max:  1,
+	}
+	lease, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if err := os.WriteFile(os.Getenv("KITSOKI_TEST_CAPACITY_READY"), []byte("ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {}
+}
+
+func TestFileGateCapacityKernelReleasesCrashedOwner(t *testing.T) {
+	root, ready := t.TempDir(), filepath.Join(t.TempDir(), "ready")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFileGateCapacityCrashHelper$")
+	cmd.Env = append(os.Environ(),
+		"KITSOKI_TEST_CAPACITY_CRASH_HELPER=1",
+		"KITSOKI_TEST_CAPACITY_ROOT="+root,
+		"KITSOKI_TEST_CAPACITY_POOL=crash",
+		"KITSOKI_TEST_CAPACITY_READY="+ready,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for !testFileExists(ready) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !testFileExists(ready) {
+		t.Fatal("child never acquired capacity")
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	lease, err := (FileGateCapacity{Root: root, Pool: "crash", Max: 1}).AcquireLease(ctx, GateAdmissionRequest{})
+	if err != nil {
+		t.Fatalf("crashed owner stranded capacity: %v", err)
+	}
+	lease.Release()
+}
+
+func testFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func TestShellGateInheritsTierAndCapacityWithoutNestedDeadlock(t *testing.T) {
+	root := wipRepo(t)
+	capacity := &FileGateCapacity{Root: t.TempDir(), Pool: "shell-nested", Max: 1}
+	bin := filepath.Join(t.TempDir(), "kitsoki")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/kitsoki")
+	build.Dir = filepath.Clean(filepath.Join("..", "..", ".."))
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build nested CLI: %v\n%s", err, out)
+	}
+	command := strconv.Quote(bin) + ` queue gate-run --project . --capacity-root "$KITSOKI_GATE_CAPACITY_ROOT" --capacity-pool "$KITSOKI_GATE_CAPACITY_POOL" --gate-tier "$KITSOKI_GATE_TIER" -- sh -c 'test "$KITSOKI_GATE_TIER" = full'`
+	worker := Worker{Deps: ProcessDeps{
+		GateAdmission: capacity,
+		GateTimeout:   5 * time.Second,
+		GateTier:      "full",
+		Gate:          ShellGate{Command: command},
+	}}
+	result, err := worker.runGate(context.Background(), Candidate{ProjectID: "repo-a", TargetRef: "main"}, Speculation{WorkspacePath: root})
+	if err != nil || !result.Passed {
+		t.Fatalf("nested shell gate result=%#v err=%v", result, err)
+	}
+	lease, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{ProjectID: "repo-b"})
+	if err != nil {
+		t.Fatalf("completed ShellGate stranded capacity: %v", err)
+	}
+	lease.Release()
+}
+
+func TestInheritedFileGateLeaseSurvivesRepeatedGC(t *testing.T) {
+	capacity := FileGateCapacity{Root: t.TempDir(), Pool: "gc", Max: 1}
+	outer, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_GATE_CAPACITY_FD", strconv.FormatUint(uint64(outer.file.Fd()), 10))
+	t.Setenv("KITSOKI_GATE_CAPACITY_ROOT", outer.root)
+	t.Setenv("KITSOKI_GATE_CAPACITY_POOL", outer.pool)
+	t.Setenv("KITSOKI_GATE_CAPACITY_PATH", outer.path)
+	dir := filepath.Dir(outer.path)
+	for i := 0; i < 32; i++ {
+		inherited, ok := inheritedFileGateLease(outer.root, outer.pool, dir)
+		if !ok {
+			t.Fatalf("inherit iteration %d failed", i)
+		}
+		inherited.Release()
+		runtime.GC()
+		if _, err := outer.file.Stat(); err != nil {
+			t.Fatalf("GC closed inherited ownership marker: %v", err)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			inherited, ok := inheritedFileGateLease(outer.root, outer.pool, dir)
+			if !ok {
+				t.Errorf("concurrent inherit failed")
+				return
+			}
+			inherited.Release()
+			runtime.GC()
+		}()
+	}
+	wg.Wait()
+	if _, err := outer.file.Stat(); err != nil {
+		t.Fatalf("concurrent borrowed wrapper closed ownership marker: %v", err)
+	}
+	outer.Release()
 }
 
 func TestDeliveryDefaultsDeriveTierAndHostCapacity(t *testing.T) {

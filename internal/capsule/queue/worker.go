@@ -270,16 +270,30 @@ func (w Worker) runGate(ctx context.Context, c Candidate, spec Speculation) (Gat
 	if admission == nil {
 		admission = DefaultFileGateCapacity()
 	}
-	release, err := admission.Acquire(ctx, GateAdmissionRequest{
+	request := GateAdmissionRequest{
 		ProjectID: c.ProjectID,
 		TargetRef: c.TargetRef,
 		Tier:      w.gateTier(c.TargetRef),
 		WorkerID:  first(w.Deps.WorkerID, "queue-worker"),
-	})
-	if err != nil {
-		return GateResult{}, Environmental(fmt.Errorf("queue: acquire gate capacity: %w", err))
 	}
-	defer release()
+	type leaseAdmission interface {
+		AcquireLease(context.Context, GateAdmissionRequest) (*FileGateLease, error)
+	}
+	if capacity, ok := admission.(leaseAdmission); ok {
+		lease, err := capacity.AcquireLease(ctx, request)
+		if err != nil {
+			return GateResult{}, Environmental(fmt.Errorf("queue: acquire gate capacity: %w", err))
+		}
+		defer lease.Release()
+		ctx = withGateCapacityLease(ctx, lease)
+	} else {
+		release, err := admission.Acquire(ctx, request)
+		if err != nil {
+			return GateResult{}, Environmental(fmt.Errorf("queue: acquire gate capacity: %w", err))
+		}
+		defer release()
+	}
+	ctx = context.WithValue(ctx, gateTierContextKey{}, request.Tier)
 	return w.Deps.Gate.Run(ctx, spec)
 }
 

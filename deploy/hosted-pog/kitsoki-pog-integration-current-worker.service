@@ -20,7 +20,7 @@ Environment=POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust
 EnvironmentFile=/etc/kitsoki/queue-worker.env
 ExecStartPre=/usr/bin/test -x /opt/kitsoki-hosted-pog/current/kitsoki
 ExecStartPre=/usr/bin/test -d /opt/pog/current
-ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue worker --project /opt/pog/current --queue-root /var/lib/kitsoki-queue-admission/pog/queue --target integration/current --executor vm-pool --executor-pipeline change --concurrency 1 --retry-delay 5m --max-retry-delay 30m --max-attempts 5
+ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue worker --project /opt/pog/current --queue-root /var/lib/kitsoki-queue-admission/pog/queue --target integration/current --gate-tier change --executor vm-pool --executor-pipeline change --concurrency 1 --retry-delay 5m --max-retry-delay 30m --max-attempts 5
 Restart=always
 RestartSec=5
 TimeoutStopSec=30s

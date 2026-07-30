@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +11,43 @@ import (
 	"kitsoki/internal/capsule/delivery"
 	"kitsoki/internal/capsule/queue"
 )
+
+func TestQueueToolsHonorExactExternalQueueRoot(t *testing.T) {
+	project := t.TempDir()
+	queueRoot := filepath.Join(t.TempDir(), "shared-queue")
+	store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
+	seeded, err := store.Submit(queue.Submit{
+		Branch: "external", SHA: strings.Repeat("d", 40),
+		Admission: queue.EmergencySkipTestsAdmission,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := queueToolHandlers{store: queue.Store{ProjectRoot: project}}
+	toolResult, out, err := h.status(context.Background(), nil, QueueStatusInput{ID: seeded.ID, QueueRoot: queueRoot})
+	if err != nil || toolResult != nil {
+		t.Fatalf("status err=%v tool=%+v", err, toolResult)
+	}
+	result, ok := out.(delivery.Result)
+	if !ok || result.Candidate == nil || result.Candidate.ID != seeded.ID {
+		t.Fatalf("external queue result=%#v", out)
+	}
+	toolResult, out, err = h.cancel(context.Background(), nil, QueueOpInput{ID: seeded.ID, QueueRoot: queueRoot, Actor: "test"})
+	if err != nil || toolResult != nil {
+		t.Fatalf("cancel err=%v tool=%+v", err, toolResult)
+	}
+	cancelled, ok := out.(delivery.Result)
+	if !ok || cancelled.Candidate == nil || cancelled.Candidate.Phase != queue.NeedsInput {
+		t.Fatalf("external queue cancel=%#v", out)
+	}
+	local, err := (queue.Store{ProjectRoot: project}).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(local.Candidates) != 0 {
+		t.Fatalf("MCP created a second project-local ledger: %+v", local.Candidates)
+	}
+}
 
 func queueTestHandlers(t *testing.T) (queueToolHandlers, queue.Store) {
 	t.Helper()

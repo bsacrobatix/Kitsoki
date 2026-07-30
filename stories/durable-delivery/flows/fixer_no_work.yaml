@@ -1,0 +1,19 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.work_queue_worker:
+    by_call:
+      claim_fixer:
+        data: { claimed: false }
+
+turns:
+  - intent: { name: work_fixer }
+    expect_state: idle
+    expect_world:
+      claimed: false
+      work_ref: ""
+      fence: 0
+
+expect_no_errors: true

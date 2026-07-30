@@ -21,7 +21,8 @@
 //	reject    {id[, actor, reason]}  -> terminal removal; branches and evidence retained
 //
 // Every op resolves the queue from args["project"] (project root, default
-// "."), mirroring the `kitsoki queue --project` CLI convention. Queue-level
+// ".") and optional args["queue_root"], mirroring the `kitsoki queue`
+// CLI convention. Queue-level
 // failures (unknown candidate, phase violations) are domain errors surfaced
 // via Result.Error; only argument/infra problems return a Go error.
 package host
@@ -146,10 +147,11 @@ func queueApprovalOp(store queue.Store, args map[string]any) (Result, error) {
 	return Result{Data: data}, nil
 }
 
-// queueStoreArg resolves the queue store from args["project"] (default "."),
-// the same project-root convention as the `kitsoki queue --project` CLI.
+// queueStoreArg resolves the queue store from args["project"] (default ".")
+// plus the exact optional args["queue_root"] external authority.
 func queueStoreArg(args map[string]any) (queue.Store, error) {
 	project, _ := args["project"].(string)
+	queueRoot, _ := args["queue_root"].(string)
 	if project == "" {
 		project = "."
 	}
@@ -157,7 +159,7 @@ func queueStoreArg(args map[string]any) (queue.Store, error) {
 	if err != nil {
 		return queue.Store{}, fmt.Errorf("host.queue: resolve project root %q: %w", project, err)
 	}
-	return queue.Store{ProjectRoot: abs}, nil
+	return queue.Store{ProjectRoot: abs, QueueRoot: queueRoot}, nil
 }
 
 // queueStatusOp implements host.queue.status: the full durable state, or a

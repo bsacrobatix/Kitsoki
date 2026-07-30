@@ -962,6 +962,17 @@ func write(path string, state State) error {
 	return atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o755)
 }
 func lock(path string, wait time.Duration) (func(), error) {
+	f, err := lockFile(path, wait)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		_ = releaseExclusiveFileLock(f)
+		_ = f.Close()
+	}, nil
+}
+
+func lockFile(path string, wait time.Duration) (*os.File, error) {
 	deadline := time.Now().Add(wait)
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -974,10 +985,7 @@ func lock(path string, wait time.Duration) (func(), error) {
 			return nil, fmt.Errorf("queue: acquire serializer: %w", err)
 		}
 		if acquired {
-			return func() {
-				_ = releaseExclusiveFileLock(f)
-				_ = f.Close()
-			}, nil
+			return f, nil
 		}
 		_ = f.Close()
 		if wait <= 0 || time.Now().After(deadline) {
