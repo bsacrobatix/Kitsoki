@@ -423,6 +423,7 @@ func TestWoeRestoreCapturedPathsFailsWhenParentDirDeniesWrite(t *testing.T) {
 // occupied, allocation must fail loudly rather than loop forever or silently
 // overwrite an existing branch.
 func TestWoePreservedBranchNameExhaustsCollisionSlots(t *testing.T) {
+	parallelQueueIntegrationTest(t)
 	dir := wipRepo(t)
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	base := preservedWIPPrefix + at.UTC().Format("20060102T150405Z")

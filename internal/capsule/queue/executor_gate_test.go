@@ -55,6 +55,7 @@ func xgWriteFixtures(t *testing.T, root string) {
 // directly against a hand-built Speculation.
 func xgSetupRepo(t *testing.T) (root, head string) {
 	t.Helper()
+	parallelQueueIntegrationTest(t)
 	root = t.TempDir()
 	git(t, root, "init", "-b", "main")
 	git(t, root, "config", "user.name", "Queue Test")

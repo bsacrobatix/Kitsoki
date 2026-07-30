@@ -251,6 +251,7 @@ func TestShellGateRejectsDirtySpeculativeWorkspace(t *testing.T) {
 
 func protectedQueueRepo(t *testing.T) string {
 	t.Helper()
+	parallelQueueIntegrationTest(t)
 	root := t.TempDir()
 	git(t, root, "init", "-b", "main")
 	git(t, root, "config", "user.name", "Queue Test")
@@ -279,6 +280,7 @@ func protectedQueueRepo(t *testing.T) string {
 
 func nativeSelfQueueRepo(t *testing.T) string {
 	t.Helper()
+	parallelQueueIntegrationTest(t)
 	root := t.TempDir()
 	git(t, root, "init", "-b", "main")
 	git(t, root, "config", "user.name", "Queue Test")

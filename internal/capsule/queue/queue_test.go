@@ -793,12 +793,14 @@ func TestExpiredLeaseIsReclaimedWithAttemptEvidence(t *testing.T) {
 // in flight — a deterministic gate that legitimately runs longer than one
 // lease window (the doc's own "full CI" case) would have its lease reclaimed
 // by a second worker mid-operation, forcing an unnecessary reprepare. A
-// short real lease here stands in for that: without the heartbeat, it would
-// clearly have expired well before speculation finishes.
+// short real lease here stands in for that. The test observes an actual
+// renewal, then crosses the original expiry instead of sleeping for an
+// arbitrary multiple of the lease.
 func TestHeartbeatKeepsLeaseAliveDuringLongRunningSpeculation(t *testing.T) {
 	store := Store{ProjectRoot: t.TempDir(), LockWait: time.Second}
 	sha := strings.Repeat("7", 40)
-	if _, err := store.Submit(Submit{Branch: "agent/heartbeat", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+	candidate, err := store.Submit(Submit{Branch: "agent/heartbeat", SHA: sha, Receipt: testReceipt(t, sha)})
+	if err != nil {
 		t.Fatal(err)
 	}
 	block := make(chan struct{})
@@ -808,17 +810,42 @@ func TestHeartbeatKeepsLeaseAliveDuringLongRunningSpeculation(t *testing.T) {
 		<-block
 		return Speculation{SHA: "tree-" + c.SHA}, nil
 	}}
-	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, GateVersion: "test", Lease: 300 * time.Millisecond}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, GateVersion: "test", Lease: 100 * time.Millisecond}
 	worker := Worker{Store: store, Deps: deps}
 
 	done := make(chan error, 1)
 	go func() { _, err := worker.RunOnce(context.Background()); done <- err }()
 	<-entered
 
-	// Wait well past the original lease window while speculation is still
-	// blocked. If the heartbeat were not renewing it, a second worker would
-	// see it as expired and reclaim it into Reprepare.
-	time.Sleep(600 * time.Millisecond)
+	initial, err := store.Get(candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewalDeadline := time.NewTimer(2 * time.Second)
+	defer renewalDeadline.Stop()
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		current, getErr := store.Get(initial.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if current.LeaseExpiresAt.After(initial.LeaseExpiresAt) {
+			break
+		}
+		select {
+		case <-poll.C:
+		case <-renewalDeadline.C:
+			t.Fatal("heartbeat did not renew the blocked speculation lease")
+		}
+	}
+	if wait := time.Until(initial.LeaseExpiresAt) + time.Millisecond; wait > 0 {
+		expiry := time.NewTimer(wait)
+		<-expiry.C
+	}
+
+	// The original lease is now expired while speculation remains blocked.
+	// Without the observed heartbeat renewal, this claim would steal it.
 	second := Worker{Store: store, Deps: deps}
 	if _, ok, err := second.claimPreparation(); err != nil {
 		t.Fatal(err)
