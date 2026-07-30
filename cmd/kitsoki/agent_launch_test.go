@@ -999,6 +999,46 @@ agent_launch_policy:
 	require.Contains(t, err.Error(), "inside protected root")
 }
 
+func TestAgentLaunchPlan_ProjectConfigAllowsManagedWorkspaceRoot(t *testing.T) {
+	project := t.TempDir()
+	workspace := filepath.Join(project, ".capsules", "workspaces", "reader")
+	storyDir := filepath.Join(workspace, "stories", "reader")
+	require.NoError(t, os.MkdirAll(storyDir, 0755))
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+
+	appPath := filepath.Join(storyDir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte(`
+app: { id: reader, version: 0.1.0, title: Reader }
+hosts: [host.agent.task]
+agents:
+  reader:
+    system_prompt: "Read only."
+    tools: []
+world: {}
+intents: {}
+root: ready
+states:
+  ready: { view: "ready" }
+`), 0644))
+	configPath := filepath.Join(project, ".kitsoki.local.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  protected_roots: [.]
+  allowed_roots: [.capsules/workspaces]
+`), 0600))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AppPath: appPath, ConfigPath: configPath, AgentName: "reader",
+		WorkingDir: workspace, Task: "inspect",
+	})
+	require.NoError(t, err)
+	require.Equal(t, workspace, plan.WorkingDir)
+	require.NotNil(t, plan.LaunchPolicy)
+	require.True(t, plan.LaunchPolicy.Allowed)
+	require.Equal(t, filepath.Join(project, ".capsules", "workspaces"), plan.LaunchPolicy.AllowedRoots[0])
+}
+
 func TestPrepareProtectedRootCodeactLaunch_UsesManagedCapsuleAndReportsLifecycle(t *testing.T) {
 	project := t.TempDir()
 	workspace := filepath.Join(project, ".capsules", "workspaces", "codeact-test")
