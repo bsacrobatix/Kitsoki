@@ -1,0 +1,86 @@
+app:
+  id: linkedin-job-search
+  version: 0.1.0
+  title: "Attended LinkedIn job search"
+  author: "Kitsoki"
+  license: "CC0"
+
+hosts:
+  - host.agent.task
+
+# This agent intentionally has no native tools. The only browser surface is the
+# local Sassfully bridge declared below. The placeholder command is fail-closed:
+# an operator must replace it with the exact bridge launch command described in
+# README.md before a live search can run.
+agents:
+  linkedin_searcher:
+    system_prompt: |
+      You perform one attended LinkedIn Jobs search and nothing else.
+      Use only the sassfully_browser MCP tools. First navigate to LinkedIn Jobs,
+      snapshot the page, and fill only the supplied keywords and location. Do
+      not press a search/submit control until the story has already obtained the
+      operator's explicit confirmation. After confirmation, press only the Jobs
+      search submission control, snapshot the resulting results page, and return
+      the final results URL and the exact search parameters used. Never open a
+      job detail, apply, message, save a job, follow anyone, alter account
+      settings, paginate, bulk-scrape, export, or collect result rows.
+    tools: []
+    mcp:
+      servers:
+        sassfully_browser:
+          command: "__CONFIGURE_SASSFULLY_BRIDGE_COMMAND__"
+          args: []
+      tools:
+        - mcp__sassfully_browser__navigate
+        - mcp__sassfully_browser__snapshot
+        - mcp__sassfully_browser__fill
+        - mcp__sassfully_browser__press
+        - mcp__sassfully_browser__confirm
+    permissions:
+      mode: ask
+      disallowed_tools: [Read, Grep, Glob, LS, NotebookRead, TodoRead, TodoWrite, Write, Edit, MultiEdit, NotebookEdit, Bash, WebFetch, WebSearch]
+    effect: external
+
+world:
+  keywords:        { type: string, default: "" }
+  location:        { type: string, default: "" }
+  search_status:   { type: string, default: "draft" }
+  confirmed:       { type: bool, default: false }
+  results_url:     { type: string, default: "" }
+  used_parameters: { type: object, default: {} }
+  search_result:   { type: object, default: {} }
+  error_detail:    { type: string, default: "" }
+
+intents:
+  prepare:
+    description: "Set the LinkedIn Jobs keywords and location for review."
+    examples: ["search jobs", "prepare a job search"]
+    priority: 90
+    slots:
+      keywords: { type: string, required: true }
+      location: { type: string, required: false }
+  confirm_search:
+    description: "Confirm the displayed parameters and submit exactly one LinkedIn Jobs search."
+    examples: ["confirm search", "submit search"]
+    priority: 85
+  finish:
+    description: "Record the returned LinkedIn Jobs results URL."
+    examples: ["finish"]
+    priority: 84
+  revise:
+    description: "Return to the parameters without submitting a search."
+    examples: ["revise", "change search"]
+    priority: 80
+  cancel:
+    description: "Cancel without submitting a search."
+    examples: ["cancel", "stop"]
+    priority: 75
+  look:
+    description: "Re-render the current state."
+    examples: ["look", "status"]
+    priority: 10
+
+root: parameters
+
+include:
+  - rooms/*.yaml

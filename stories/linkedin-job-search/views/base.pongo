@@ -1,0 +1,5 @@
+{% block status %}linkedin-job-search · {{ world.search_status }}{% endblock %}
+{% block heading %}{{ state.description }}{% endblock %}
+{% block body %}{% endblock %}
+{% block choices %}{% endblock %}
+{% block footer %}{% endblock %}

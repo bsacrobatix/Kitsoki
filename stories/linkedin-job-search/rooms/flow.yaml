@@ -1,0 +1,185 @@
+states:
+  parameters:
+    description: "Collect LinkedIn Jobs search parameters without browser activity."
+    relevant_world: [keywords, location, search_status]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "I will only prepare a LinkedIn Jobs search. No browser action or submission happens until you review the parameters and explicitly confirm."
+          - kv:
+              pairs:
+                Keywords: "{{ world.keywords|default:'(not yet chosen)' }}"
+                Location: "{{ world.location|default:'(any location)' }}"
+                Status: "{{ world.search_status }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "prepare keywords=… location=…"
+                  hint: "review parameters before any search"
+                - label: "cancel"
+                  hint: "end without opening or searching LinkedIn"
+                - label: "look"
+    on:
+      prepare:
+        - target: review
+          effects:
+            - set:
+                keywords: "{{ slots.keywords }}"
+                location: "{{ slots.location ?? '' }}"
+                search_status: "awaiting_confirmation"
+                confirmed: false
+                results_url: ""
+                used_parameters: {}
+                search_result: {}
+                error_detail: ""
+      cancel:
+        - target: cancelled
+      look:
+        - target: .
+
+  review:
+    description: "Require explicit confirmation immediately before LinkedIn Jobs search submission."
+    relevant_world: [keywords, location, search_status, confirmed]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Ready to submit exactly one LinkedIn Jobs search. Confirmation will navigate, fill these fields, and press the Jobs search control; it will not open jobs, apply, message, save, paginate, or bulk-scrape."
+          - kv:
+              pairs:
+                Keywords: "{{ world.keywords }}"
+                Location: "{{ world.location|default:'(any location)' }}"
+                Status: "{{ world.search_status }}"
+        choices:
+          - heading: "Required decision"
+          - list:
+              items:
+                - label: "confirm_search"
+                  hint: "submit this one search now"
+                - label: "revise"
+                  hint: "return without submitting"
+                - label: "cancel"
+                  hint: "end without submitting"
+                - label: "look"
+    on:
+      confirm_search:
+        - target: searching
+          effects:
+            - set:
+                confirmed: true
+                search_status: "submitting_confirmed_search"
+      revise:
+        - target: parameters
+          effects:
+            - set: { search_status: "draft", confirmed: false }
+      cancel:
+        - target: cancelled
+      look:
+        - target: .
+
+  searching:
+    description: "Run the single confirmed LinkedIn Jobs search through the Sassfully browser bridge."
+    relevant_world: [keywords, location, search_status, results_url, used_parameters, error_detail]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to a LinkedIn Jobs search submission and results URL capture."
+          - kv:
+              pairs:
+                Status: "{{ world.search_status }}"
+                Keywords: "{{ world.keywords }}"
+                Location: "{{ world.location|default:'(any location)' }}"
+                Results URL: "{{ world.results_url|default:'(pending)' }}"
+                Error: "{{ world.error_detail|default:'(none)' }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "look"
+    on_enter:
+      - invoke: host.agent.task
+        id: submit_confirmed_linkedin_jobs_search
+        once: true
+        with:
+          agent: linkedin_searcher
+          acceptance:
+            schema: schemas/search-result.json
+          context:
+            prompt: prompts/submit-search.md
+            args:
+              keywords: "{{ world.keywords }}"
+              location: "{{ world.location }}"
+              confirmation: "{{ world.confirmed }}"
+        bind:
+          search_result: submitted
+          results_url: submitted.results_url
+          used_parameters: submitted.parameters
+        on_error: failed
+      - when: "world.results_url != ''"
+        emit_intent: finish
+    on:
+      finish:
+        - target: complete
+          effects:
+            - set: { search_status: "complete" }
+      look:
+        - target: .
+
+  complete:
+    description: "Confirmed LinkedIn Jobs search completed with its results URL captured."
+    terminal: true
+    relevant_world: [keywords, location, search_status, results_url, used_parameters]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "The attended LinkedIn Jobs search completed. The story captured the requested parameters and final results URL; it did not inspect job details or collect result rows."
+          - kv:
+              pairs:
+                Status: "{{ world.search_status }}"
+                Keywords: "{{ world.used_parameters.keywords|default:world.keywords }}"
+                Location: "{{ world.used_parameters.location|default:world.location }}"
+                Results URL: "{{ world.results_url }}"
+
+  failed:
+    description: "Configured bridge or search operation failed without a retrying side effect."
+    relevant_world: [keywords, location, error_detail]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "No additional browser action will be attempted automatically. Check the local Sassfully bridge configuration, then prepare the search again if you still want to submit it."
+          - kv:
+              pairs:
+                Error: "{{ world.error_detail|default:$host_error.hint|default:'(bridge did not return a result)' }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "revise"
+                  hint: "return without retrying"
+                - label: "cancel"
+                  hint: "end"
+                - label: "look"
+    on:
+      revise:
+        - target: parameters
+          effects:
+            - set: { search_status: "draft", confirmed: false }
+      cancel:
+        - target: cancelled
+      look:
+        - target: .
+
+  cancelled:
+    description: "Search cancelled before submission."
+    terminal: true
+    relevant_world: [keywords, location]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Cancelled. No LinkedIn Jobs search was submitted by this story."

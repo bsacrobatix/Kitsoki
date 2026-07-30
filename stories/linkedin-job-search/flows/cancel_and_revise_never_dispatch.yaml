@@ -1,0 +1,19 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: parameters
+turns:
+  - intent:
+      name: prepare
+      slots: { keywords: "Designer", location: "Remote" }
+    expect_state: review
+  - intent: { name: revise }
+    expect_state: parameters
+    expect_world: { confirmed: false, search_status: "draft" }
+    expect_no_host_calls: [host.agent.task]
+  - intent:
+      name: prepare
+      slots: { keywords: "Designer", location: "Remote" }
+    expect_state: review
+  - intent: { name: cancel }
+    expect_state: cancelled
+    expect_no_host_calls: [host.agent.task]

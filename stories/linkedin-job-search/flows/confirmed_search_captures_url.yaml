@@ -1,0 +1,31 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: parameters
+host_handlers:
+  host.agent.task:
+    by_call:
+      submit_confirmed_linkedin_jobs_search:
+        data:
+          ok: true
+          submitted:
+            results_url: "https://www.linkedin.com/jobs/search/?keywords=Product%20Manager&location=Bangkok"
+            parameters:
+              keywords: "Product Manager"
+              location: "Bangkok"
+turns:
+  - intent:
+      name: prepare
+      slots: { keywords: "Product Manager", location: "Bangkok" }
+    expect_state: review
+    expect_world:
+      search_status: "awaiting_confirmation"
+      confirmed: false
+  - intent: { name: confirm_search }
+    expect_state: complete
+    expect_world:
+      search_status: "complete"
+      results_url: "https://www.linkedin.com/jobs/search/?keywords=Product%20Manager&location=Bangkok"
+      used_parameters: { keywords: "Product Manager", location: "Bangkok" }
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "submit_confirmed_linkedin_jobs_search" }

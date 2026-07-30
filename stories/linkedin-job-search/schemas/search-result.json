@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["results_url", "parameters"],
+  "properties": {
+    "results_url": {"type": "string", "minLength": 1, "pattern": "^https://(www\\.)?linkedin\\.com/jobs/"},
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keywords", "location"],
+      "properties": {
+        "keywords": {"type": "string", "minLength": 1},
+        "location": {"type": "string"}
+      }
+    }
+  }
+}
