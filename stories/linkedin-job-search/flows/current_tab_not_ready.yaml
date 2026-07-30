@@ -1,0 +1,15 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: ready
+host_handlers:
+  host.agent.task:
+    by_call:
+      inspect_current_paired_tab:
+        error: "Current tab is not a Remote LinkedIn Jobs results page"
+turns:
+  - intent: { name: inspect_current }
+    expect_state: failed
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "inspect_current_paired_tab" }
+        times: 1

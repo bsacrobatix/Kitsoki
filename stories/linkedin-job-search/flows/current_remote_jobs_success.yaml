@@ -1,0 +1,25 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: ready
+host_handlers:
+  host.agent.task:
+    by_call:
+      inspect_current_paired_tab:
+        data:
+          submitted:
+            current_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang&geoId=103644278"
+            remote_visible: true
+            cards:
+              - { title: "Principal Software Engineer", company: "OpenAI", location: "United States (Remote)", posted: "3 days ago" }
+              - { title: "Principal Engineer", company: "Weave", location: "United States (Remote)", posted: "6 days ago" }
+            action_audit: [snapshot, extract]
+turns:
+  - intent: { name: inspect_current }
+    expect_state: complete
+    expect_world:
+      remote_visible: true
+      action_audit: [snapshot, extract]
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "inspect_current_paired_tab" }
+        times: 1

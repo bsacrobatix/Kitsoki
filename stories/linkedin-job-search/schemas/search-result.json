@@ -1,10 +1,16 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["visible_output", "current_url", "action_audit"],
+  "required": ["current_url", "remote_visible", "cards", "action_audit"],
   "properties": {
-    "visible_output": {"type": "string", "minLength": 1},
-    "current_url": {"type": "string", "minLength": 1, "pattern": "^https://(www\\.)?linkedin\\.com/jobs/search-results/"},
-    "action_audit": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+    "current_url": {"type": "string", "pattern": "^https://(www\\.)?linkedin\\.com/jobs/search-results/"},
+    "remote_visible": {"const": true},
+    "cards": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "object", "additionalProperties": false, "required": ["title", "company", "location", "posted"], "properties": {
+        "title": {"type": "string", "minLength": 1}, "company": {"type": "string", "minLength": 1}, "location": {"type": "string", "minLength": 1}, "posted": {"type": "string", "minLength": 1}
+      }}
+    },
+    "action_audit": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string", "enum": ["snapshot", "extract"]}}
   }
 }

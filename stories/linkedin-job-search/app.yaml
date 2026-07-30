@@ -1,14 +1,14 @@
 app:
   id: linkedin-job-search
   version: 0.1.0
-  title: "LinkedIn paired-tab search"
+  title: "LinkedIn current results reader"
   author: "Kitsoki"
   license: "CC0"
 hosts: [host.agent.task]
 agents:
-  linkedin_searcher:
+  linkedin_results_reader:
     system_prompt: |
-      Drive one paired LinkedIn Jobs tab session and return visible job-result cards. In Codex, first use tool_search with raw query `linkedin_story`, then use only the returned bridge tool. The first bridge action must be navigate to the supplied LinkedIn Jobs results URL with no extra fields. Do not use a People URL or append USA or remote to the keywords. Every snapshot call must be exactly `{action:"snapshot"}` with no captureEvidence or other fields. Use a semantic click on the visible Remote button or option only when needed, wait with that same bare snapshot, then finish with exactly one extract of visible job-result cards. Return visible output, current URL, and the complete action outcome audit. Do not use any other tool.
+      Read the already-open paired LinkedIn Jobs results tab. In Codex, first use tool_search with raw query `linkedin_story`, then invoke only the returned bridge tool exactly twice: first `{"action":"snapshot"}`, then `{"action":"extract"}`. Do not navigate, click, fill, press, open jobs, alter filters, or paginate. Return `{current_url, remote_visible, cards, action_audit}`. `current_url` must be a LinkedIn Jobs search-results URL, `remote_visible` must be true only when the visible page shows Remote, and each card must summarize only visible title, company, location, and posted text.
     tools: []
     mcp:
       servers:
@@ -21,25 +21,15 @@ agents:
       disallowed_tools: [Read, Grep, Glob, LS, NotebookRead, TodoRead, TodoWrite, Write, Edit, MultiEdit, NotebookEdit, Bash, WebFetch, WebSearch]
     effect: external
 world:
-  keywords: { type: string, default: "" }
-  location: { type: string, default: "" }
-  search_url: { type: string, default: "" }
-  search_status: { type: string, default: "draft" }
-  search_result: { type: object, default: {} }
-  extracted_output: { type: string, default: "" }
+  inspection: { type: object, default: {} }
   current_url: { type: string, default: "" }
+  remote_visible: { type: bool, default: false }
+  cards: { type: array, default: [] }
   action_audit: { type: array, default: [] }
   error_detail: { type: string, default: "" }
 intents:
-  prepare:
-    description: "Run a paired-tab LinkedIn search from terms."
-    examples: ["search jobs", "prepare a job search"]
-    priority: 90
-    slots:
-      keywords: { type: string, required: true }
-      location: { type: string, required: false }
-  finish: { description: "Record extracted visible output.", examples: ["finish"], priority: 84 }
-  cancel: { description: "Cancel the search.", examples: ["cancel", "stop"], priority: 75 }
+  inspect_current: { description: "Read the current paired Jobs results.", examples: ["inspect current", "read current results"], priority: 90 }
+  finish: { description: "Record the current visible Jobs results.", examples: ["finish"], priority: 84 }
   look: { description: "Re-render the current state.", examples: ["look", "status"], priority: 10 }
-root: parameters
+root: ready
 include: [rooms/*.yaml]
