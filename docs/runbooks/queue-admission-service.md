@@ -277,7 +277,8 @@ workers refuse to start when `--executor-pipeline` differs from
 to the command as `KITSOKI_GATE_TIER` and cannot be inferred from that text.
 Direct implementation checks should use `kitsoki queue gate-run --gate-tier
 <tier> -- <command>` so they share the same host capacity pool. Nested
-gate-run calls borrow the inherited open slot and do not deadlock.
+gate-run calls borrow a kernel-bound liveness marker and do not deadlock; the
+actual capacity lock remains exclusively in the owning Kitsoki process.
 
 ### Hosted `integration/current` drain worker
 

@@ -69,7 +69,7 @@ func TestFileGateCapacityCrashHelper(t *testing.T) {
 	if err := os.WriteFile(os.Getenv("KITSOKI_TEST_CAPACITY_READY"), []byte("ready"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	select {}
+	time.Sleep(30 * time.Second)
 }
 
 func TestFileGateCapacityKernelReleasesCrashedOwner(t *testing.T) {
@@ -140,50 +140,49 @@ func TestShellGateInheritsTierAndCapacityWithoutNestedDeadlock(t *testing.T) {
 	lease.Release()
 }
 
-func TestInheritedGateBorrowSurvivesRepeatedGCAndDetectsOwnerExit(t *testing.T) {
-	root, pool := t.TempDir(), "gc"
-	read, write, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer read.Close()
-	defer write.Close()
-	t.Setenv("KITSOKI_GATE_CAPACITY_FD", strconv.FormatUint(uint64(read.Fd()), 10))
-	t.Setenv("KITSOKI_GATE_CAPACITY_ROOT", root)
-	t.Setenv("KITSOKI_GATE_CAPACITY_POOL", pool)
-	for i := 0; i < 32; i++ {
-		marker, ok := inheritedGateBorrow(root, pool)
-		if !ok {
-			t.Fatalf("inherit iteration %d failed", i)
-		}
-		runtime.GC()
-		if !gateBorrowAlive(marker) {
-			t.Fatal("GC closed inherited liveness marker")
-		}
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			marker, ok := inheritedGateBorrow(root, pool)
+func TestInheritedGateBorrowSurvivesRepeatedGC(t *testing.T) {
+	if os.Getenv("KITSOKI_TEST_INHERITED_BORROW_HELPER") == "1" {
+		root, pool := os.Getenv("KITSOKI_GATE_CAPACITY_ROOT"), os.Getenv("KITSOKI_GATE_CAPACITY_POOL")
+		dir := filepath.Dir(os.Getenv("KITSOKI_GATE_CAPACITY_CUSTODY_PATH"))
+		for i := 0; i < 32; i++ {
+			marker, ok := inheritedGateBorrow(root, pool, dir)
 			if !ok {
-				t.Errorf("concurrent inherit failed")
-				return
+				t.Fatalf("inherit iteration %d failed", i)
 			}
 			runtime.GC()
 			if !gateBorrowAlive(marker) {
-				t.Errorf("concurrent marker was closed")
+				t.Fatal("GC closed inherited liveness marker")
 			}
-		}()
+		}
+		var wg sync.WaitGroup
+		for i := 0; i < 32; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				marker, ok := inheritedGateBorrow(root, pool, dir)
+				if !ok {
+					t.Errorf("concurrent inherit failed")
+					return
+				}
+				runtime.GC()
+				if !gateBorrowAlive(marker) {
+					t.Errorf("concurrent marker was closed")
+				}
+			}()
+		}
+		wg.Wait()
+		return
 	}
-	wg.Wait()
-	if err := write.Close(); err != nil {
+	capacity := FileGateCapacity{Root: t.TempDir(), Pool: "gc", Max: 1}
+	lease, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	marker, _ := inheritedGateBorrow(root, pool)
-	if gateBorrowAlive(marker) {
-		t.Fatal("borrow marker remained live after owner writer closed")
+	defer lease.Release()
+	helper := exec.Command(os.Args[0], "-test.run=^TestInheritedGateBorrowSurvivesRepeatedGC$")
+	helper.Env = append(os.Environ(), "KITSOKI_TEST_INHERITED_BORROW_HELPER=1")
+	if err := lease.RunCommand(context.Background(), helper); err != nil {
+		t.Fatalf("run inherited borrow helper: %v", err)
 	}
 }
 

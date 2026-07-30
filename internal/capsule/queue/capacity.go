@@ -88,12 +88,15 @@ func (c FileGateCapacity) Acquire(ctx context.Context, in GateAdmissionRequest) 
 // Nested gate-run wrappers borrow a cheap liveness marker and create their own
 // supervised process group, avoiding both self-deadlock and orphan-held locks.
 type FileGateLease struct {
-	file      *os.File
-	root      string
-	pool      string
-	borrow    gateBorrowMarker
-	inherited bool
-	once      sync.Once
+	file        *os.File
+	custody     *os.File
+	root        string
+	pool        string
+	custodyPath string
+	ownerPID    int
+	borrow      gateBorrowMarker
+	inherited   bool
+	once        sync.Once
 }
 
 // Release relinquishes an owned slot. A borrowed lease never owns a kernel
@@ -103,15 +106,18 @@ func (l *FileGateLease) Release() {
 		return
 	}
 	l.once.Do(func() {
+		if l.custody != nil {
+			_ = l.custody.Close()
+		}
 		_ = releaseExclusiveFileLock(l.file)
 		_ = l.file.Close()
 	})
 }
 
 // RunCommand starts cmd under crash-safe supervision. Darwin and Linux use a
-// liveness pipe plus a dedicated process group: if this process is killed, the
-// pipe reaches EOF and an external watchdog terminates the entire group. The
-// capacity flock itself is never exposed to cmd or its descendants.
+// kernel-authenticated liveness socket plus a dedicated process group: if this
+// process is killed, the socket reaches EOF and an external watchdog terminates
+// the entire group. The capacity locks are never exposed to descendants.
 func (l *FileGateLease) RunCommand(ctx context.Context, cmd *exec.Cmd) error {
 	if l == nil || (l.file == nil && !l.inherited) {
 		return fmt.Errorf("queue: gate capacity lease is required")
@@ -119,6 +125,9 @@ func (l *FileGateLease) RunCommand(ctx context.Context, cmd *exec.Cmd) error {
 	if l.file != nil {
 		if _, err := l.file.Stat(); err != nil {
 			return fmt.Errorf("queue: gate capacity lease is closed: %w", err)
+		}
+		if l.custody == nil {
+			return fmt.Errorf("queue: gate capacity custody lock is required")
 		}
 	} else if !gateBorrowAlive(l.borrow) {
 		return fmt.Errorf("queue: inherited gate capacity owner is no longer alive")
@@ -140,6 +149,9 @@ func (l *FileGateLease) validate() error {
 		if _, err := l.file.Stat(); err != nil {
 			return fmt.Errorf("queue: gate capacity lease is closed: %w", err)
 		}
+		if l.custody == nil {
+			return fmt.Errorf("queue: gate capacity custody lock is required")
+		}
 	} else if !gateBorrowAlive(l.borrow) {
 		return fmt.Errorf("queue: inherited gate capacity owner is no longer alive")
 	}
@@ -159,6 +171,12 @@ func (l *FileGateLease) commandEnv(env []string, markerFD int) ([]string, error)
 	env = setEnv(env, "KITSOKI_GATE_CAPACITY_FD", fmt.Sprintf("%d", markerFD))
 	env = setEnv(env, "KITSOKI_GATE_CAPACITY_ROOT", l.root)
 	env = setEnv(env, "KITSOKI_GATE_CAPACITY_POOL", l.pool)
+	ownerPID, custodyPath := l.ownerPID, l.custodyPath
+	if l.inherited {
+		ownerPID, custodyPath = l.borrow.ownerPID, l.borrow.custodyPath
+	}
+	env = setEnv(env, "KITSOKI_GATE_CAPACITY_OWNER_PID", fmt.Sprintf("%d", ownerPID))
+	env = setEnv(env, "KITSOKI_GATE_CAPACITY_CUSTODY_PATH", custodyPath)
 	return env, nil
 }
 
@@ -196,15 +214,31 @@ func (c FileGateCapacity) AcquireLease(ctx context.Context, in GateAdmissionRequ
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("queue: create gate capacity authority: %w", err)
 	}
-	if marker, ok := inheritedGateBorrow(root, pool); ok {
-		return &FileGateLease{root: root, pool: pool, borrow: marker, inherited: true}, nil
+	if marker, ok := inheritedGateBorrow(root, pool, dir); ok {
+		return &FileGateLease{
+			root: root, pool: pool, custodyPath: marker.custodyPath,
+			ownerPID: marker.ownerPID, borrow: marker, inherited: true,
+		}, nil
 	}
 	for {
 		for slot := 0; slot < max; slot++ {
 			path := filepath.Join(dir, fmt.Sprintf("slot-%03d.lock", slot))
 			file, err := lockFile(path, 0)
 			if err == nil {
-				return &FileGateLease{file: file, root: root, pool: pool}, nil
+				custodyPath := filepath.Join(dir, fmt.Sprintf("slot-%03d.custody", slot))
+				custody, custodyErr := acquireGateCustody(custodyPath)
+				if custodyErr == nil {
+					return &FileGateLease{
+						file: file, custody: custody, root: root, pool: pool,
+						custodyPath: custodyPath, ownerPID: os.Getpid(),
+					}, nil
+				}
+				_ = releaseExclusiveFileLock(file)
+				_ = file.Close()
+				if !errors.Is(custodyErr, ErrBusy) {
+					return nil, custodyErr
+				}
+				continue
 			}
 			if !errors.Is(err, ErrBusy) {
 				return nil, err

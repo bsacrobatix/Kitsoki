@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || linux
 
 package queue
 
@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,13 +19,15 @@ import (
 )
 
 type gateBorrowMarker struct {
-	file *os.File
+	file        *os.File
+	ownerPID    int
+	custodyPath string
 }
 
 var inheritedGateBorrowFiles sync.Map
 var inheritedGateBorrowFilesMu sync.Mutex
 
-func inheritedGateBorrow(root, pool string) (gateBorrowMarker, bool) {
+func inheritedGateBorrow(root, pool, dir string) (gateBorrowMarker, bool) {
 	if os.Getenv("KITSOKI_GATE_CAPACITY_ROOT") != root ||
 		os.Getenv("KITSOKI_GATE_CAPACITY_POOL") != pool {
 		return gateBorrowMarker{}, false
@@ -32,7 +36,17 @@ func inheritedGateBorrow(root, pool string) (gateBorrowMarker, bool) {
 	if err != nil || fd < 3 {
 		return gateBorrowMarker{}, false
 	}
-	key := strconv.Itoa(fd) + "\x00" + root + "\x00" + pool
+	ownerPID, err := strconv.Atoi(os.Getenv("KITSOKI_GATE_CAPACITY_OWNER_PID"))
+	if err != nil || ownerPID <= 1 {
+		return gateBorrowMarker{}, false
+	}
+	custodyPath := filepath.Clean(os.Getenv("KITSOKI_GATE_CAPACITY_CUSTODY_PATH"))
+	rel, err := filepath.Rel(dir, custodyPath)
+	if err != nil || filepath.Dir(rel) != "." || !validGateCustodyName(rel) {
+		return gateBorrowMarker{}, false
+	}
+	key := strconv.Itoa(fd) + "\x00" + root + "\x00" + pool + "\x00" +
+		strconv.Itoa(ownerPID) + "\x00" + custodyPath
 	inheritedGateBorrowFilesMu.Lock()
 	defer inheritedGateBorrowFilesMu.Unlock()
 	value, ok := inheritedGateBorrowFiles.Load(key)
@@ -45,19 +59,41 @@ func inheritedGateBorrow(root, pool string) (gateBorrowMarker, bool) {
 		value = file
 	}
 	file, ok := value.(*os.File)
-	marker := gateBorrowMarker{file: file}
+	marker := gateBorrowMarker{file: file, ownerPID: ownerPID, custodyPath: custodyPath}
 	if !ok || !gateBorrowAlive(marker) {
 		return gateBorrowMarker{}, false
 	}
 	return marker, true
 }
 
+func validGateCustodyName(name string) bool {
+	if len(name) != len("slot-000.custody") ||
+		!strings.HasPrefix(name, "slot-") ||
+		!strings.HasSuffix(name, ".custody") {
+		return false
+	}
+	for _, ch := range name[len("slot-"):len("slot-000")] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func gateBorrowAlive(marker gateBorrowMarker) bool {
-	if marker.file == nil {
+	if marker.file == nil || marker.ownerPID <= 1 || !filepath.IsAbs(marker.custodyPath) {
 		return false
 	}
 	info, err := marker.file.Stat()
-	if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return false
+	}
+	peerPID, err := gateSocketPeerPID(marker.file.Fd())
+	if err != nil || peerPID != marker.ownerPID {
+		return false
+	}
+	custodyPID, err := gateCustodyOwner(marker.custodyPath)
+	if err != nil || custodyPID != marker.ownerPID {
 		return false
 	}
 	for {
@@ -71,7 +107,7 @@ func gateBorrowAlive(marker gateBorrowMarker) bool {
 }
 
 const gateSupervisorScript = `
-has_parent=$1
+has_second_marker=$1
 shift
 (
 	trap '' TERM
@@ -82,7 +118,7 @@ shift
 ) &
 local_watch=$!
 parent_watch=
-if [ "$has_parent" = 1 ]; then
+if [ "$has_second_marker" = 1 ]; then
 	(
 		trap '' TERM
 		IFS= read -r _ <&4
@@ -111,27 +147,31 @@ func runSupervisedGateCommand(ctx context.Context, child *exec.Cmd, lease *FileG
 	if len(child.ExtraFiles) != 0 {
 		return fmt.Errorf("queue: gate command cannot supply inherited files")
 	}
-	localRead, localWrite, err := os.Pipe()
+	localOwner, localChild, err := newGateLivenessSocket()
 	if err != nil {
-		return fmt.Errorf("queue: create gate liveness pipe: %w", err)
+		return fmt.Errorf("queue: create gate liveness socket: %w", err)
 	}
-	defer localWrite.Close()
-	defer localRead.Close()
+	defer localOwner.Close()
+	defer localChild.Close()
 
-	hasParent := "0"
-	extra := []*os.File{localRead}
+	hasSecondMarker := "0"
+	extra := []*os.File{localChild}
 	if lease.inherited {
 		if !gateBorrowAlive(lease.borrow) {
 			return fmt.Errorf("queue: inherited gate capacity owner is no longer alive")
 		}
-		hasParent = "1"
-		extra = append(extra, lease.borrow.file)
+		// FD 3 remains the original kernel-authenticated owner marker so
+		// arbitrarily deep nesting continues to bind to the custody lock owner.
+		// FD 4 watches this immediate wrapper and kills its command group if the
+		// wrapper itself disappears while the original owner remains alive.
+		hasSecondMarker = "1"
+		extra = []*os.File{lease.borrow.file, localChild}
 	}
 	env, err := lease.commandEnv(child.Env, 3)
 	if err != nil {
 		return err
 	}
-	args := []string{"-c", gateSupervisorScript, "kitsoki-gate-supervisor", hasParent, child.Path}
+	args := []string{"-c", gateSupervisorScript, "kitsoki-gate-supervisor", hasSecondMarker, child.Path}
 	if len(child.Args) > 1 {
 		args = append(args, child.Args[1:]...)
 	}
@@ -144,7 +184,7 @@ func runSupervisedGateCommand(ctx context.Context, child *exec.Cmd, lease *FileG
 	if err := supervisor.Start(); err != nil {
 		return fmt.Errorf("queue: start supervised gate: %w", err)
 	}
-	_ = localRead.Close()
+	_ = localChild.Close()
 
 	wait := make(chan error, 1)
 	go func() { wait <- supervisor.Wait() }()

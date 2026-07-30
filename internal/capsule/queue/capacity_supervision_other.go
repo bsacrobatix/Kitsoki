@@ -1,4 +1,4 @@
-//go:build windows
+//go:build !darwin && !linux && !windows
 
 package queue
 
@@ -20,5 +20,5 @@ func inheritedGateBorrow(_, _, _ string) (gateBorrowMarker, bool) {
 func gateBorrowAlive(gateBorrowMarker) bool { return false }
 
 func runSupervisedGateCommand(context.Context, *exec.Cmd, *FileGateLease) error {
-	return fmt.Errorf("queue: crash-safe gate process-group supervision is unavailable on windows")
+	return fmt.Errorf("queue: crash-safe gate process-group supervision is unavailable on this platform")
 }
