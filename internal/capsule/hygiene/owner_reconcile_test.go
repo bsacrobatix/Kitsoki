@@ -112,7 +112,18 @@ func TestOwnerReconcileAcceptsStrictPreMarkerGitIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	setOwnerReconcileDurableGitIdentity(t, root, "legacy", workspace, false)
-	plan, err := BuildOwnerReconcilePlan(context.Background(), OwnerReconcileOptions{ProjectRoot: root, MinAge: time.Nanosecond, Now: func() time.Time { return now }, ReadWorkspaceActivity: inactiveOwnerReconcileActivity, ReadWorkspaceCommands: inactiveOwnerReconcileActivity})
+	// The fixture's age cannot be pinned from the caller: both
+	// FileInstanceStore.Create and CompareAndSwap stamp UpdatedAt with the real
+	// wall clock, so the record is always as new as the last CAS -- here the one
+	// setOwnerReconcileDurableGitIdentity performs. A frozen `now` captured one
+	// second before the fixture runs therefore lands BEHIND that stamp as soon as
+	// the fixture's ~7 git subprocesses take longer than a second on a loaded
+	// machine, making the age negative and tripping the orphan age guard this
+	// test is not about. Reading the clock at plan time keeps the age strictly
+	// positive regardless of load. MinAge stays 1ns and both assertions below are
+	// unchanged: this test is about accepting a strict pre-marker git identity.
+	planNow := func() time.Time { return time.Now().UTC().Add(time.Second) }
+	plan, err := BuildOwnerReconcilePlan(context.Background(), OwnerReconcileOptions{ProjectRoot: root, MinAge: time.Nanosecond, Now: planNow, ReadWorkspaceActivity: inactiveOwnerReconcileActivity, ReadWorkspaceCommands: inactiveOwnerReconcileActivity})
 	if err != nil {
 		t.Fatal(err)
 	}
