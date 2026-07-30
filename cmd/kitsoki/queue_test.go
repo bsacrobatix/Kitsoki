@@ -605,3 +605,47 @@ func testCLIReceipt(t *testing.T, sha string) receipt.Receipt {
 	require.Equal(t, "valid", v.Status)
 	return r
 }
+
+func TestQueueProcessCLIRejectsWeakMainGateFromTrackedProfile(t *testing.T) {
+	project := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.name", "CLI Gate Test"},
+		{"config", "user.email", "cli-gate@example.invalid"},
+	} {
+		command := exec.Command("git", append([]string{"-C", project}, args...)...)
+		require.NoError(t, command.Run())
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(project, ".kitsoki"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(project, ".kitsoki", "project-profile.yaml"), []byte(
+		"schema: project-profile/v1\ncommands:\n  change: make quick\n  full: make full\n"), 0o644))
+	for _, args := range [][]string{
+		{"add", ".kitsoki/project-profile.yaml"},
+		{"commit", "-m", "tracked gate policy"},
+	} {
+		command := exec.Command("git", append([]string{"-C", project}, args...)...)
+		require.NoError(t, command.Run())
+	}
+	cmd := queueProcessCmd()
+	cmd.SetArgs([]string{"--project", project, "--target", "main", "--gate", "true"})
+	cmd.SetOut(new(strings.Builder))
+	err := cmd.Execute()
+	require.ErrorContains(t, err, `requires tracked full gate "make full"`)
+}
+
+func TestQueueGatePolicyCLIResolvesKitsokiTrackedMainGate(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	project := filepath.Clean(filepath.Join(cwd, "..", ".."))
+	required, configured, err := queue.RequiredGateCommand(project, "main")
+	require.NoError(t, err)
+	require.True(t, configured)
+	require.Equal(t, "make test-full", required)
+
+	cmd := queueGatePolicyCmd()
+	cmd.SetArgs([]string{"--project", project, "--target", "main"})
+	out := new(strings.Builder)
+	cmd.SetOut(out)
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, required, strings.TrimSpace(out.String()))
+}

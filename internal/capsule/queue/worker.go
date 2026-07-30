@@ -21,6 +21,9 @@ func (w Worker) RunOnce(ctx context.Context) (bool, error) {
 	if w.Deps.Integration == nil || w.Deps.Gate == nil {
 		return false, fmt.Errorf("queue: integration and gate are required")
 	}
+	if err := validateProcessGatePolicy(w.Store.ProjectRoot, w.Deps); err != nil {
+		return false, err
+	}
 	c, ok, err := w.claimPreparation()
 	if err != nil {
 		return false, err
@@ -422,6 +425,11 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 			// stale base (normal train movement) re-prepares for free.
 			cur.WorkerID, cur.LeaseExpiresAt, cur.Failure = "", time.Time{}, err.Error()
 			cur.Evidence = append(cur.Evidence, err.Error())
+			var overlap *ProtectedCheckoutOverlapError
+			if errors.As(err, &overlap) {
+				w.park(cur, "protected_checkout_overlap")
+				return
+			}
 			var harness HarnessError
 			if errors.As(err, &harness) {
 				w.parkHuman(cur, "finalization_harness_failure", ReasonHarnessFailure)
@@ -466,6 +474,14 @@ func (w Worker) ahead(sequence uint64) ([]Candidate, error) {
 			break
 		}
 	}
+	// Candidate-scoped workers are admission/finalization helpers for one
+	// already-durable queue entry. They integrate only against the live target:
+	// earlier broken or retrying entries remain durable but are never silently
+	// stacked into work the caller did not select. Protected CAS still
+	// serializes this candidate with every ordinary worker.
+	if strings.TrimSpace(w.Deps.CandidateID) != "" {
+		return nil, nil
+	}
 	for _, c := range state.Candidates {
 		if c.Sequence < sequence && c.TargetRef == target && c.ProjectID == project && !terminal(c.phase()) {
 			out = append(out, c)
@@ -477,6 +493,9 @@ func (w Worker) ahead(sequence uint64) ([]Candidate, error) {
 func (w Worker) targetRef() string { return strings.TrimSpace(w.Deps.TargetRef) }
 
 func (w Worker) matchesTarget(c Candidate) bool {
+	if id := strings.TrimSpace(w.Deps.CandidateID); id != "" && c.ID != id {
+		return false
+	}
 	target := w.targetRef()
 	if target != "" && c.TargetRef != target {
 		return false

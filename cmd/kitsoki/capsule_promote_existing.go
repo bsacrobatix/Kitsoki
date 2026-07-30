@@ -26,7 +26,7 @@ import (
 )
 
 func capsulePromoteExistingCmd() *cobra.Command {
-	var project, sourceTarget, sha, destinationTarget, pipeline, gate, definition string
+	var project, queueRoot, sourceTarget, sha, destinationTarget, pipeline, gate, definition string
 	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:          "promote-existing",
@@ -45,6 +45,7 @@ func capsulePromoteExistingCmd() *cobra.Command {
 			}
 			authority := queue.PromoteExistingAuthority{
 				ProjectRoot: root,
+				QueueRoot:   queueRoot,
 				Certifier: queue.ExistingSHACertifierFunc(func(ctx context.Context, in queue.ExistingSHACertification) (record.Stored, error) {
 					return runPromoteExistingCI(ctx, root, definition, in)
 				}),
@@ -57,6 +58,7 @@ func capsulePromoteExistingCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", ".", "protected project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&sourceTarget, "source-target", "", "source target whose landed queue result is authoritative")
 	cmd.Flags().StringVar(&sha, "sha", "", "exact SHA currently landed on the source target")
 	cmd.Flags().StringVar(&destinationTarget, "target", "main", "destination protected target")

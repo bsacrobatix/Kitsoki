@@ -581,6 +581,90 @@ func queuedPair(t *testing.T) (Store, Candidate, Candidate) {
 	return store, first, second
 }
 
+func setCandidatePhase(t *testing.T, store Store, id string, phase Status) {
+	t.Helper()
+	if _, err := store.withLock(func(path string) (State, error) {
+		state, _, err := store.read(path)
+		if err != nil {
+			return State{}, err
+		}
+		for i := range state.Candidates {
+			if state.Candidates[i].ID == id {
+				state.Candidates[i].Phase, state.Candidates[i].Status = phase, phase
+				return state, write(path, state)
+			}
+		}
+		return State{}, fmt.Errorf("candidate %s not found", id)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCandidateScopedWorkerLandsWithoutTakingEarlierCandidateCustody(t *testing.T) {
+	for _, phase := range []Status{Queued, ReadyToFinalize, RetryWait} {
+		t.Run(string(phase), func(t *testing.T) {
+			store, first, second := queuedPair(t)
+			if phase != Queued {
+				setCandidatePhase(t, store, first.ID, phase)
+			}
+			beforeFirst, err := store.Get(first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			speculations := 0
+			integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
+				speculations++
+				if c.ID != second.ID {
+					t.Fatalf("speculated candidate %s, want %s", c.ID, second.ID)
+				}
+				if len(ahead) != 0 {
+					t.Fatalf("candidate-scoped speculation stacked earlier work: %#v", ahead)
+				}
+				return Speculation{SHA: "tree-" + c.SHA}, nil
+			}}
+			worker := Worker{Store: store, Deps: ProcessDeps{
+				Integration: integration,
+				Gate:        passingGate{},
+				GateVersion: "test",
+				TargetRef:   second.TargetRef,
+				GateTier:    second.RequiredGateTier,
+				CandidateID: second.ID,
+			}}
+			progressed, err := worker.RunOnce(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !progressed {
+				t.Fatalf("candidate-scoped worker did not prepare %s past earlier %s candidate", second.ID, phase)
+			}
+			progressed, err = worker.RunOnce(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !progressed {
+				t.Fatalf("candidate-scoped worker did not finalize %s", second.ID)
+			}
+			if speculations != 1 || integration.landed != 1 {
+				t.Fatalf("speculations=%d landed=%d, want one isolated integration", speculations, integration.landed)
+			}
+			gotFirst, err := store.Get(first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotSecond, err := store.Get(second.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(gotFirst, beforeFirst) {
+				t.Fatalf("earlier candidate custody changed:\nbefore=%#v\nafter=%#v", beforeFirst, gotFirst)
+			}
+			if gotSecond.phase() != Landed {
+				t.Fatalf("first=%s second=%s", gotFirst.phase(), gotSecond.phase())
+			}
+		})
+	}
+}
+
 type fakeIntegration struct {
 	speculate func(context.Context, Candidate, []Candidate) (Speculation, error)
 	landed    int

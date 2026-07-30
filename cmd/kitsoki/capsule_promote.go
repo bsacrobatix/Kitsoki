@@ -65,7 +65,7 @@ type capsulePromoteResult struct {
 }
 
 func capsulePromoteCmd() *cobra.Command {
-	var project, workspace, pipeline, target, gate, message, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
+	var project, queueRoot, workspace, pipeline, target, gate, message, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
 	var remoteURL, remoteTokenEnv, remoteBucketURL, remoteKeyEnv, remoteSecretEnv, remoteTargetBaseSHA, remoteTrain, remoteStatusCommand string
 	var gateTimeout time.Duration
 	var current, wait, jsonOut, skipTests bool
@@ -84,6 +84,7 @@ func capsulePromoteCmd() *cobra.Command {
 			}
 			result, err := runCapsulePromote(cmd.Context(), capsulePromoteOptions{
 				ProjectRoot:         project,
+				QueueRoot:           queueRoot,
 				WorkspaceID:         workspace,
 				Pipeline:            pipeline,
 				TargetRef:           target,
@@ -107,6 +108,7 @@ func capsulePromoteCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", ".", "protected source project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "managed workspace id")
 	cmd.Flags().BoolVar(&current, "current", false, "resolve project and workspace from .kitsoki-dev-workspace.json in the current directory")
 	cmd.Flags().StringVar(&pipeline, "pipeline", "change", "Capsule CI pipeline to run")
@@ -136,6 +138,7 @@ func capsulePromoteCmd() *cobra.Command {
 
 type capsulePromoteOptions struct {
 	ProjectRoot         string
+	QueueRoot           string
 	WorkspaceID         string
 	Pipeline            string
 	TargetRef           string
@@ -170,6 +173,7 @@ var errPromoteReceiptNotEligible = errors.New("capsule promote: reusable receipt
 type promoteReceiptReuse struct {
 	Schema            string `json:"schema"`
 	ProjectRoot       string `json:"project_root"`
+	QueueRoot         string `json:"queue_root"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkspaceGen      uint64 `json:"workspace_generation"`
 	Branch            string `json:"branch"`
@@ -245,6 +249,12 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	root, err := filepath.Abs(opts.ProjectRoot)
 	if err != nil {
 		return capsulePromoteResult{}, err
+	}
+	if strings.TrimSpace(opts.QueueRoot) != "" {
+		opts.QueueRoot, err = filepath.Abs(opts.QueueRoot)
+		if err != nil {
+			return capsulePromoteResult{}, err
+		}
 	}
 	manager, err := capsuleWorkspaceManager(root)
 	if err != nil {
@@ -335,7 +345,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	if _, err := gitTrim(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", workspacePath, candidateSHA); err != nil {
 		return capsulePromoteResult{}, fmt.Errorf("capsule promote: publish candidate %s into %s: %w", candidateSHA, root, err)
 	}
-	qstore := queue.Store{ProjectRoot: root}
+	qstore := queue.Store{ProjectRoot: root, QueueRoot: opts.QueueRoot}
 	var qcandidate queue.Candidate
 	if !opts.SkipTests {
 		qcandidate, err = qstore.Submit(queue.Submit{
@@ -363,18 +373,18 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		reviewer = queue.ShellRepairReviewer{Command: opts.RepairReviewCommand, ReviewerID: opts.ReviewerID}
 	}
 	state, err := qstore.Process(ctx, queue.ProcessDeps{
-		Integration:        queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
+		Integration:        queue.ProtectedIntegration{ProjectRoot: root, QueueRoot: opts.QueueRoot, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
 		Gate:               queue.ShellGate{Command: opts.GateCommand},
 		Repairer:           repairer,
 		RepairReviewer:     reviewer,
 		RepairerID:         opts.RepairerID,
 		ReviewPolicyDigest: opts.ReviewPolicyDigest,
-		Finalizer:          queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},
+		Finalizer:          queue.ProtectedFinalizer{ProjectRoot: root, QueueRoot: opts.QueueRoot, TargetRef: opts.TargetRef},
 		GateVersion:        opts.Pipeline + ":" + opts.GateCommand,
 		GateTier:           queue.RequiredGateTierForTarget(opts.TargetRef),
 		GateTimeout:        opts.GateTimeout,
 		TargetRef:          opts.TargetRef,
-		GateMemo:           queue.FileGateMemo{ProjectRoot: root},
+		GateMemo:           queue.FileGateMemo{ProjectRoot: root, QueueRoot: opts.QueueRoot},
 	})
 	if err != nil {
 		if errors.Is(err, queue.ErrBusy) {
@@ -552,6 +562,7 @@ func loadPromoteReceiptReuse(ctx context.Context, root string, instance control.
 func reuseMatchesAttempt(reuse promoteReceiptReuse, root string, instance control.Instance, branch string, opts capsulePromoteOptions) bool {
 	return reuse.Schema == promoteReceiptReuseSchema &&
 		reuse.ProjectRoot == root &&
+		reuse.QueueRoot == opts.QueueRoot &&
 		reuse.WorkspaceID == instance.ID &&
 		reuse.WorkspaceGen == instance.Generation &&
 		reuse.Branch == branch &&
@@ -616,7 +627,7 @@ func persistPromoteReceiptReuse(root string, instance control.Instance, branch s
 		return err
 	}
 	reuse := promoteReceiptReuse{
-		Schema: promoteReceiptReuseSchema, ProjectRoot: root, WorkspaceID: instance.ID, WorkspaceGen: instance.Generation,
+		Schema: promoteReceiptReuseSchema, ProjectRoot: root, QueueRoot: opts.QueueRoot, WorkspaceID: instance.ID, WorkspaceGen: instance.Generation,
 		Branch: branch, CandidateSHA: instance.Head, Pipeline: opts.Pipeline, TargetRef: opts.TargetRef, GateCommand: opts.GateCommand,
 		ReceiptID: stored.Receipt.ReceiptID, ReceiptPath: filepath.Join(root, ".capsules", "ci", stored.Receipt.JobID+".receipt.json"), RunID: stored.Receipt.JobID,
 		EnvelopeDigest: stored.Receipt.Envelope.Digest, StoryDigest: stored.Receipt.Envelope.StoryDigest, EnvironmentDigest: stored.Receipt.Envelope.Environment.Digest,

@@ -39,9 +39,9 @@ func gitOutputEnv(ctx context.Context, dir string, env []string, args ...string)
 const preservedWIPPrefix = "queue/preserved-wip/"
 
 // PreservedWIPRestoreError proves that capture and the second byte-completeness
-// snapshot both succeeded and only checkout restoration failed. Callers may
-// safely advance a protected ref only for this typed failure: a branch name in
-// an arbitrary later error is not, by itself, proof that capture was complete.
+// snapshot both succeeded and only checkout restoration failed. The branch is
+// durable recovery evidence, but callers must still fail before protected CAS:
+// an unrestored index can stage an inverse of an otherwise successful landing.
 type PreservedWIPRestoreError struct {
 	Branch string
 	Err    error
@@ -201,7 +201,7 @@ func captureTree(ctx context.Context, root string, paths []string) (tree string,
 // on its parent directory, not on the file itself — confirmed by repro), so
 // a blanket reset/clean would silently destroy exactly the content this
 // function exists to protect.
-func restoreCapturedPaths(ctx context.Context, root string, skip []string) error {
+func restoreCapturedPaths(ctx context.Context, root string, skip []string) (returnErr error) {
 	status, err := porcelainStatus(ctx, root)
 	if err != nil {
 		return err
@@ -210,7 +210,21 @@ func restoreCapturedPaths(ctx context.Context, root string, skip []string) error
 	for _, p := range skip {
 		skipSet[p] = true
 	}
-	for _, path := range porcelainPaths(status) {
+	paths := porcelainPaths(status)
+	restoreModes, err := unlockCapturedPaths(root, paths, skipSet)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if modeErr := restoreModes(); modeErr != nil {
+			if returnErr == nil {
+				returnErr = modeErr
+			} else {
+				returnErr = fmt.Errorf("%v; restore checkout protection modes: %w", returnErr, modeErr)
+			}
+		}
+	}()
+	for _, path := range paths {
 		if skipSet[path] {
 			continue
 		}
@@ -260,6 +274,124 @@ func restoreCapturedPaths(ctx context.Context, root string, skip []string) error
 		}
 	}
 	return nil
+}
+
+type protectedPathMode struct {
+	path string
+	mode os.FileMode
+}
+
+const chmodModeMask = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+
+// unlockCapturedPaths temporarily grants only the current user the minimum
+// write/search bits needed to restore captured paths. Every target is resolved
+// lexically below root, symlinks are rejected rather than chmod-followed, and
+// exact original modes are restored in reverse order on every exit.
+func unlockCapturedPaths(root string, paths []string, skip map[string]bool) (func() error, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	root = filepath.Clean(root)
+	type requestedMode struct {
+		path string
+		bits os.FileMode
+	}
+	requested := []requestedMode{{path: root, bits: 0o300}}
+	requestedIndex := map[string]int{root: 0}
+	addRequested := func(path string, bits os.FileMode) {
+		if index, ok := requestedIndex[path]; ok {
+			requested[index].bits |= bits
+			return
+		}
+		requestedIndex[path] = len(requested)
+		requested = append(requested, requestedMode{path: path, bits: bits})
+	}
+	var changed []protectedPathMode
+	restore := func() error {
+		var firstErr error
+		for i := len(changed) - 1; i >= 0; i-- {
+			if err := os.Chmod(changed[i].path, changed[i].mode&chmodModeMask); err != nil && !os.IsNotExist(err) && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	}
+	fail := func(err error) (func() error, error) {
+		if restoreErr := restore(); restoreErr != nil {
+			return nil, fmt.Errorf("%v; rollback checkout protection modes: %w", err, restoreErr)
+		}
+		return nil, err
+	}
+	unlock := func(path string, bits os.FileMode) error {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("queue: refusing to change protection mode through symlink %s", path)
+		}
+		old := info.Mode() & chmodModeMask
+		if old&bits == bits {
+			return nil
+		}
+		if err := os.Chmod(path, old|bits); err != nil {
+			return err
+		}
+		changed = append(changed, protectedPathMode{path: path, mode: old})
+		return nil
+	}
+	// First resolve and validate every requested path without changing a mode.
+	// This makes traversal/type refusal side-effect free.
+	for _, rel := range paths {
+		if skip[rel] {
+			continue
+		}
+		clean := filepath.Clean(filepath.FromSlash(rel))
+		if clean == "." || filepath.IsAbs(clean) || clean == ".." ||
+			strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fail(fmt.Errorf("queue: captured path escapes protected checkout: %q", rel))
+		}
+		full := filepath.Join(root, clean)
+		within, err := filepath.Rel(root, full)
+		if err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+			return fail(fmt.Errorf("queue: captured path escapes protected checkout: %q", rel))
+		}
+		var parents []string
+		for dir := filepath.Dir(full); dir != root; dir = filepath.Dir(dir) {
+			parents = append(parents, dir)
+			if filepath.Dir(dir) == dir {
+				return fail(fmt.Errorf("queue: captured path parent escapes protected checkout: %q", rel))
+			}
+		}
+		for i := len(parents) - 1; i >= 0; i-- {
+			addRequested(parents[i], 0o300)
+		}
+		addRequested(full, 0o200)
+	}
+	for _, request := range requested {
+		info, err := os.Lstat(request.path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fail(fmt.Errorf("queue: refusing to change protection mode through symlink %s", request.path))
+		}
+	}
+	// Root is first, so reverse restoration puts its exact original mode back
+	// last after every child has been restored.
+	for _, request := range requested {
+		if err := unlock(request.path, request.bits); err != nil {
+			return fail(err)
+		}
+	}
+	return restore, nil
 }
 
 // RestoreTypeCollisionError is returned by restoreCapturedPaths (and
@@ -430,7 +562,7 @@ func preservedBranchName(ctx context.Context, root string, at time.Time) (string
 // a large part of why this defect survived ~100 finalizations without being
 // localized: the logs could not answer "did the sync run?". Every outcome now
 // names itself.
-func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) (string, error) {
+func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) (summary string, returnErr error) {
 	head, err := gitOutput(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || head != strings.TrimPrefix(target, "refs/heads/") {
 		// Detached or a different branch checked out; the ref move is enough.
@@ -458,6 +590,19 @@ func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) (st
 	if len(conflicts) > 0 {
 		return "", &ProtectedSyncConflictError{Paths: conflicts, OldSHA: oldSHA}
 	}
+	restoreModes, err := unlockCapturedPaths(root, landed, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if modeErr := restoreModes(); modeErr != nil {
+			if returnErr == nil {
+				returnErr = fmt.Errorf("queue: restore protected checkout modes after sync: %w", modeErr)
+			} else {
+				returnErr = fmt.Errorf("%v; restore protected checkout modes after sync: %w", returnErr, modeErr)
+			}
+		}
+	}()
 	for _, path := range landed {
 		if _, err := gitOutput(ctx, root, "cat-file", "-e", "HEAD:"+path); err == nil {
 			// Present in the new tip: checkout updates the index entry and the
@@ -487,7 +632,11 @@ func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) (st
 // HEAD is what a subsequent `git commit` in this checkout would diff against,
 // and matching HEAD is the property that has to hold.
 func landedPaths(ctx context.Context, root, oldSHA string) ([]string, error) {
-	out, err := gitOutput(ctx, root, "diff", "--name-only", "--no-renames", oldSHA, "HEAD")
+	return changedPathsBetween(ctx, root, oldSHA, "HEAD")
+}
+
+func changedPathsBetween(ctx context.Context, root, oldSHA, newSHA string) ([]string, error) {
+	out, err := gitOutput(ctx, root, "diff", "--name-only", "--no-renames", oldSHA, newSHA)
 	if err != nil {
 		return nil, err
 	}
@@ -557,4 +706,19 @@ type ProtectedSyncConflictError struct {
 func (e *ProtectedSyncConflictError) Error() string {
 	return fmt.Sprintf("queue: refusing to sync the protected checkout: %d path(s) changed by the landing also hold local changes since the pre-finalization tip %s: %s; the landing itself is applied and the protected ref has moved, but these paths were left untouched — reconcile them by hand (inspect any queue/preserved-wip/* branch from this finalization) before committing in this checkout",
 		len(e.Paths), e.OldSHA, strings.Join(e.Paths, ", "))
+}
+
+// ProtectedCheckoutOverlapError is a pre-CAS refusal: the protected checkout
+// holds residual index/worktree state on paths the candidate would change.
+// Unlike ProtectedSyncConflictError the ref has not moved, so the worker can
+// park immediately without consuming retries or leaving a projection behind.
+type ProtectedCheckoutOverlapError struct {
+	Paths          []string
+	RecoveryBranch string
+	Reason         string
+}
+
+func (e *ProtectedCheckoutOverlapError) Error() string {
+	return fmt.Sprintf("queue: protected checkout blocks CAS: %s (recovery=%s paths=%s)",
+		e.Reason, first(e.RecoveryBranch, "unavailable"), strings.Join(e.Paths, ", "))
 }

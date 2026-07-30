@@ -21,7 +21,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueImportCapsuleSourceCmd(), queueCapsulePromotionExecutorCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueGateRunCmd(), queueMigrateCmd(), queueSweepCmd(), queueMedicCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueImportCapsuleSourceCmd(), queueCapsulePromotionExecutorCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueGateRunCmd(), queueGatePolicyCmd(), queueMigrateCmd(), queueSweepCmd(), queueMedicCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -35,6 +35,29 @@ func queueCmd() *cobra.Command {
 			return s.ReconcileLanding(op)
 		}),
 	)
+	return cmd
+}
+
+func queueGatePolicyCmd() *cobra.Command {
+	var project, target string
+	cmd := &cobra.Command{
+		Use:   "gate-policy",
+		Short: "Print the tracked deterministic gate command required by a protected target",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			required, configured, err := queue.RequiredGateCommand(project, target)
+			if err != nil {
+				return err
+			}
+			if !configured {
+				return fmt.Errorf("queue: target %q has no tracked gate command", target)
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), required)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root containing the tracked gate profile")
+	cmd.Flags().StringVar(&target, "target", "", "protected destination ref")
+	_ = cmd.MarkFlagRequired("target")
 	return cmd
 }
 
@@ -678,12 +701,16 @@ func first(values ...string) string {
 // process uses the managed staging-capsule lifecycle and requires an explicit
 // deterministic gate. It has no raw-main fallback.
 func queueProcessCmd() *cobra.Command {
-	var project, queueRoot, gate, target, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
+	var project, queueRoot, candidate, gate, target, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
+	var capacityRoot, capacityPool string
+	var capacity int
 	var gateTimeout time.Duration
 	cmd := &cobra.Command{Use: "process", Aliases: []string{"drain"}, Short: "Process candidates through a configured protected integration", RunE: func(cmd *cobra.Command, _ []string) error {
 		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}
 		deps := queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, "")
+		deps.CandidateID = strings.TrimSpace(candidate)
 		deps.GateTimeout = gateTimeout
+		deps.GateAdmission = queue.FileGateCapacity{Root: capacityRoot, Pool: capacityPool, Max: capacity}
 		if strings.TrimSpace(repair) != "" {
 			if repairReview == "" || repairerID == "" || reviewerID == "" || reviewPolicyDigest == "" {
 				return fmt.Errorf("queue process: --repair requires --repair-review, --repairer-id, --reviewer-id, and --review-policy-digest")
@@ -700,6 +727,7 @@ func queueProcessCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
+	cmd.Flags().StringVar(&candidate, "candidate", "", "process only this durable candidate identity without draining unrelated work")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each speculative tree")
 	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
@@ -708,6 +736,9 @@ func queueProcessCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repairerID, "repairer-id", "", "stable repair agent identity")
 	cmd.Flags().StringVar(&reviewerID, "reviewer-id", "", "stable independent reviewer identity")
 	cmd.Flags().StringVar(&reviewPolicyDigest, "review-policy-digest", "", "deterministic anti-weakening policy digest")
+	cmd.Flags().StringVar(&capacityRoot, "capacity-root", queue.DefaultGateCapacityRoot(), "absolute shared gate-capacity authority root")
+	cmd.Flags().StringVar(&capacityPool, "capacity-pool", "default", "operator-owned physical resource pool shared across repositories")
+	cmd.Flags().IntVar(&capacity, "capacity", 1, "maximum concurrent gates in the physical capacity pool")
 	cmd.Flags().DurationVar(&gateTimeout, "gate-timeout", queue.DefaultStageTimeout, "hard timeout applied independently to gate, repair, and anti-weakening review stages")
 	_ = cmd.MarkFlagRequired("gate")
 	return cmd

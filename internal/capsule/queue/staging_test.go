@@ -275,6 +275,10 @@ func protectedQueueRepo(t *testing.T) string {
 	git(t, root, "config", "user.name", "Queue Test")
 	git(t, root, "config", "user.email", "queue@example.invalid")
 	writeDevelopmentDefinition(t, root, "dev-workspace-script")
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), []byte("schema: project-profile/v1\ncommands:\n  test: git diff --check\n  change: git diff --check\n  full: git diff --check\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".kitsoki/project-profile.yaml")
 	copyQueueScript(t, root, "dev-workspace.sh")
 	copyQueueScript(t, root, "refresh-staging-local.sh")
 	copyQueueScript(t, root, "protected-main-mode.sh")
@@ -304,6 +308,10 @@ func nativeSelfQueueRepo(t *testing.T) string {
 	git(t, root, "config", "user.name", "Queue Test")
 	git(t, root, "config", "user.email", "queue@example.invalid")
 	writeDevelopmentDefinition(t, root, "self")
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), []byte("schema: project-profile/v1\ncommands:\n  test: git diff --check\n  change: git diff --check\n  full: git diff --check\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".kitsoki/project-profile.yaml")
 	commit(t, root, "base.txt", "base\n", "base")
 	return root
 }

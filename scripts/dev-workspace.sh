@@ -1323,6 +1323,7 @@ cmd_merge() {
   local branch=""
   local target=""
   local gate=""
+  local gate_explicit=0
   local teardown=0
   local replace_landing=0
   while [ "$#" -gt 0 ]; do
@@ -1331,7 +1332,7 @@ cmd_merge() {
       --root) root="${2:?--root requires a value}"; shift 2 ;;
       --branch) branch="${2:?--branch requires a value}"; shift 2 ;;
       --target|--onto) target="${2:?--target requires a value}"; shift 2 ;;
-      --gate) gate="${2:?--gate requires a value}"; shift 2 ;;
+      --gate) gate="${2:?--gate requires a value}"; gate_explicit=1; shift 2 ;;
       --teardown) teardown=1; shift ;;
       --replace-landing) replace_landing=1; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -1374,6 +1375,28 @@ cmd_merge() {
     make -C "$repo" -n capsule-ci-quick >/dev/null 2>&1; then
     gate="make capsule-ci-quick"
     echo "merge: using default staging gate: $gate" >&2
+  fi
+
+  if [ "$target" = "$DEFAULT_TARGET" ] &&
+    [ -x "$repo/scripts/kitsoki-promotion-route.sh" ]; then
+    local id workspace_tip landed_tip
+    id="$(workspace_id_from_path "$path")"
+    workspace_tip="$(git -C "$path" rev-parse --verify HEAD)"
+    local route_args=(workspace-to-staging --repo "$repo" --workspace "$id")
+    [ "$gate_explicit" != "1" ] || route_args+=(--gate "$gate")
+    "$repo/scripts/kitsoki-promotion-route.sh" "${route_args[@]}" >/dev/null ||
+      die "merge: native staging promotion did not land"
+    landed_tip="$(git -C "$repo" rev-parse --verify "refs/heads/$target")"
+    git -C "$repo" merge-base --is-ancestor "$workspace_tip" "$landed_tip" ||
+      die "merge: native staging landing lost workspace result $workspace_tip"
+    if [ "$teardown" = "1" ]; then
+      cmd_close --repo "$repo" --root "$root" \
+        --expected-branch "$branch" --expected-tip "$workspace_tip" "$path" ||
+        echo "warning: merge landed but teardown failed for $path" >&2
+    fi
+    echo "$target -> $(git -C "$repo" rev-parse --short "$target")"
+    echo "merged: $branch -> $target"
+    return 0
   fi
 
   local target_base target_existed=0

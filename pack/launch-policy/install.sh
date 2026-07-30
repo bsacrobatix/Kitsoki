@@ -62,6 +62,7 @@ install_file "$policy_tmp" "$target/.kitsoki.local.yaml" 0644
 install_file "$pack_dir/.claude/hooks/block-bare-checkout.sh" "$target/.claude/hooks/block-bare-checkout.sh" 0755
 install_file "$pack_dir/templates/settings.json" "$target/.claude/settings.json" 0644
 install_file "$pack_dir/scripts/launch-policy-gate.sh" "$target/scripts/launch-policy-gate.sh" 0755
+install_pack_owned_file "$pack_dir/scripts/kitsoki-promotion-route.sh" "$target/scripts/kitsoki-promotion-route.sh" 0755
 install_pack_owned_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/claude" 0755
 install_pack_owned_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/codex" 0755
 install_file "$pack_dir/templates/launcher-env.sh" "$target/.kitsoki/launch-policy.sh" 0644

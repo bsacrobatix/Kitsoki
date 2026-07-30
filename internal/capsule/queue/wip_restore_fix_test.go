@@ -50,6 +50,20 @@ func TestWrfPreserveWIPRefusesDestructiveRestoreOnFileToDirectoryCollision(t *te
 	if err := os.WriteFile(innerPath, []byte("untracked nested content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(innerPath, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "tracked.txt"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o755)
+		_ = os.Chmod(filepath.Join(dir, "tracked.txt"), 0o755)
+		_ = os.Chmod(innerPath, 0o644)
+	})
 
 	branch, skipped, err := PreserveWIP(context.Background(), dir, time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
 	if err == nil {
@@ -83,6 +97,15 @@ func TestWrfPreserveWIPRefusesDestructiveRestoreOnFileToDirectoryCollision(t *te
 	}
 	if info, err := os.Stat(filepath.Join(dir, "tracked.txt")); err != nil || !info.IsDir() {
 		t.Fatalf("tracked.txt should still be the untouched directory, stat=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o555 {
+		t.Fatalf("root protection mode was not rolled back: stat=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "tracked.txt")); err != nil || info.Mode().Perm() != 0o555 {
+		t.Fatalf("collision directory mode was not rolled back: stat=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(innerPath); err != nil || info.Mode().Perm() != 0o444 {
+		t.Fatalf("collision file mode was not rolled back: stat=%v err=%v", info, err)
 	}
 
 	// Provable survival #2: the same bytes are also already on the

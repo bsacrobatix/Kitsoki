@@ -310,6 +310,10 @@ type ProcessDeps struct {
 	// TargetRef selects the only candidate partition this worker may mutate.
 	// Empty retains supervisor compatibility for legacy in-process callers.
 	TargetRef string
+	// CandidateID narrows an explicitly invoked worker to one durable
+	// candidate without processing unrelated work under the caller's gate.
+	// FIFO finalization still applies, so this never jumps an earlier item.
+	CandidateID string
 	// GateMemo, when set, skips a gate run whose exact (tree, GateVersion,
 	// runtime-config digest) tuple already passed — see GateMemo's doc. Nil
 	// disables memoization.

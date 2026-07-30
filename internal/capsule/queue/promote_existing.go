@@ -91,9 +91,13 @@ type PromoteExistingResult struct {
 
 type PromoteExistingAuthority struct {
 	ProjectRoot string
-	Certifier   ExistingSHACertifier
-	Now         func() time.Time
-	LockWait    time.Duration
+	// QueueRoot selects the one durable queue authority shared by admission,
+	// promotion records, locks, and destination processing. Empty preserves
+	// the project-local <project>/.capsules/queue default.
+	QueueRoot string
+	Certifier ExistingSHACertifier
+	Now       func() time.Time
+	LockWait  time.Duration
 }
 
 // PromoteExisting admits an exact, receipt-proven source-target landing to a
@@ -108,10 +112,18 @@ func (a PromoteExistingAuthority) Promote(ctx context.Context, request PromoteEx
 	if err := validatePromoteExistingRequest(request); err != nil {
 		return PromoteExistingResult{}, err
 	}
+	if err := ValidateGateCommand(root, request.DestinationTarget, request.GateCommand); err != nil {
+		return PromoteExistingResult{}, fmt.Errorf("queue promote-existing: destination gate policy: %w", err)
+	}
 	if a.Certifier == nil {
 		return PromoteExistingResult{}, fmt.Errorf("queue promote-existing: certifier is required")
 	}
 	a.ProjectRoot = root
+	queueRoot, err := (Store{ProjectRoot: root, QueueRoot: a.QueueRoot}).queueRoot()
+	if err != nil {
+		return PromoteExistingResult{}, err
+	}
+	a.QueueRoot = queueRoot
 	key := promoteExistingKey(request)
 	unlock, err := a.lock(key)
 	if err != nil {
@@ -142,18 +154,27 @@ func (a PromoteExistingAuthority) Promote(ctx context.Context, request PromoteEx
 		if currentSource != existing.SourceTargetSHAAtObservation || currentSource != request.LandedSHA {
 			return a.reject(key, request, existing, "target_moved", fmt.Sprintf("source target %s moved from %s to %s", request.SourceTarget, existing.SourceTargetSHAAtObservation, currentSource))
 		}
-		if currentDestination != existing.DestinationSHAAtObservation {
-			return a.reject(key, request, existing, "target_moved", fmt.Sprintf("destination target %s moved from %s to %s", request.DestinationTarget, existing.DestinationSHAAtObservation, currentDestination))
-		}
 		if existing.DestinationCandidateID != "" {
-			candidate, err := (Store{ProjectRoot: root}).Get(existing.DestinationCandidateID)
+			candidate, err := a.store().Get(existing.DestinationCandidateID)
 			if err != nil {
 				return a.reject(key, request, existing, "candidate_missing", err.Error())
 			}
 			if candidate.SHA != request.LandedSHA || candidate.TargetRef != request.DestinationTarget || candidate.ReceiptID != existing.CIReceiptID {
 				return a.reject(key, request, existing, "candidate_mismatch", "durable destination candidate does not match promotion authority")
 			}
+			// A controller restart after the destination CAS observes the
+			// destination at ResultMainSHA. That is successful replay, not
+			// target movement; retain the one candidate/receipt identity.
+			if candidate.phase() == Landed && candidate.ResultMainSHA == currentDestination {
+				return PromoteExistingResult{Schema: PromoteExistingSchema, Status: PromoteExistingStatusQueued, Record: existing, Candidate: candidate}, nil
+			}
+			if currentDestination != existing.DestinationSHAAtObservation {
+				return a.reject(key, request, existing, "target_moved", fmt.Sprintf("destination target %s moved from %s to %s", request.DestinationTarget, existing.DestinationSHAAtObservation, currentDestination))
+			}
 			return PromoteExistingResult{Schema: PromoteExistingSchema, Status: PromoteExistingStatusQueued, Record: existing, Candidate: candidate}, nil
+		}
+		if currentDestination != existing.DestinationSHAAtObservation {
+			return a.reject(key, request, existing, "target_moved", fmt.Sprintf("destination target %s moved from %s to %s", request.DestinationTarget, existing.DestinationSHAAtObservation, currentDestination))
 		}
 	}
 
@@ -224,7 +245,7 @@ func (a PromoteExistingAuthority) Promote(ctx context.Context, request PromoteEx
 		return a.reject(key, request, existing, "target_moved", fmt.Sprintf("destination target %s moved during certification from %s to %s", request.DestinationTarget, existing.DestinationSHAAtObservation, afterDestination))
 	}
 
-	candidate, err := (Store{ProjectRoot: root}).Submit(Submit{
+	candidate, err := a.store().Submit(Submit{
 		Branch:                   promoteExistingBranch(request),
 		SHA:                      request.LandedSHA,
 		TargetRef:                request.DestinationTarget,
@@ -248,7 +269,7 @@ func (a PromoteExistingAuthority) Promote(ctx context.Context, request PromoteEx
 }
 
 func (a PromoteExistingAuthority) sourceLanding(ctx context.Context, request PromoteExistingRequest) (Candidate, error) {
-	state, err := (Store{ProjectRoot: a.ProjectRoot}).List()
+	state, err := a.store().List()
 	if err != nil {
 		return Candidate{}, err
 	}
@@ -360,7 +381,7 @@ func validatePromoteExistingRequest(in PromoteExistingRequest) error {
 }
 
 func promoteExistingKey(in PromoteExistingRequest) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{in.SourceTarget, in.LandedSHA, in.DestinationTarget, in.Pipeline}, "\x00")))
+	sum := sha256.Sum256([]byte(strings.Join([]string{in.SourceTarget, in.LandedSHA, in.DestinationTarget, in.Pipeline, in.GateCommand}, "\x00")))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
@@ -378,7 +399,23 @@ func gitRefSHA(ctx context.Context, root, ref string) (string, error) {
 }
 
 func (a PromoteExistingAuthority) statePath(key string) string {
-	return filepath.Join(a.ProjectRoot, ".capsules", "queue", "promote-existing", strings.TrimPrefix(key, "sha256:")+".json")
+	return filepath.Join(a.queueRoot(), "promote-existing", strings.TrimPrefix(key, "sha256:")+".json")
+}
+
+func (a PromoteExistingAuthority) queueRoot() string {
+	root, err := a.storeUnnormalized().queueRoot()
+	if err != nil {
+		return filepath.Join(a.ProjectRoot, ".capsules", "queue")
+	}
+	return root
+}
+
+func (a PromoteExistingAuthority) store() Store {
+	return Store{ProjectRoot: a.ProjectRoot, QueueRoot: a.queueRoot()}
+}
+
+func (a PromoteExistingAuthority) storeUnnormalized() Store {
+	return Store{ProjectRoot: a.ProjectRoot, QueueRoot: a.QueueRoot}
 }
 
 func (a PromoteExistingAuthority) read(key string) (PromoteExistingRecord, bool, error) {
@@ -408,7 +445,7 @@ func (a PromoteExistingAuthority) write(in PromoteExistingRecord) error {
 }
 
 func (a PromoteExistingAuthority) lock(key string) (func(), error) {
-	path := filepath.Join(a.ProjectRoot, ".capsules", "queue", "promote-existing", strings.TrimPrefix(key, "sha256:")+".lock")
+	path := filepath.Join(a.queueRoot(), "promote-existing", strings.TrimPrefix(key, "sha256:")+".lock")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}

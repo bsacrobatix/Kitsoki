@@ -162,6 +162,351 @@ func TestPsrSuccessfulLandingLeavesNoStagedReversalWithPermanentlyDirtyShims(t *
 	}
 }
 
+func TestPsrReadOnlyDeletedWIPSelfHealsBeforeCASAndRestoresProtection(t *testing.T) {
+	root := protectedQueueRepo(t)
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirtyPath := filepath.Join(locked, "operator.txt")
+	if err := os.WriteFile(dirtyPath, []byte("operator work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "locked/operator.txt")
+	git(t, root, "commit", "-m", "operator fixture")
+	base := git(t, root, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(root, "base.txt"), []byte("candidate changed base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "candidate.txt"), []byte("candidate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "base.txt", "candidate.txt")
+	git(t, root, "commit", "-m", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/read-only-restore", sha)
+	git(t, root, "reset", "--hard", base)
+
+	if err := os.Remove(dirtyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "base.txt"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(root, 0o755)
+		_ = os.Chmod(locked, 0o755)
+		_ = os.Chmod(filepath.Join(root, "base.txt"), 0o644)
+	})
+	store := Store{ProjectRoot: root}
+	submitted, err := store.Submit(Submit{
+		Branch: "agent/read-only-restore", SHA: sha,
+		Receipt: persistedReceipt(t, root, sha), TargetRef: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+		TargetRef:   "main",
+		GateVersion: "full:git diff --check",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := candidateByID(t, state, submitted.ID)
+	if candidate.phase() != Landed {
+		t.Fatalf("candidate did not land after scoped protection recovery: %#v", candidate)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != sha {
+		t.Fatalf("protected CAS result=%s want=%s", got, sha)
+	}
+	if staged := git(t, root, "diff", "--cached", "--stat", "HEAD"); strings.TrimSpace(staged) != "" {
+		t.Fatalf("successful landing left a staged reversal: %s", staged)
+	}
+	if status := git(t, root, "status", "--porcelain=v1", "--untracked-files=all"); strings.TrimSpace(status) != "" {
+		t.Fatalf("protected checkout did not clean before CAS: %s", status)
+	}
+	info, err := os.Stat(locked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o555 {
+		t.Fatalf("protected directory mode=%#o want 0555", got)
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootInfo.Mode().Perm() != 0o555 {
+		t.Fatalf("protected root mode=%v", rootInfo.Mode())
+	}
+	baseInfo, err := os.Stat(filepath.Join(root, "base.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseInfo.Mode().Perm() != 0o444 {
+		t.Fatalf("protected file mode=%v", baseInfo.Mode())
+	}
+	branches := git(t, root, "for-each-ref", "--format=%(refname)", "refs/heads/queue/preserved-wip/")
+	if strings.TrimSpace(branches) == "" {
+		t.Fatal("landing did not retain a preserved-WIP recovery branch")
+	}
+	branch := strings.TrimSpace(strings.Split(branches, "\n")[0])
+	diff := git(t, root, "diff", "--name-status", base, branch)
+	if !strings.Contains(diff, "D\tlocked/operator.txt") {
+		t.Fatalf("preserved branch lost operator deletion intent: %s", diff)
+	}
+	if got, err := os.ReadFile(dirtyPath); err != nil || string(got) != "operator work\n" {
+		t.Fatalf("protected checkout did not restore tracked file before CAS: %q err=%v", got, err)
+	}
+}
+
+func TestPsrUnchangedPendingProjectionSelfHealsBeforeNextCAS(t *testing.T) {
+	root := protectedQueueRepo(t)
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirtyPath := filepath.Join(locked, "operator.txt")
+	if err := os.WriteFile(dirtyPath, []byte("operator work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "locked/operator.txt")
+	git(t, root, "commit", "-m", "operator fixture")
+	base := git(t, root, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(root, "first.txt"), []byte("first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "first.txt")
+	git(t, root, "commit", "-m", "first landing")
+	firstSHA := git(t, root, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(root, "second.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "second.txt")
+	git(t, root, "commit", "-m", "second landing")
+	secondSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/second", secondSHA)
+	git(t, root, "reset", "--hard", base)
+
+	if err := os.Remove(dirtyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	git(t, root, "update-ref", "refs/heads/main", firstSHA, base)
+	finalizer := ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"}
+	if err := finalizer.writeProjection(context.Background(), "main", firstSHA, "queue/preserved-wip/incident"); err != nil {
+		t.Fatal(err)
+	}
+
+	store := Store{ProjectRoot: root}
+	submitted, err := store.Submit(Submit{
+		Branch: "agent/second", SHA: secondSHA,
+		Receipt: persistedReceipt(t, root, secondSHA), TargetRef: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   finalizer,
+		TargetRef:   "main",
+		GateVersion: "full:git diff --check",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := candidateByID(t, state, submitted.ID)
+	if candidate.phase() != Landed || git(t, root, "rev-parse", "main") != secondSHA {
+		t.Fatalf("pending projection did not self-heal into one landing: %#v", candidate)
+	}
+	if status := git(t, root, "status", "--porcelain=v1", "--untracked-files=all"); strings.TrimSpace(status) != "" {
+		t.Fatalf("projection recovery left staged reversal or WIP: %s", status)
+	}
+	info, err := os.Stat(locked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o555 {
+		t.Fatalf("projection recovery changed protected mode: mode=%v", info.Mode())
+	}
+	if path, err := finalizer.projectionPath("main"); err != nil {
+		t.Fatal(err)
+	} else if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("recovered projection was not cleared: %v", err)
+	}
+}
+
+func TestPsrExcludedTrackedReversalBlocksUnrelatedNextCAS(t *testing.T) {
+	root := protectedQueueRepo(t)
+	psrCommitShims(t, root)
+	base := git(t, root, "rev-parse", "HEAD")
+
+	claudeShim := filepath.Join(root, ".kitsoki", "bin", "claude")
+	if err := os.WriteFile(claudeShim, []byte("#!/bin/sh\n# shim changed by first landing\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-f", ".kitsoki/bin/claude")
+	git(t, root, "commit", "-m", "first landing changes tracked excluded shim")
+	firstSHA := git(t, root, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(root, "unrelated-second.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "unrelated-second.txt")
+	git(t, root, "commit", "-m", "second unrelated landing")
+	secondSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/unrelated-second", secondSHA)
+	git(t, root, "reset", "--hard", base)
+
+	// Model the first CAS winning while checkout sync crashed: HEAD now names
+	// firstSHA, but the index/worktree still describe base. Because .kitsoki is
+	// excluded from WIP capture, the resulting staged shim reversal cannot be
+	// silently cleared by the next unrelated candidate.
+	git(t, root, "update-ref", "refs/heads/main", firstSHA, base)
+	finalizer := ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"}
+	if err := finalizer.writeProjection(context.Background(), "main", firstSHA, "queue/preserved-wip/first-landing"); err != nil {
+		t.Fatal(err)
+	}
+	if staged := git(t, root, "diff", "--cached", "--name-only", "HEAD"); !strings.Contains(staged, ".kitsoki/bin/claude") {
+		t.Fatalf("fixture did not create excluded tracked reversal: %q", staged)
+	}
+
+	store := Store{ProjectRoot: root}
+	submitted, err := store.Submit(Submit{
+		Branch: "agent/unrelated-second", SHA: secondSHA,
+		Receipt: persistedReceipt(t, root, secondSHA), TargetRef: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   finalizer,
+		TargetRef:   "main",
+		GateVersion: "full:git diff --check",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := candidateByID(t, state, submitted.ID)
+	if candidate.phase() != NeedsInput || candidate.RetryReason != "protected_checkout_overlap" {
+		t.Fatalf("unrelated candidate was not parked immediately on excluded staged reversal: %#v", candidate)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != firstSHA {
+		t.Fatalf("second CAS moved main=%s want unchanged %s", got, firstSHA)
+	}
+	if staged := git(t, root, "diff", "--cached", "--name-only", "HEAD"); !strings.Contains(staged, ".kitsoki/bin/claude") {
+		t.Fatalf("excluded reversal was silently cleared: %q", staged)
+	}
+	projectionPath, err := finalizer.projectionPath("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(projectionPath); err != nil {
+		t.Fatalf("pending projection recovery evidence was lost: %v", err)
+	}
+	if !strings.Contains(candidate.Failure, "staged state after recovery") {
+		t.Fatalf("candidate failure does not explain blocked projection recovery: %q", candidate.Failure)
+	}
+}
+
+func TestPsrStagingCASIgnoresDifferentCheckedOutMainTree(t *testing.T) {
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "main")
+	git(t, root, "update-ref", "refs/heads/staging/local", base)
+
+	if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("main checkout\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "shared.txt")
+	git(t, root, "commit", "-m", "main changes shared path")
+	mainSHA := git(t, root, "rev-parse", "main")
+
+	git(t, root, "checkout", "-b", "agent/staging-shared", base)
+	if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("staging candidate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "shared.txt")
+	git(t, root, "commit", "-m", "staging changes same shared path")
+	candidateSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("dirty operator main checkout\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "operator-untracked.txt"), []byte("untracked operator work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	statusBefore := git(t, root, "status", "--porcelain=v1", "--untracked-files=all")
+	indexBefore := git(t, root, "write-tree")
+	preservedBefore := git(t, root, "for-each-ref", "--format=%(refname)", "refs/heads/queue/preserved-wip/")
+
+	store := Store{ProjectRoot: root}
+	submitted, err := store.Submit(Submit{
+		Branch: "agent/staging-shared", SHA: candidateSHA,
+		Receipt: persistedReceipt(t, root, candidateSHA), TargetRef: "staging/local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "staging/local"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "staging/local"},
+		TargetRef:   "staging/local",
+		GateVersion: "change:git diff --check",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := candidateByID(t, state, submitted.ID)
+	if candidate.phase() != Landed || git(t, root, "rev-parse", "staging/local") != candidateSHA {
+		t.Fatalf("staging candidate did not land while main was checked out: %#v", candidate)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != mainSHA {
+		t.Fatalf("staging CAS moved main=%s want=%s", got, mainSHA)
+	}
+	if got := git(t, root, "rev-parse", "HEAD"); got != mainSHA {
+		t.Fatalf("staging CAS moved checked-out HEAD=%s want=%s", got, mainSHA)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "shared.txt")); err != nil || string(got) != "dirty operator main checkout\n" {
+		t.Fatalf("staging CAS touched main worktree: %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "operator-untracked.txt")); err != nil || string(got) != "untracked operator work\n" {
+		t.Fatalf("staging CAS touched untracked main WIP: %q err=%v", got, err)
+	}
+	if statusAfter := git(t, root, "status", "--porcelain=v1", "--untracked-files=all"); statusAfter != statusBefore {
+		t.Fatalf("staging CAS changed main status:\nbefore=%q\nafter=%q", statusBefore, statusAfter)
+	}
+	if indexAfter := git(t, root, "write-tree"); indexAfter != indexBefore {
+		t.Fatalf("staging CAS changed main index: before=%s after=%s", indexBefore, indexAfter)
+	}
+	if preservedAfter := git(t, root, "for-each-ref", "--format=%(refname)", "refs/heads/queue/preserved-wip/"); preservedAfter != preservedBefore {
+		t.Fatalf("staging CAS preserved unrelated main WIP: before=%q after=%q", preservedBefore, preservedAfter)
+	}
+	finalizer := ProtectedFinalizer{ProjectRoot: root, TargetRef: "staging/local"}
+	if projection, err := finalizer.projectionPath("staging/local"); err != nil {
+		t.Fatal(err)
+	} else if _, err := os.Stat(projection); !os.IsNotExist(err) {
+		t.Fatalf("staging CAS created checkout projection while main was checked out: %v", err)
+	}
+}
+
 // TestPsrSuccessfulLandingThatDeletesAFileLeavesNoReversal covers the third
 // shape of the reversal: when the landing DELETES a tracked file, a refused
 // sync leaves the deleted file present on disk and staged as an addition, so

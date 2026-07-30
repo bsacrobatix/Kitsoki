@@ -22,7 +22,7 @@ func TestCapsulePromoteExistingExposesNoWaiverOrDirectFinalizationFlags(t *testi
 			t.Fatalf("promote-existing unexpectedly exposes --%s", forbidden)
 		}
 	}
-	for _, required := range []string{"project", "source-target", "sha", "target", "pipeline", "gate", "definition"} {
+	for _, required := range []string{"project", "queue-root", "source-target", "sha", "target", "pipeline", "gate", "definition"} {
 		if command.Flags().Lookup(required) == nil {
 			t.Fatalf("promote-existing is missing --%s", required)
 		}

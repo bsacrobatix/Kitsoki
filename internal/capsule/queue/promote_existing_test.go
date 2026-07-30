@@ -21,7 +21,8 @@ func TestPromoteExistingCarriesExactStagingLandingToMainAndRestartsIdempotently(
 	certifications := 0
 	certifier := ExistingSHACertifierFunc(func(_ context.Context, in ExistingSHACertification) (record.Stored, error) {
 		certifications++
-		if in.Request.LandedSHA != staged || in.SourceLandingReceiptID != source.ReceiptID {
+		if in.Request.LandedSHA != staged || in.SourceLandingReceiptID != source.ReceiptID ||
+			in.Request.Pipeline != "change" {
 			t.Fatalf("certification input = %#v", in)
 		}
 		return persistedPromotionReceipt(t, root, in.JobID, staged), nil
@@ -36,6 +37,9 @@ func TestPromoteExistingCarriesExactStagingLandingToMainAndRestartsIdempotently(
 	}
 	if first.Status != PromoteExistingStatusQueued || first.Candidate.SHA != staged || first.Candidate.TargetRef != "main" {
 		t.Fatalf("first result = %#v", first)
+	}
+	if first.Candidate.RequiredGateTier != "full" {
+		t.Fatalf("change-tier source certification weakened main landing tier: candidate=%#v", first.Candidate)
 	}
 	if got := git(t, root, "rev-parse", "main"); got != mainBefore {
 		t.Fatalf("promote-existing performed protected CAS: main=%s want=%s", got, mainBefore)
@@ -81,12 +85,18 @@ func TestPromoteExistingCarriesExactStagingLandingToMainAndRestartsIdempotently(
 	}
 
 	// Only the ordinary queue worker may perform the destination CAS.
+	fullGateRuns := 0
+	fullGateSHA := ""
 	state, err = (Store{ProjectRoot: root}).Process(context.Background(), ProcessDeps{
 		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
-		Gate:        ShellGate{Command: request.GateCommand},
+		Gate: gateFunc(func(_ context.Context, spec Speculation) (GateResult, error) {
+			fullGateRuns++
+			fullGateSHA = spec.SHA
+			return GateResult{Passed: true, Evidence: []string{"gate:full-final-tree=" + spec.SHA}}, nil
+		}),
 		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
 		TargetRef:   "main",
-		GateVersion: "change:" + request.GateCommand,
+		GateVersion: "full:" + request.GateCommand,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +106,109 @@ func TestPromoteExistingCarriesExactStagingLandingToMainAndRestartsIdempotently(
 	if mainCandidate.phase() != Landed || mainCandidate.ResultMainSHA != mainAfter || mainCandidate.SHA != staged {
 		t.Fatalf("main candidate = %#v", mainCandidate)
 	}
+	if certifications != 1 || fullGateRuns != 1 {
+		t.Fatalf("source certifications=%d full final-tree gates=%d, want exactly one of each", certifications, fullGateRuns)
+	}
+	if fullGateSHA == "" || fullGateSHA != mainCandidate.TreeSHA ||
+		fullGateSHA != mainCandidate.ValidatedSHA ||
+		fullGateSHA != mainCandidate.ResultMainSHA ||
+		fullGateSHA != mainAfter {
+		t.Fatalf("full gate did not bind the exact landed final tree: gate=%s tree=%s validated=%s result=%s main=%s",
+			fullGateSHA, mainCandidate.TreeSHA, mainCandidate.ValidatedSHA, mainCandidate.ResultMainSHA, mainAfter)
+	}
 	git(t, root, "merge-base", "--is-ancestor", staged, mainAfter)
+
+	afterLanding, err := (PromoteExistingAuthority{
+		ProjectRoot: root,
+		Certifier: ExistingSHACertifierFunc(func(context.Context, ExistingSHACertification) (record.Stored, error) {
+			t.Fatal("post-landing restart attempted duplicate certification")
+			return record.Stored{}, nil
+		}),
+	}).Promote(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterLanding.Candidate.ID != first.Candidate.ID || afterLanding.Candidate.phase() != Landed {
+		t.Fatalf("post-landing replay changed authority: %#v", afterLanding)
+	}
+}
+
+func TestPromoteExistingUsesOneExternalQueueAuthorityAcrossLandingAndRestart(t *testing.T) {
+	queueRoot := filepath.Join(t.TempDir(), "shared-queue")
+	root, staged, source := landedStagingCandidateAt(t, queueRoot)
+	request := PromoteExistingRequest{
+		SourceTarget: "staging/local", LandedSHA: staged,
+		DestinationTarget: "main", Pipeline: "change", GateCommand: "git diff --check",
+	}
+	certifications := 0
+	authority := PromoteExistingAuthority{
+		ProjectRoot: root, QueueRoot: queueRoot,
+		Certifier: ExistingSHACertifierFunc(func(_ context.Context, in ExistingSHACertification) (record.Stored, error) {
+			certifications++
+			return persistedPromotionReceipt(t, root, in.JobID, staged), nil
+		}),
+	}
+	first, err := authority.Promote(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Candidate.RequiredGateTier != "full" {
+		t.Fatalf("external authority weakened main landing tier: %#v", first.Candidate)
+	}
+	fullGateRuns := 0
+	fullGateSHA := ""
+	state, err := (Store{ProjectRoot: root, QueueRoot: queueRoot}).Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, QueueRoot: queueRoot, TargetRef: "main"},
+		Gate: gateFunc(func(_ context.Context, spec Speculation) (GateResult, error) {
+			fullGateRuns++
+			fullGateSHA = spec.SHA
+			return GateResult{Passed: true, Evidence: []string{"gate:full-final-tree=" + spec.SHA}}, nil
+		}),
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, QueueRoot: queueRoot, TargetRef: "main"},
+		TargetRef:   "main",
+		GateVersion: "full:" + request.GateCommand,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	landed := candidateByID(t, state, first.Candidate.ID)
+	if landed.phase() != Landed || landed.ResultMainSHA == "" {
+		t.Fatalf("destination candidate=%#v", landed)
+	}
+	if fullGateSHA == "" || fullGateSHA != landed.TreeSHA || fullGateSHA != landed.ValidatedSHA ||
+		fullGateSHA != landed.ResultMainSHA || fullGateSHA != git(t, root, "rev-parse", "main") {
+		t.Fatalf("external full gate did not bind exact landed tree: gate=%s candidate=%#v", fullGateSHA, landed)
+	}
+	restarted, err := authority.Promote(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.Candidate.ID != first.Candidate.ID || certifications != 1 || fullGateRuns != 1 {
+		t.Fatalf("restart=%#v certifications=%d full-gates=%d", restarted, certifications, fullGateRuns)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".capsules", "queue", "state.json")); !os.IsNotExist(err) {
+		t.Fatalf("project-local queue fork exists: %v", err)
+	}
+	raw, err := filepath.Glob(filepath.Join(queueRoot, "promote-existing", "*.json"))
+	if err != nil || len(raw) != 1 {
+		t.Fatalf("promotion records=%v err=%v", raw, err)
+	}
+	if !sameStrings(first.Candidate.RequiredReceiptIDs, []string{first.Record.CIReceiptID, source.ReceiptID}) {
+		t.Fatalf("required receipts=%v", first.Candidate.RequiredReceiptIDs)
+	}
+}
+
+func TestPromoteExistingRelativeQueueRootUsesStoreCWDNotProjectRoot(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := PromoteExistingAuthority{ProjectRoot: t.TempDir(), QueueRoot: "relative-authority"}
+	got := authority.queueRoot()
+	want := filepath.Join(cwd, "relative-authority")
+	if got != want {
+		t.Fatalf("queue root=%s want Store-compatible %s", got, want)
+	}
 }
 
 func TestPromoteExistingRejectsReachableSHAWithoutLandedSourceReceipt(t *testing.T) {
@@ -186,6 +298,10 @@ func TestPromoteExistingFailsClosedWhenSourceMovesDuringCertification(t *testing
 }
 
 func landedStagingCandidate(t *testing.T) (string, string, Candidate) {
+	return landedStagingCandidateAt(t, "")
+}
+
+func landedStagingCandidateAt(t *testing.T, queueRoot string) (string, string, Candidate) {
 	t.Helper()
 	root := protectedQueueRepo(t)
 	// The shared queue fixture leaves lifecycle scripts untracked so WIP tests
@@ -207,7 +323,7 @@ func landedStagingCandidate(t *testing.T) (string, string, Candidate) {
 	git(t, root, "branch", "worker/fix", workerSHA)
 	git(t, root, "reset", "--hard", base)
 	sourceReceipt := persistedReceipt(t, root, workerSHA)
-	store := Store{ProjectRoot: root}
+	store := Store{ProjectRoot: root, QueueRoot: queueRoot}
 	submitted, err := store.Submit(Submit{
 		Branch: "worker/fix", SHA: workerSHA, Receipt: sourceReceipt,
 		ReceiptRef: filepath.Join(root, ".capsules", "ci", "job-"+workerSHA[:8]+".receipt.json"),
@@ -217,9 +333,9 @@ func landedStagingCandidate(t *testing.T) (string, string, Candidate) {
 		t.Fatal(err)
 	}
 	state, err := store.Process(context.Background(), ProcessDeps{
-		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "staging/local"},
+		Integration: ProtectedIntegration{ProjectRoot: root, QueueRoot: queueRoot, TargetRef: "staging/local"},
 		Gate:        ShellGate{Command: "git diff --check"},
-		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "staging/local"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, QueueRoot: queueRoot, TargetRef: "staging/local"},
 		TargetRef:   "staging/local",
 		GateVersion: "change:git diff --check",
 	})

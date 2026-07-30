@@ -617,34 +617,55 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	var wipSkipped []string
 	var checkoutWarning string
 	projectionPending := false
-	if !p.SkipWIPPreservation {
+	checkedOut, _ := gitOutput(ctx, p.ProjectRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	targetCheckedOut := checkedOut == strings.TrimPrefix(target, "refs/heads/")
+	if !p.SkipWIPPreservation && targetCheckedOut {
 		projection, reusable, projectionErr := p.reusableProjection(ctx, target)
 		if projectionErr != nil {
 			return FinalizeResult{}, Environmental(fmt.Errorf("queue: inspect pending checkout projection: %w", projectionErr))
 		}
 		if reusable {
 			preserved = projection.PreservedBranch
-			projectionPending = true
-			checkoutWarning = "protected checkout still matches its pending projection; skipped duplicate WIP capture"
+			// A prior CAS may have persisted a projection after checkout
+			// restoration failed. The unchanged projection is safe to recover
+			// automatically, but never safe to carry through another CAS: its
+			// old index can stage an inverse of both landings. Re-capture the
+			// exact live tree, use the scoped protection unlock to clean it to
+			// current HEAD, then clear the old projection before proceeding.
+			recovered, recoveredSkipped, recoverErr := PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
+			if recoverErr != nil {
+				return FinalizeResult{}, Environmental(fmt.Errorf(
+					"queue: recover pending protected checkout projection blocked CAS (recovery=%s): %w",
+					first(preserved, recovered, "unavailable"), recoverErr,
+				))
+			}
+			if preserved == "" {
+				preserved = recovered
+			}
+			wipSkipped = append(wipSkipped, recoveredSkipped...)
+			if _, err := gitOutput(ctx, p.ProjectRoot, "diff", "--cached", "--quiet", "HEAD", "--"); err != nil {
+				paths, _ := gitOutput(ctx, p.ProjectRoot, "diff", "--cached", "--name-only", "HEAD", "--")
+				return FinalizeResult{}, &ProtectedCheckoutOverlapError{
+					Paths: strings.Fields(paths), RecoveryBranch: preserved,
+					Reason: "pending projection still has staged state after recovery; projection retained",
+				}
+			}
+			p.clearProjection(target)
+			checkoutWarning = "recovered unchanged pending protected-checkout projection before CAS"
 		} else {
 			var err error
 			preserved, wipSkipped, err = PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
 			if err != nil {
-				// PreserveWIP publishes the immutable preservation branch before it
-				// attempts to restore the protected checkout. Once that branch
-				// exists, a restore failure (most commonly a 0444 primary checkout)
-				// is checkout hygiene, not a reason to block the protected-ref CAS:
-				// the bytes are durable and the checkout is still carrying them.
-				//
-				// If capture itself failed and no branch exists, retain the old
-				// fail-closed behavior because advancing the ref could then make
-				// unanchored work harder to recover.
-				var restoreErr *PreservedWIPRestoreError
-				if preserved == "" || !errors.As(err, &restoreErr) {
-					return FinalizeResult{}, Environmental(fmt.Errorf("queue: protected checkout WIP preservation: %w", err))
-				}
-				projectionPending = true
-				checkoutWarning = fmt.Sprintf("protected checkout restore failed after durable WIP capture on %s: %v", preserved, err)
+				// A preservation branch proves the bytes are durable, but it does
+				// not make a failed checkout restore safe to ignore. Advancing the
+				// protected ref while its index still describes the old tree
+				// stages an inverse of the landing; the next ordinary commit can
+				// silently revert it. Fail before CAS and retain the preservation
+				// branch as recovery evidence.
+				return FinalizeResult{}, Environmental(fmt.Errorf(
+					"queue: protected checkout WIP preservation blocked CAS (recovery=%s): %w",
+					first(preserved, "unavailable"), err,
+				))
 			}
 		}
 	}
@@ -678,6 +699,22 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	}
 	if plan.Candidate != c.TreeSHA || c.ValidatedSHA != c.TreeSHA {
 		return FinalizeResult{}, fmt.Errorf("queue: prepared tree changed after deterministic gate")
+	}
+	if targetCheckedOut {
+		changedPaths, err := changedPathsBetween(ctx, p.ProjectRoot, plan.Expected.Target, plan.Candidate)
+		if err != nil {
+			return FinalizeResult{}, Environmental(fmt.Errorf("queue: inspect protected checkout candidate paths: %w", err))
+		}
+		overlap, err := landedPathConflicts(ctx, p.ProjectRoot, plan.Expected.Target, changedPaths)
+		if err != nil {
+			return FinalizeResult{}, Environmental(fmt.Errorf("queue: inspect protected checkout overlap: %w", err))
+		}
+		if len(overlap) > 0 {
+			return FinalizeResult{}, &ProtectedCheckoutOverlapError{
+				Paths: overlap, RecoveryBranch: preserved,
+				Reason: "candidate paths overlap residual protected-checkout work",
+			}
+		}
 	}
 	reconciler := reconcile.Reconciler{VCS: reconcile.Git{}}
 	if c.admission() == ReceiptAdmission {

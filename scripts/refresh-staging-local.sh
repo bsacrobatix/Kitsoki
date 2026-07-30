@@ -35,6 +35,7 @@ skip_remote=0
 no_fetch=0
 resume=0
 gate=""
+gate_explicit=0
 dirty_action="auto"
 # A replay is useful for a short, reviewable staging delta. For a long-lived
 # branch, its conflict surface grows with every historical commit even when
@@ -683,6 +684,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --gate)
       gate="${2:?--gate requires a value}"
+      gate_explicit=1
       shift 2
       ;;
     --dirty-action)
@@ -713,15 +715,19 @@ while [ "$#" -gt 0 ]; do
 done
 
 repo_root="$(git rev-parse --show-toplevel)"
-staging_lease_dir="$repo_root/.capsules/locks/staging-local-promotion"
-mkdir -p "$(dirname "$staging_lease_dir")"
-if ! mkdir "$staging_lease_dir" 2>/dev/null; then
-  die "staging/local promotion or refresh is already active ($staging_lease_dir); wait for its receipt or recovery"
+native_promotion_route=0
+[ ! -x "$repo_root/scripts/kitsoki-promotion-route.sh" ] || native_promotion_route=1
+if [ "$native_promotion_route" = "0" ]; then
+  staging_lease_dir="$repo_root/.capsules/locks/staging-local-promotion"
+  mkdir -p "$(dirname "$staging_lease_dir")"
+  if ! mkdir "$staging_lease_dir" 2>/dev/null; then
+    die "staging/local promotion or refresh is already active ($staging_lease_dir); wait for its receipt or recovery"
+  fi
+  printf '%s\n' "pid=$$ started=$(date -u +%Y-%m-%dT%H:%M:%SZ) command=refresh-staging-local" >"$staging_lease_dir/owner"
+  release_staging_lease() { rm -rf "$staging_lease_dir"; }
+  trap release_staging_lease EXIT
 fi
-printf '%s\n' "pid=$$ started=$(date -u +%Y-%m-%dT%H:%M:%SZ) command=refresh-staging-local" >"$staging_lease_dir/owner"
 staging_artifact_run="$repo_root/.artifacts/staging-local/$(date -u +%Y%m%dT%H%M%S)-$$"
-release_staging_lease() { rm -rf "$staging_lease_dir"; }
-trap release_staging_lease EXIT
 cd "$repo_root"
 
 case "$rebase_replay_limit" in
@@ -832,6 +838,52 @@ if [ -n "$dirty" ]; then
 fi
 git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
   die "staging capsule has no 'source' remote: $staging_capsule"
+
+if [ "$native_promotion_route" = "1" ]; then
+  # Installed repositories never manufacture a new staging commit or advance
+  # staging/local from refresh. Workspace changes enter through capsule
+  # promote; staging-to-main enters through PromoteExistingAuthority. Refresh
+  # is therefore a convergence/readiness operation only.
+  capsule_tip="$(git -C "$staging_capsule" rev-parse --verify HEAD)"
+  recovery_ref=""
+  if [ "$capsule_tip" != "$staging_start" ]; then
+    recovery_ref="refs/kitsoki/staging-capsule-recovery/$capsule_tip"
+    if git -C "$repo_root" rev-parse --verify --quiet "$recovery_ref" >/dev/null; then
+      [ "$(git -C "$repo_root" rev-parse "$recovery_ref")" = "$capsule_tip" ] ||
+        die "content-addressed staging recovery ref points at the wrong object"
+    else
+      git -C "$repo_root" fetch --no-tags "$staging_capsule" "$capsule_tip:$recovery_ref"
+    fi
+    if git -C "$staging_capsule" merge-base --is-ancestor "$capsule_tip" "$staging_start"; then
+      :
+    else
+      die "staging capsule contains unlanded work at $capsule_tip; preserved at $recovery_ref and left untouched for native queue admission"
+    fi
+  fi
+  if [ "$resume" -eq 1 ]; then
+    die "queue-owned refresh refuses direct --resume import; resolved capsule tip $capsule_tip is preserved at ${recovery_ref:-refs/heads/$staging_branch} and must enter through native queue admission"
+  fi
+  if [ "$staging_start" != "$base_primary_start" ]; then
+    git -C "$repo_root" merge-base --is-ancestor "$staging_start" "$base_primary_start" ||
+      die "$staging_branch and $base diverged; queue-owned refresh refuses to invent a reconciliation commit"
+    route_args=(main-to-staging --repo "$repo_root" --sha "$base_primary_start")
+    [ "$gate_explicit" != "1" ] || route_args+=(--gate "$gate")
+    "$repo_root/scripts/kitsoki-promotion-route.sh" "${route_args[@]}" >/dev/null ||
+      die "native main-to-staging convergence did not land"
+    staging_start="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
+  fi
+  if [ "$(git -C "$staging_capsule" rev-parse --verify HEAD)" != "$staging_start" ]; then
+    git -C "$staging_capsule" fetch source \
+      "+refs/heads/$staging_branch:refs/remotes/source/$staging_branch"
+    git -C "$staging_capsule" reset --hard "refs/remotes/source/$staging_branch" >/dev/null
+  fi
+  [ "$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")" = "$staging_start" ] ||
+    die "staging branch advanced during queue-owned refresh; rerun"
+  printf '%s -> %s (queue-owned; no ref mutation)\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")"
+  printf 'staging capsule: %s\n' "$staging_capsule"
+  printf 'base: %s (%s)\n' "$base" "$(git rev-parse --short "$base")"
+  exit 0
+fi
 
 # A conflict deliberately leaves the managed capsule in place so its rebase can
 # be resolved there. An ordinary retry would otherwise replay that work from

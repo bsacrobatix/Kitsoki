@@ -58,6 +58,7 @@ DEFAULT_GATE="make test"
 branch=""
 source_dir=""
 gate="$DEFAULT_GATE"
+gate_explicit=0
 force=0
 resume=0
 import_branch=""
@@ -226,6 +227,7 @@ while [ $# -gt 0 ]; do
       ;;
     --gate)
       gate="${2:?--gate requires a value}"
+      gate_explicit=1
       shift 2
       ;;
     --force)
@@ -288,19 +290,29 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-# Refresh and promotion both mutate the managed staging capsule and its
-# primary ref.  A source-tip CAS alone cannot prevent another helper from
-# changing the capsule/artifact state between the gate and import.  Serialize
-# the complete transaction with an atomic directory lease.
-staging_lease_dir="$repo_root/.capsules/locks/staging-local-promotion"
-mkdir -p "$(dirname "$staging_lease_dir")"
-if ! mkdir "$staging_lease_dir" 2>/dev/null; then
-  echo "error: staging/local promotion is already active ($staging_lease_dir); wait for its receipt or recovery" >&2
+native_promotion_route=0
+[ ! -x "$repo_root/scripts/kitsoki-promotion-route.sh" ] || native_promotion_route=1
+
+# The native queue owns durable admission, locking, and protected CAS. Keep
+# the historical process-owned mkdir lease only for bootstrap/legacy installs;
+# a stale directory must never block the durable authority.
+if [ "$native_promotion_route" = "0" ]; then
+  staging_lease_dir="$repo_root/.capsules/locks/staging-local-promotion"
+  mkdir -p "$(dirname "$staging_lease_dir")"
+  if ! mkdir "$staging_lease_dir" 2>/dev/null; then
+    echo "error: staging/local promotion is already active ($staging_lease_dir); wait for its receipt or recovery" >&2
+    exit 1
+  fi
+  printf '%s\n' "pid=$$ started=$(date -u +%Y-%m-%dT%H:%M:%SZ) command=merge-to-main" >"$staging_lease_dir/owner"
+  release_staging_lease() { rm -rf "$staging_lease_dir"; }
+  trap release_staging_lease EXIT
+fi
+
+if [ "$native_promotion_route" = "1" ] &&
+  [ "$branch" != "$DEFAULT_BRANCH" ]; then
+  echo "error: installed promotion authority refuses direct branch-to-main mutation; submit the managed workspace with 'kitsoki capsule promote --target main'" >&2
   exit 1
 fi
-printf '%s\n' "pid=$$ started=$(date -u +%Y-%m-%dT%H:%M:%SZ) command=merge-to-main" >"$staging_lease_dir/owner"
-release_staging_lease() { rm -rf "$staging_lease_dir"; }
-trap release_staging_lease EXIT
 
 if [ -n "$source_dir" ]; then
   if [ "${source_dir#/}" = "$source_dir" ]; then
@@ -339,6 +351,41 @@ if [ -n "$source_dir" ]; then
     echo "error: source dir has uncommitted changes: $source_dir" >&2
     printf '%s\n' "$source_dirty" >&2
     exit 1
+  fi
+  if [ "$branch" = "$DEFAULT_BRANCH" ] &&
+    [ "$native_promotion_route" = "1" ]; then
+    if [ "$resume" = "1" ]; then
+      resolved_tip="$(git -C "$source_dir" rev-parse --verify HEAD)"
+      resolved_recovery_ref="refs/kitsoki/promotion-source-recovery/$resolved_tip"
+      if git -C "$repo_root" rev-parse --verify --quiet "$resolved_recovery_ref" >/dev/null; then
+        [ "$(git -C "$repo_root" rev-parse "$resolved_recovery_ref")" = "$resolved_tip" ] || {
+          echo "error: content-addressed promotion recovery ref points at the wrong object" >&2
+          exit 1
+        }
+      else
+        git -C "$repo_root" fetch --no-tags "$source_dir" "$resolved_tip:$resolved_recovery_ref"
+      fi
+      echo "error: installed promotion authority refuses direct --resume import; resolved source tip $resolved_tip is preserved at $resolved_recovery_ref and must enter through native queue admission" >&2
+      exit 1
+    fi
+    [ "$force" != "1" ] || {
+      echo "error: the native staging promotion authority does not accept --force" >&2
+      exit 1
+    }
+    # The exact already-landed staging SHA is the candidate. Do not rebase the
+    # staging capsule or rewrite staging/local here: PromoteExistingAuthority
+    # certifies this immutable source landing and the ordinary main worker
+    # owns integration, the deterministic gate, and the protected CAS.
+    route_args=(staging-to-main --repo "$repo_root" --sha "$staging_snapshot")
+    [ "$gate_explicit" != "1" ] || route_args+=(--gate "$gate")
+    "$repo_root/scripts/kitsoki-promotion-route.sh" "${route_args[@]}"
+    main_result="$(git rev-parse --verify main)"
+    git merge-base --is-ancestor "$staging_snapshot" "$main_result" || {
+      echo "error: native promotion reported success but main does not contain $staging_snapshot" >&2
+      exit 1
+    }
+    echo "main -> $(git rev-parse --short main)"
+    exit 0
   fi
   if [ "$resume" = "1" ] && rebase_in_progress "$source_dir"; then
     echo "error: cannot resume while the source rebase is still in progress; resolve it and run git -C '$source_dir' rebase --continue first" >&2

@@ -15,6 +15,9 @@ git -C "$repo" commit -q --allow-empty -m init
 test -x "$repo/.claude/hooks/block-bare-checkout.sh"
 test -x "$repo/.kitsoki/bin/claude"
 test -x "$repo/.kitsoki/bin/codex"
+test -x "$repo/scripts/kitsoki-promotion-route.sh"
+cmp -s "$pack_dir/scripts/kitsoki-promotion-route.sh" "$repo/scripts/kitsoki-promotion-route.sh" ||
+  { echo "FAIL: installed promotion route differs from pack authority" >&2; exit 1; }
 test -f "$repo/.kitsoki/launch-policy.sh"
 grep -q 'KITSOKI_AGENT_CLAUDE_BIN' "$repo/.kitsoki/launch-policy.sh"
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$repo/.claude/settings.json"
@@ -79,6 +82,7 @@ rc=0
 grep -q '# locally customized' "$repo2/.kitsoki.local.yaml" || { echo "FAIL: divergent file was overwritten" >&2; exit 1; }
 test -x "$repo2/.kitsoki/bin/claude" || { echo "FAIL: skip aborted the remaining install" >&2; exit 1; }
 test -x "$repo2/scripts/launch-policy-gate.sh" || { echo "FAIL: gate script missing after skip" >&2; exit 1; }
+test -x "$repo2/scripts/kitsoki-promotion-route.sh" || { echo "FAIL: promotion route missing after skip" >&2; exit 1; }
 echo "PASS: divergent-file skip continues installing"
 
 # The activation file must self-locate under zsh (BASH_SOURCE is unset there)
