@@ -94,7 +94,7 @@ Resubmitting the same SHA (e.g. with a fresh CI receipt) supersedes the prior
 active candidate and inherits its attempt count, so bounded retries cannot be
 reset by resubmission races.
 
-### BREAKING CHANGE for downstream consumers of the wire status (bump-gated)
+### BREAKING CHANGE for downstream consumers of the wire status (POG side landed)
 
 Before this change, every automation park (harness failure, exhausted
 attempt budget, environment stuck past its wall-clock bound) emitted
@@ -108,9 +108,37 @@ backward compatible for any consumer that pattern-matches the literal string
 every automation park.
 
 This engine repo has no such consumer. POG (the known downstream, pinned via
-`kitsoki.lock`) does, as of this writing.
+`kitsoki.lock`) did.
 
-**A registered POG CI gate goes red, not merely quiet.** This one is not a
+**Status: the POG-side companion change has landed.** Every consumer below now
+treats `needs_human` as parked/human-actionable alongside `needs_input`, in
+POG's own commit on `agent/claude-20260729-013518-58633`. The adaptation is
+deliberately *tolerant of both spellings* rather than a swap, so POG stays
+green on the pinned pre-split engine (`b0d996923`) and stays green after the
+bump — which is what makes the lock bump a safe, separately-reviewable step
+instead of a flag day. `kitsoki.lock` itself is intentionally **not** bumped by
+that commit: bumping it is a decision about which engine revision POG runs,
+not part of making POG able to read both spellings.
+
+The rest of this section is kept as the record of what had to change and why,
+because it is also the checklist for verifying any future re-split. Two entries
+were **missing** from the original enumeration and were found by re-grepping
+POG while landing the change — proof that the "re-grep before trusting this
+list" instruction at the end is not boilerplate:
+
+- `portal/src/data/virtual-pr.ts` — `assertValidMergeQueuePromotion` is
+  **fail-closed** on an unknown `promotion.state`, so `needs_human` would have
+  thrown `merge_proposal.promotion.state is invalid` rather than degrading:
+  a hard portal failure, not a cosmetic one. `MergeQueueState` and the
+  validator's `states` array both needed the member (plus the
+  `Record<MergeQueueState, string>` label maps in `StreamsPanel.vue`, which
+  the compiler then requires).
+- `scripts/pog-integration-train-authority.mjs` (`waitForLanding`) — fast-fails
+  on `["needs_input", "rejected"]`. A `needs_human` candidate would instead
+  have been polled until `queueWaitSeconds` expired and then reported as the
+  generic `queue-pending` timeout, hiding the real, already-known cause.
+
+**A registered POG CI gate went red, not merely quiet.** This one is not a
 degraded message, so it is listed first and separately:
 
 - `scripts/test-queue-core-integration.sh:196` asserts
@@ -128,7 +156,7 @@ degraded message, so it is listed first and separately:
   `retry_wait`/`gate_failed` assertion at line 188 is unaffected and still
   holds.)
 
-Production consumers that degrade rather than fail:
+Production consumers that degraded rather than failed (each now accepts both spellings):
 
 - `scripts/promotion-status.sh` — its parked-candidate branch does not
   recognize `needs_human` and falls through to a generic message instead of
@@ -146,10 +174,11 @@ Production consumers that degrade rather than fail:
 - `portal/src/data/streams.ts` — routes a parked stream back to the portal
   Inbox only on `needs_input`; a `needs_human` stream will not route there.
 
-Finally, three POG tests hand-seed a `needs_input` fixture *as* the
-automation-park case. They keep passing (they never invoke the engine to
-produce the park), but they silently stop covering what they were written to
-cover, so they belong in the same change rather than being discovered later:
+Finally, three POG tests hand-seeded a `needs_input` fixture *as* the
+automation-park case. They kept passing (they never invoke the engine to
+produce the park), but they had silently stopped covering what they were
+written to cover, so they were retargeted in the same change rather than left
+to be discovered later:
 `scripts/test-promotion-status.sh:54`,
 `scripts/test-pog-prune-capsule-workspaces.sh:166`, and
 `scripts/test-runner-session-reaper.sh:824`. (`scripts/test-promotion.sh:350`
@@ -159,16 +188,23 @@ the engine does not write, and `retry_reason == "promotion_failed"` — already
 describe a pre-engine POG-native path, so it is stale independently of this
 change and is deliberately excluded from the list above.)
 
-**This is a blocking follow-up, not an oversight to be worked around here.**
-POG's `kitsoki.lock` must not be bumped past the commit that introduces
-`needs_human` until the CI-gate assertion, the five production consumers, and
-(ideally in the same change) the three fixtures above are updated to treat
-`needs_human` as parked/human-actionable alongside `needs_input`. Nothing is
-broken today because POG still pins an engine revision that predates this
-change; this note exists so that stays true only until someone deliberately
-fixes the POG-side consumers, not by accident. Anyone acting on this list
-should re-grep POG for the literal `needs_input` before bumping rather than
-trusting this enumeration to have stayed current.
+**What "landed" means concretely, and what is still owed.** The CI-gate
+assertion, all seven production consumers (the five enumerated above plus the
+two the enumeration missed), and the three fixtures now accept both spellings,
+each with a comment naming `b0d996923` as the boundary revision so the next
+reader knows why two spellings exist. New POG-side tests pin the two behaviors
+that would otherwise regress silently: the promotion-status operator-lifecycle
+hint is asserted for all three parked phases, and the pruner keeps a
+continuation tree referenced by a `needs_human` candidate. Portal coverage pins
+that the fail-closed promotion validator accepts `needs_human` while its union
+stays closed, and that a `needs_human` promotion still routes to the Inbox.
+Still owed, deliberately and separately: the `kitsoki.lock` bump itself, and
+`scripts/test-promotion.sh:350`, which also asserts a `needs_input` automation
+park but is excluded for the reason given above (it describes a POG-native
+pre-engine path and is stale independently of this change). Anyone re-splitting
+or re-tightening these consumers should re-grep POG for the literal
+`needs_input` rather than trusting this enumeration to have stayed current —
+it was already incomplete once.
 
 ## The medic: bounded productive retries on stalled parked candidates
 
@@ -195,14 +231,34 @@ closes both gaps using only existing queue mechanics — it never calls
 
 Both cases carry their own bounded productive-retry budget, tracked durably
 on the candidate (`medic_dispatches` / `medic_first_dispatch_at` /
-`medic_kicked_attempt`) and separate from the ordinary `attempt` budget: a
-wall-clock deadline (checked first, always escalates with the generic
-`budget-exhausted` — "ran out of time" is a different claim from "kept
-failing") and a dispatch-count ceiling (escalates with the specific
-`resolver-exhausted` or `repairer-exhausted`). Exhaustion always lands on
-`needs_human` with a `needs_human_evidence_ref`, exactly like `parkHuman`.
-`resume`/`override` reset this budget too — a human declaring the underlying
-cause fixed gets the medic a fresh budget, not a mid-exhaustion one.
+`medic_kicked_attempt` / `medic_dispatch_at_attempt`) and separate from the
+ordinary `attempt` budget: a wall-clock deadline (checked first, always
+escalates with the generic `budget-exhausted` — "ran out of time" is a
+different claim from "kept failing") and a dispatch-count ceiling (escalates
+with the specific `resolver-exhausted` or `repairer-exhausted`). Exhaustion
+always lands on `needs_human` with a `needs_human_evidence_ref`, exactly like
+`parkHuman`.
+
+**That budget is scoped to the stall, not to the candidate's lifetime.**
+Three things end it and hand the next stall a fresh budget:
+`resume`/`override` (a human declaring the underlying cause fixed gets the
+medic a fresh budget, not a mid-exhaustion one) and — just as importantly —
+**a clean preparation**: when speculation and the deterministic gate both come
+back green, `Worker.prepare` resets the medic budget exactly the way it
+already resets the environmental-failure streak. Without that reset
+`medic_first_dispatch_at` would be a per-candidate stopwatch that only a
+human ever stops, so a long-lived candidate the medic legitimately helped
+once would carry a spent 2h deadline forever and be escalated to
+`needs_human` on its very first medic-actionable event weeks later —
+terminating a candidate `retryOrPark` would have retried many more times,
+under a reason code (`budget-exhausted` / `medic_deadline_exceeded`) that
+misdescribes what happened. Note the reset deliberately does *not* happen
+merely because a worker claimed the candidate: a claim is an attempt, not
+progress, and resetting there would let the conflict dispatch loop (park →
+dispatch → claim → park again, which never reaches a clean preparation and
+whose conflict park does not itself consume the ordinary `attempt` budget)
+re-dispatch without bound — precisely what `--medic-max-dispatches` exists to
+prevent.
 
 A third, reaper arm covers the case where the medic *has* dispatched a
 candidate back to `queued`/`reprepare` but nothing ever re-drives it into
@@ -211,20 +267,51 @@ running for this target, the worker down, or a standalone `queue medic`
 running with no worker process at all. Without this arm such a candidate
 would sit forever with its medic budget already spent and nothing left in
 the scan able to revisit it (the switch only matches
-`needs_conflict_input`/`retry_wait`). This is what makes "every candidate the
-medic touches ends up progressing or in `needs_human`" hold unconditionally,
-not just in the common case of a live worker claiming its own dispatch
-promptly.
+`needs_conflict_input`/`retry_wait`).
 
-**Caveat on `--medic-max-dispatches` vs `--max-attempts`:** the gate-retry arm
-can escalate a candidate to `repairer-exhausted` while it still has ordinary
-attempts left under `--max-attempts` — e.g. `--medic-max-dispatches 3` with
-`--max-attempts 10` escalates around attempt 5 (threshold 2 + 3 dispatches)
-even though `retryOrPark` would have kept retrying through attempt 10. The
-direction is conservative (nothing lands unverified), but it does mean a
-worker configured with a much larger `--max-attempts` than
-`--medic-max-dispatches` will see the medic reduce automation throughput
-rather than increase it for that population; size the two together.
+"Stranded" is a claim about the queue, not about the clock, so the reaper
+requires two more things than an exceeded deadline before it escalates —
+otherwise it would undo the medic's own progress and manufacture false
+operator work under a misleading reason code:
+
+- **Nothing re-drove the dispatch.** `attempt` must still be exactly
+  `medic_dispatch_at_attempt`. Every claim increments `attempt`
+  (`claimPreparation`), so an advanced `attempt` proves a worker did pick the
+  dispatch up, and a candidate back in `reprepare` after that is an ordinary
+  lease-expiry reclaim the base machinery already owns. (A durable record
+  written before `medic_dispatch_at_attempt` existed reads it as `0`; if it
+  has any attempts at all that reads as "re-driven", so the reaper stays
+  quiet rather than escalating on incomplete history.)
+- **No worker is demonstrably working this same protected target**, judged by
+  `started` / `phase_started_at` / `completed_at` / `lease_expires_at` on the
+  target's *other* candidates — each of which only a working worker writes,
+  with `lease_expires_at` in particular covering a single multi-hour
+  heartbeat-renewed gate run ahead of this candidate. A dispatch goes to the
+  **back** of the line, so on a deep train a correctly dispatched candidate
+  can easily sit `queued` past the 2h deadline having done nothing wrong
+  except wait its FIFO turn. Liveness is scoped to the candidate's own
+  `target_ref`, not to the medic pass's `--target`, because workers are
+  target-scoped: another target's healthy train says nothing about whether
+  anyone will ever claim this candidate, and an unscoped pass sees both.
+
+The cost is that the reaper waits: a dispatched candidate on a train that
+keeps moving is left alone indefinitely rather than escalated. That is the
+correct trade — "ends up progressing or in `needs_human`" is a guarantee
+about candidates nothing is driving, and a moving train is driving this one.
+
+**Caveat on `--medic-max-dispatches` vs `--max-attempts`:** within a single
+stall the gate-retry arm can escalate a candidate to `repairer-exhausted`
+while it still has ordinary attempts left under `--max-attempts` — e.g.
+`--medic-max-dispatches 3` with `--max-attempts 10` escalates around attempt 5
+(threshold 2 + 3 dispatches) even though `retryOrPark` would have kept
+retrying through attempt 10. The direction is conservative (nothing lands
+unverified), but it does mean a worker configured with a much larger
+`--max-attempts` than `--medic-max-dispatches` will see the medic reduce
+automation throughput rather than increase it for that population; size the
+two together. `--medic-deadline` has the same shape within a stall. Neither
+bound leaks *across* stalls — a clean preparation resets both (see above) —
+so this caveat is about one continuous stall, not about a candidate the medic
+ever helped.
 
 `needs_input` and `needs_human` are never touched. `needs_input` is exactly
 what an operator's own `queue park` verb produces; acting on it would mean
@@ -303,7 +390,7 @@ Flags (both surfaces; the standalone command omits the `medic-` prefix):
 | `--medic`                             | *(always on)*             | off     | enable the medic pass |
 | `--target` *(reused from the worker's own flag)* | `--target`     | unscoped | scope every medic action to this protected target ref — **required for a multi-target store**, must match the corresponding `queue worker --target` exactly |
 | `--medic-max-dispatches`               | `--max-dispatches`        | 3       | productive retries per candidate before escalating |
-| `--medic-deadline`                     | `--deadline`              | 2h      | wall-clock bound since a candidate's first medic touch |
+| `--medic-deadline`                     | `--deadline`              | 2h      | wall-clock bound since the medic's first touch of the current stall (a clean preparation, `resume`, or `override` starts a fresh one) |
 | `--medic-gate-failure-threshold`       | `--gate-failure-threshold`| 2       | consecutive gate-failed attempts before a `retry_wait` candidate is medic-actionable |
 | *(derived from `--repair`)*            | `--repairer-configured`   | false   | whether this worker actually has a repairer configured; the standalone command cannot see the worker's own `--repair`, so it must be told explicitly |
 

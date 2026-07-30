@@ -32,7 +32,20 @@ import (
 // itself (MedicDispatches/MedicFirstDispatchAt in queue.go) — separate from
 // the ordinary product-failure Attempt budget, because the parked state
 // itself does not otherwise bound how long the medic could keep re-driving a
-// candidate. On exhaustion the candidate is escalated straight to
+// candidate.
+//
+// That budget is scoped to the stall being treated, not to the candidate's
+// lifetime. A clean preparation (speculation plus the deterministic gate,
+// both green — see Worker.prepare) ends the stall and resets the budget,
+// exactly like it already resets the environmental-failure streak. Without
+// that reset MedicFirstDispatchAt would be a per-candidate-lifetime
+// stopwatch: a long-lived candidate the medic legitimately helped once would
+// carry a spent wall-clock deadline forever, and the medic would escalate it
+// to needs_human on the very first medic-actionable event weeks later —
+// terminating a candidate the ordinary retryOrPark policy would have retried
+// many more times, under a reason code that misdescribes what happened.
+//
+// On exhaustion the candidate is escalated straight to
 // needs_human — never spun forever, never silently dropped — with a typed
 // ReasonCode (resolver-exhausted / repairer-exhausted for a dispatch-count
 // ceiling, budget-exhausted for the wall-clock deadline, which fires
@@ -68,11 +81,13 @@ type MedicDeps struct {
 	// failure) before escalating it to needs_human. Zero takes
 	// DefaultMedicMaxDispatches.
 	MaxDispatches int
-	// Deadline bounds wall-clock time since the medic's first touch of a
-	// candidate (MedicFirstDispatchAt); exceeding it escalates to
-	// needs_human even when MaxDispatches has not been reached — a resolver
-	// that never finishes in time is exhausted exactly as much as one that
-	// returns and fails repeatedly. Zero takes DefaultMedicDeadline.
+	// Deadline bounds wall-clock time since the medic's first touch of the
+	// stall it is treating (MedicFirstDispatchAt, which a clean preparation
+	// or a human resume/override clears — see resetMedicBudget); exceeding
+	// it escalates to needs_human even when MaxDispatches has not been
+	// reached — a resolver that never finishes in time is exhausted exactly
+	// as much as one that returns and fails repeatedly. Zero takes
+	// DefaultMedicDeadline.
 	Deadline time.Duration
 	// RepairerConfigured must mirror whether ProcessDeps.Repairer is
 	// actually set for this worker. The medic only accelerates a repeated
@@ -202,7 +217,7 @@ func (s Store) MedicRunOnce(deps MedicDeps) (MedicResult, error) {
 				c.Attempt >= deps.gateFailureThreshold() && c.MedicKickedAttempt != c.Attempt:
 				act, touched = medicHandleGateRetry(c, deps, n)
 			case (c.phase() == Queued || c.phase() == Reprepare) && c.MedicDispatches > 0:
-				act, touched = medicHandleStrandedDispatch(c, deps, n)
+				act, touched = medicHandleStrandedDispatch(c, &state, deps, n)
 			}
 			if touched {
 				result.Actions = append(result.Actions, act)
@@ -260,13 +275,17 @@ func medicEscalate(c *Candidate, now time.Time, medicID, reason string, code Rea
 
 // medicDispatch stamps the bookkeeping every productive medic action
 // (dispatch_resolver, kick_gate_retry) shares: the wall-clock start of this
-// candidate's medic-owned budget (set once, on the first dispatch), the
-// running dispatch count, and who/when/what for `queue status`.
+// candidate's medic-owned budget (set once, per stall, on the first
+// dispatch), the running dispatch count, the Attempt this dispatch was made
+// at (so the reaper arm can tell a never-re-driven dispatch from a re-claimed
+// one — see medicHandleStrandedDispatch), and who/when/what for `queue
+// status`.
 func medicDispatch(c *Candidate, now time.Time, medicID, verb string) {
 	if c.MedicFirstDispatchAt.IsZero() {
 		c.MedicFirstDispatchAt = now
 	}
 	c.MedicDispatches++
+	c.MedicDispatchAtAttempt = c.Attempt
 	c.MedicLastAction, c.MedicLastAt, c.MedicLastBy = verb, now, medicID
 }
 
@@ -312,15 +331,91 @@ func medicHandleConflict(c *Candidate, state *State, deps MedicDeps, now time.Ti
 // candidate out of those phases nothing would ever check its deadline again.
 // This closes that gap so the medic's "every candidate it touches ends up
 // progressing or in needs_human" guarantee holds even when no worker ever
-// re-drives the dispatch. It only ever fires past the deadline — a
-// dispatched candidate still within budget that simply has not been claimed
-// yet is left alone, since it may still be claimed and land normally at any
-// moment.
-func medicHandleStrandedDispatch(c *Candidate, deps MedicDeps, now time.Time) (MedicAction, bool) {
+// re-drives the dispatch.
+//
+// "Stranded" is a claim about the queue, not about the clock, so the deadline
+// alone is never sufficient. Two further conditions must hold, because
+// escalating a candidate that is merely waiting its turn would undo the
+// medic's own progress and manufacture false operator work under a reason
+// code that actively misleads whoever opens it:
+//
+//   - Nothing has re-driven the dispatch: Attempt is still exactly what it
+//     was when the dispatch happened (MedicDispatchAtAttempt). Any claim
+//     increments Attempt (claimPreparation), so an advanced Attempt means a
+//     worker did pick the dispatch up and the candidate's current
+//     Queued/Reprepare state is the ordinary machinery at work — a lease
+//     expiry reclaim or a stale-base repreparation — which needs no medic at
+//     all. (A candidate whose durable record predates this field reads
+//     MedicDispatchAtAttempt as 0; if it has any attempts at all that reads
+//     as "re-driven", so the reaper stays quiet rather than escalating on
+//     incomplete history.)
+//   - No worker is demonstrably working this protected target: see
+//     medicWorkerActivitySince. medicHandleConflict deliberately dispatches
+//     to the back of the line, so on a deep train a correctly dispatched
+//     candidate can easily sit queued for longer than the deadline with
+//     nothing wrong with it at all — the workers are simply busy ahead of
+//     it, and they will reach it.
+//
+// The cost of those conditions is that the reaper waits: a dispatched
+// candidate on a train that keeps moving is left alone indefinitely rather
+// than escalated. That is the correct trade — the "ends up progressing or in
+// needs_human" guarantee is about candidates nothing is driving, and a moving
+// train is driving this one.
+func medicHandleStrandedDispatch(c *Candidate, state *State, deps MedicDeps, now time.Time) (MedicAction, bool) {
 	if !medicDeadlineExceeded(c, deps, now) {
 		return MedicAction{}, false
 	}
+	if c.Attempt != c.MedicDispatchAtAttempt {
+		return MedicAction{}, false
+	}
+	if medicWorkerActivitySince(state, c, medicLastDispatchAt(c)) {
+		return MedicAction{}, false
+	}
 	return medicEscalate(c, now, deps.medicID(), "medic_deadline_exceeded", ReasonBudgetExhausted), true
+}
+
+// medicLastDispatchAt is when the medic most recently dispatched c. For a
+// Queued/Reprepare candidate with MedicDispatches > 0 — the only kind the
+// reaper arm looks at — MedicLastAt is exactly that: the medic's only
+// possible last actions on such a candidate are dispatch_resolver and
+// kick_gate_retry (an escalate would have left it in needs_human, which the
+// switch never matches). MedicFirstDispatchAt is the fallback for a durable
+// record written before MedicLastAt existed.
+func medicLastDispatchAt(c *Candidate) time.Time {
+	if !c.MedicLastAt.IsZero() {
+		return c.MedicLastAt
+	}
+	return c.MedicFirstDispatchAt
+}
+
+// medicWorkerActivitySince reports whether some worker has demonstrably been
+// working c's own protected target at or after since — i.e. whether c is
+// waiting behind a moving train rather than stranded. Any of four durable
+// timestamps on another candidate for the same TargetRef counts, because each
+// is written only by a worker actually doing work: Started (set when
+// claimPreparation claims), PhaseStartedAt (set by every lease transition),
+// Completed (set when finalization lands), and LeaseExpiresAt (extended by
+// the heartbeat for as long as a worker holds an in-flight phase, which is
+// what a single multi-hour gate run ahead of c looks like).
+//
+// Scoping to c.TargetRef rather than to deps.TargetRef is deliberate and
+// stricter: workers are target-scoped (Worker.matchesTarget), so activity on
+// another target proves nothing about whether anyone will ever claim c, and
+// an unscoped medic pass (empty MedicDeps.TargetRef, which matches every
+// candidate) must not read one target's healthy train as liveness for
+// another target that has no worker at all.
+func medicWorkerActivitySince(state *State, c *Candidate, since time.Time) bool {
+	for i := range state.Candidates {
+		other := &state.Candidates[i]
+		if other.ID == c.ID || other.TargetRef != c.TargetRef {
+			continue
+		}
+		if other.Started.After(since) || other.PhaseStartedAt.After(since) ||
+			other.Completed.After(since) || other.LeaseExpiresAt.After(since) {
+			return true
+		}
+	}
+	return false
 }
 
 // medicHandleGateRetry is the repeated-gate-failure retry_wait path: clear
@@ -341,11 +436,23 @@ func medicHandleGateRetry(c *Candidate, deps MedicDeps, now time.Time) (MedicAct
 	return MedicAction{CandidateID: c.ID, Verb: "kick_gate_retry", Reason: "repeated_gate_failure", At: now}, true
 }
 
-// resetMedicBudget clears every medic bookkeeping field. Called by Resume and
-// Override: a human declaring the underlying cause fixed gets the medic a
-// fresh productive-retry budget too, exactly like the ordinary attempt
-// budget those verbs already reset.
+// resetMedicBudget clears every medic bookkeeping field, ending the stall the
+// budget was scoped to. Called by Resume and Override (a human declaring the
+// underlying cause fixed gets the medic a fresh productive-retry budget too,
+// exactly like the ordinary attempt budget those verbs already reset) and by
+// Worker.prepare on a clean preparation (the candidate made it through
+// speculation and the deterministic gate, so whatever stall the medic was
+// treating is over; a later, unrelated stall must not inherit an already-spent
+// wall-clock deadline).
+//
+// Note it is deliberately NOT called merely because a worker claimed the
+// candidate: a claim is an attempt, not progress. Resetting there would let
+// the needs_conflict_input dispatch loop (park -> dispatch -> claim -> park
+// again, which never reaches a clean preparation and whose conflict park does
+// not itself consume the ordinary Attempt budget) re-dispatch without bound,
+// which is exactly what MaxDispatches exists to prevent.
 func resetMedicBudget(c *Candidate) {
 	c.MedicDispatches, c.MedicFirstDispatchAt, c.MedicKickedAttempt = 0, time.Time{}, 0
+	c.MedicDispatchAtAttempt = 0
 	c.MedicLastAction, c.MedicLastAt, c.MedicLastBy = "", time.Time{}, ""
 }

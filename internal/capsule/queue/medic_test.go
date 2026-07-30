@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -601,15 +602,24 @@ func TestMdStrandedDispatchWithinDeadlineLeftAlone(t *testing.T) {
 // TestMdStrandedDispatchInReprepareEscalatesPastDeadline pins that the
 // reaper arm also covers Reprepare, the other claimable non-terminal phase a
 // dispatched candidate can land in (see worker.go's claim check), not just
-// Queued.
+// Queued. The fixture keeps the reaper's other precondition satisfied —
+// Attempt is still exactly the dispatch's MedicDispatchAtAttempt, i.e.
+// nothing re-claimed it — so this isolates the phase arm itself. In
+// production a Reprepare candidate usually HAS been re-claimed since the
+// dispatch (that is how it got to Reprepare), which
+// TestMdStrandedDispatchReclaimedSinceDispatchIsLeftAlone pins as
+// deliberately left alone.
 func TestMdStrandedDispatchInReprepareEscalatesPastDeadline(t *testing.T) {
 	store := Store{ProjectRoot: t.TempDir()}
 	c := wltSubmit(t, store, "stranded-reprepare")
 	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	wltMutate(t, store, c.ID, func(cand *Candidate) {
 		cand.Phase, cand.Status = Reprepare, Reprepare
+		cand.Attempt = 2
 		cand.MedicDispatches = 2
+		cand.MedicDispatchAtAttempt = 2
 		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAt, cand.MedicLastAction = dispatchedAt, "dispatch_resolver"
 	})
 
 	now := dispatchedAt.Add(3 * time.Hour)
@@ -669,6 +679,215 @@ func TestMdConcurrentMedicRunOnceSingleFlightsDispatch(t *testing.T) {
 	got := mustGet(t, store, c.ID)
 	if got.MedicDispatches != 1 || got.phase() != Queued {
 		t.Fatalf("candidate double-dispatched or left in the wrong phase: %#v", got)
+	}
+}
+
+// TestMdCleanPreparationEndsTheMedicStall pins that the medic's
+// productive-retry budget is scoped to the stall it is treating, not to the
+// candidate's lifetime. Without the reset in Worker.prepare,
+// MedicFirstDispatchAt is a per-candidate stopwatch that only a human
+// resume/override ever stops, so a long-lived candidate the medic helped once
+// would be escalated straight to needs_human on its first medic-actionable
+// event any time later — killing a candidate retryOrPark would have retried
+// eight more times, under a reason code (budget-exhausted /
+// medic_deadline_exceeded) that misdescribes what happened.
+func TestMdCleanPreparationEndsTheMedicStall(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "stall-scoped-budget")
+	dispatchedAt := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.MedicDispatches = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicDispatchAtAttempt = 0
+		cand.MedicLastAction, cand.MedicLastAt, cand.MedicLastBy = "dispatch_resolver", dispatchedAt, "medic-1"
+	})
+
+	// The medic's dispatch worked: one ordinary worker cycle takes the
+	// candidate all the way through speculation and a green gate.
+	worker := Worker{Store: store, Deps: ProcessDeps{
+		Integration: &fakeIntegration{speculate: func(_ context.Context, cand Candidate, _ []Candidate) (Speculation, error) {
+			return Speculation{SHA: "spec-" + cand.SHA}, nil
+		}},
+		Gate: passingGate{},
+	}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prepared := mustGet(t, store, c.ID)
+	if prepared.phase() != ReadyToFinalize {
+		t.Fatalf("precondition: a clean preparation should be ready_to_finalize, got %s (%s)", prepared.phase(), prepared.Failure)
+	}
+	if prepared.MedicDispatches != 0 || !prepared.MedicFirstDispatchAt.IsZero() || prepared.MedicDispatchAtAttempt != 0 ||
+		prepared.MedicKickedAttempt != 0 || prepared.MedicLastAction != "" || !prepared.MedicLastAt.IsZero() || prepared.MedicLastBy != "" {
+		t.Fatalf("clean preparation did not end the medic stall: %#v", prepared)
+	}
+
+	// A month later the same candidate enters an ordinary, healthy
+	// gate-failure retry streak at attempt 2 of 10, with a repairer
+	// configured. The medic must productively kick it, not escalate it on an
+	// inherited, long-spent wall-clock deadline.
+	later := dispatchedAt.Add(30 * 24 * time.Hour)
+	wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = RetryWait, RetryWait
+		cand.Attempt = 2
+		cand.ReasonCode = ReasonGateFailed
+		cand.RetryReason = "gate_failed"
+		cand.RetryAt = later.Add(time.Hour)
+	})
+	result, err := store.MedicRunOnce(MedicDeps{
+		Now: mdClock(later), MedicID: "medic-1", RepairerConfigured: true,
+		GateFailureThreshold: 2, MaxDispatches: 3, Deadline: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Verb != "kick_gate_retry" {
+		t.Fatalf("healthy retry streak was not productively kicked: actions=%#v", result.Actions)
+	}
+	got := mustGet(t, store, c.ID)
+	if got.phase() != RetryWait || !got.RetryAt.IsZero() || got.ReasonCode != ReasonGateFailed {
+		t.Fatalf("after kick: phase=%s retry_at=%v code=%s", got.phase(), got.RetryAt, got.ReasonCode)
+	}
+	if !got.MedicFirstDispatchAt.Equal(later) {
+		t.Fatalf("the kick should have opened a fresh budget at %v, got %v", later, got.MedicFirstDispatchAt)
+	}
+}
+
+// TestMdStrandedDispatchReclaimedSinceDispatchIsLeftAlone pins the reaper
+// arm's "has anything re-driven this dispatch" precondition: a worker claim
+// increments Attempt, so an Attempt past MedicDispatchAtAttempt proves the
+// dispatch was picked up. Such a candidate back in Reprepare is an ordinary
+// lease-expiry reclaim, which the base machinery owns — escalating it to
+// needs_human on the medic's wall clock would terminate a candidate nothing
+// is actually stuck on.
+func TestMdStrandedDispatchReclaimedSinceDispatchIsLeftAlone(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "stranded-but-reclaimed")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	before := wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Reprepare, Reprepare
+		cand.Attempt = 3 // claimed once since the dispatch below
+		cand.MedicDispatches = 1
+		cand.MedicDispatchAtAttempt = 2
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAction, cand.MedicLastAt, cand.MedicLastBy = "dispatch_resolver", dispatchedAt, "medic-1"
+	})
+
+	result, err := store.MedicRunOnce(MedicDeps{Now: mdClock(dispatchedAt.Add(3 * time.Hour)), MedicID: "medic-1", MaxDispatches: 3, Deadline: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 0 {
+		t.Fatalf("reaper escalated a dispatch a worker demonstrably re-claimed: actions=%#v", result.Actions)
+	}
+	if after := mustGet(t, store, c.ID); !reflect.DeepEqual(before, after) {
+		t.Fatalf("re-claimed candidate mutated:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
+// TestMdStrandedDispatchBehindAMovingTrainIsLeftAlone pins the reaper arm's
+// other precondition. medicHandleConflict dispatches to the BACK of the line,
+// so on a deep train a freshly, correctly dispatched candidate can easily sit
+// queued past the deadline having done nothing wrong except wait its FIFO
+// turn. Escalating it would undo the medic's own progress and manufacture
+// false operator work. The control half of this test — the same fixture with
+// every trace of worker activity moved to before the dispatch — still
+// escalates, proving the difference is genuinely the liveness signal and not
+// a fixture that stopped matching.
+func TestMdStrandedDispatchBehindAMovingTrainIsLeftAlone(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	stranded := wltSubmit(t, store, "dispatched-behind-a-moving-train")
+	ahead := wltSubmit(t, store, "ahead-in-line")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	now := dispatchedAt.Add(3 * time.Hour)
+
+	before := wltMutate(t, store, stranded.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.Attempt = 1
+		cand.MedicDispatches = 1
+		cand.MedicDispatchAtAttempt = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAction, cand.MedicLastAt, cand.MedicLastBy = "dispatch_resolver", dispatchedAt, "medic-1"
+	})
+	// A worker claimed the candidate ahead of it after the dispatch and is
+	// still gating it, heartbeat-renewing its lease: a multi-hour CI run in
+	// front of the dispatched candidate.
+	wltMutate(t, store, ahead.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Gating, Gating
+		cand.Attempt = 1
+		cand.WorkerID = "worker-a"
+		cand.Started = dispatchedAt.Add(time.Minute)
+		cand.PhaseStartedAt = dispatchedAt.Add(time.Minute)
+		cand.LeaseExpiresAt = now.Add(30 * time.Second)
+	})
+
+	deps := MedicDeps{Now: mdClock(now), MedicID: "medic-1", MaxDispatches: 3, Deadline: 2 * time.Hour}
+	result, err := store.MedicRunOnce(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 0 {
+		t.Fatalf("reaper escalated a candidate merely waiting behind a moving train: actions=%#v", result.Actions)
+	}
+	if after := mustGet(t, store, stranded.ID); !reflect.DeepEqual(before, after) {
+		t.Fatalf("backlogged candidate mutated:\nbefore=%#v\nafter=%#v", before, after)
+	}
+
+	// Control: the train stopped — nothing has been claimed, leased, or
+	// landed since the dispatch — so the same candidate is genuinely
+	// stranded and must be escalated.
+	wltMutate(t, store, ahead.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.WorkerID = ""
+		cand.Started = dispatchedAt.Add(-time.Hour)
+		cand.PhaseStartedAt = dispatchedAt.Add(-time.Hour)
+		cand.LeaseExpiresAt = time.Time{}
+	})
+	result2, err := store.MedicRunOnce(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result2.Actions) != 1 || result2.Actions[0].Verb != "escalate" || result2.Actions[0].CandidateID != stranded.ID {
+		t.Fatalf("a genuinely stranded dispatch was not escalated: actions=%#v", result2.Actions)
+	}
+	got := mustGet(t, store, stranded.ID)
+	if got.phase() != NeedsHuman || got.ReasonCode != ReasonBudgetExhausted || got.RetryReason != "medic_deadline_exceeded" {
+		t.Fatalf("phase=%s code=%s reason=%s", got.phase(), got.ReasonCode, got.RetryReason)
+	}
+}
+
+// TestMdStrandedDispatchIgnoresOtherTargetsLiveness pins that the liveness
+// signal is scoped to the stranded candidate's own protected target. Workers
+// are target-scoped (Worker.matchesTarget), so a busy train on another target
+// says nothing about whether anyone will ever claim this candidate — and an
+// unscoped medic pass sees both.
+func TestMdStrandedDispatchIgnoresOtherTargetsLiveness(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	stranded := wltSubmit(t, store, "stranded-on-its-own-target")
+	elsewhere := wltSubmit(t, store, "busy-on-another-target")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	now := dispatchedAt.Add(3 * time.Hour)
+
+	wltMutate(t, store, stranded.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.MedicDispatches = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAction, cand.MedicLastAt, cand.MedicLastBy = "dispatch_resolver", dispatchedAt, "medic-1"
+	})
+	wltMutate(t, store, elsewhere.ID, func(cand *Candidate) {
+		cand.TargetRef = "release/2026.07"
+		cand.Phase, cand.Status = Gating, Gating
+		cand.WorkerID = "worker-release"
+		cand.Started, cand.PhaseStartedAt = now.Add(-time.Minute), now.Add(-time.Minute)
+		cand.LeaseExpiresAt = now.Add(30 * time.Second)
+	})
+
+	result, err := store.MedicRunOnce(MedicDeps{Now: mdClock(now), MedicID: "medic-1", MaxDispatches: 3, Deadline: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].CandidateID != stranded.ID || result.Actions[0].Verb != "escalate" {
+		t.Fatalf("another target's busy train was read as liveness: actions=%#v", result.Actions)
 	}
 }
 

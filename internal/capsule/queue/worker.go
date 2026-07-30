@@ -261,6 +261,15 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// unrelated environmental blip.
 		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
 		cur.EnvFailureSignature, cur.EnvRepeatStreak = "", 0
+		// For exactly the same reason it ends whatever stall the medic was
+		// treating: speculation and the deterministic gate both came back
+		// green, so this candidate is out of the conflict/gate-failure stall
+		// the medic's bounded productive-retry budget was opened for. Leaving
+		// MedicFirstDispatchAt behind would turn that budget into a
+		// per-candidate-lifetime stopwatch and make the medic escalate a
+		// perfectly healthy candidate to needs_human on its first
+		// medic-actionable event weeks later (see resetMedicBudget).
+		resetMedicBudget(cur)
 	})
 }
 

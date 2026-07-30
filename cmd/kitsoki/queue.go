@@ -204,7 +204,7 @@ func queueMedicCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "", "scope every medic action to candidates bound to this protected target ref (default: unscoped, matches every target — only safe for a single-target-per-store deployment; a multi-target store should pass the exact --target the corresponding `queue worker` uses)")
 	cmd.Flags().StringVar(&medicID, "medic-id", "", "durable medic identity recorded in evidence and needs_human parked_by (default queue-medic)")
 	cmd.Flags().IntVar(&maxDispatches, "max-dispatches", queue.DefaultMedicMaxDispatches, "productive retries (resolver dispatch / gate kick) per candidate before escalating to needs_human")
-	cmd.Flags().DurationVar(&deadline, "deadline", queue.DefaultMedicDeadline, "wall-clock bound since a candidate's first medic touch before escalating to needs_human, independent of the dispatch count")
+	cmd.Flags().DurationVar(&deadline, "deadline", queue.DefaultMedicDeadline, "wall-clock bound since the medic's first touch of the current stall (a clean preparation or a human resume/override starts a fresh one) before escalating to needs_human, independent of the dispatch count")
 	cmd.Flags().BoolVar(&repairerConfigured, "repairer-configured", false, "set when the worker processing this queue has a --repair command configured, so the medic will accelerate repeated-gate-failure retry_wait candidates")
 	cmd.Flags().IntVar(&gateFailureThreshold, "gate-failure-threshold", queue.DefaultMedicGateFailureThreshold, "consecutive gate-failed attempts before a retry_wait candidate is medic-actionable")
 	cmd.Flags().BoolVar(&once, "once", false, "perform exactly one medic pass instead of looping")
@@ -589,7 +589,7 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxEnvRepeat, "max-env-repeat", queue.DefaultMaxEnvRepeat, "consecutive byte-identical environmental failure messages before parking as needs_human, regardless of --max-env-duration; a changed message resets the count")
 	cmd.Flags().BoolVar(&medicEnabled, "medic", false, "run the merge-queue medic (P1.7 part 2) once per worker cycle: retry stalled needs_conflict_input and repeated-gate-failure candidates through existing verbs (dispatch the resolver again / kick the backoff), escalating honestly to needs_human on exhaustion; see docs/architecture/merge-queue.md")
 	cmd.Flags().IntVar(&medicMaxDispatches, "medic-max-dispatches", queue.DefaultMedicMaxDispatches, "medic: productive retries per candidate before escalating to needs_human")
-	cmd.Flags().DurationVar(&medicDeadline, "medic-deadline", queue.DefaultMedicDeadline, "medic: wall-clock bound since a candidate's first medic touch before escalating to needs_human")
+	cmd.Flags().DurationVar(&medicDeadline, "medic-deadline", queue.DefaultMedicDeadline, "medic: wall-clock bound since the medic's first touch of the current stall (a clean preparation or a human resume/override starts a fresh one) before escalating to needs_human")
 	cmd.Flags().IntVar(&medicGateFailureThreshold, "medic-gate-failure-threshold", queue.DefaultMedicGateFailureThreshold, "medic: consecutive gate-failed attempts before a retry_wait candidate is medic-actionable (only when --repair is also set)")
 	return cmd
 }

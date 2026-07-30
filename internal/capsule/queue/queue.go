@@ -186,17 +186,29 @@ type Candidate struct {
 	// gate failure early on retry_wait) before it must escalate to
 	// needs_human instead of continuing forever. MedicKickedAttempt records
 	// the last Attempt value the medic already kicked, so a single
-	// retry_wait streak is never kicked more than once. MedicLastAction/At/By
-	// are the "what did the medic do last, and why" telemetry `queue status`
-	// renders. Resume/Override reset all of these — a human declaring the
-	// underlying cause fixed gets the medic a fresh budget too, exactly like
-	// the ordinary attempt budget.
-	MedicDispatches      int       `json:"medic_dispatches,omitempty"`
-	MedicFirstDispatchAt time.Time `json:"medic_first_dispatch_at,omitempty"`
-	MedicKickedAttempt   int       `json:"medic_kicked_attempt,omitempty"`
-	MedicLastAction      string    `json:"medic_last_action,omitempty"`
-	MedicLastAt          time.Time `json:"medic_last_at,omitempty"`
-	MedicLastBy          string    `json:"medic_last_by,omitempty"`
+	// retry_wait streak is never kicked more than once.
+	// MedicDispatchAtAttempt records the Attempt value as of the most recent
+	// dispatch, which is what lets the reaper arm tell "nothing ever
+	// re-drove this dispatch" (Attempt unchanged) from "a worker picked it
+	// up again" (Attempt advanced, since claimPreparation increments it) —
+	// see medicHandleStrandedDispatch. MedicLastAction/At/By are the "what
+	// did the medic do last, and why" telemetry `queue status` renders.
+	//
+	// The whole budget is scoped to the stall the medic is treating, not to
+	// the candidate's lifetime: Resume/Override reset it (a human declaring
+	// the underlying cause fixed gets the medic a fresh budget too, exactly
+	// like the ordinary attempt budget) and so does a clean preparation (see
+	// Worker.prepare) — a candidate that got all the way through
+	// speculation and the gate is out of the stall the medic was treating,
+	// so a later, unrelated stall must start from a fresh budget rather than
+	// inheriting an ancient wall-clock deadline.
+	MedicDispatches        int       `json:"medic_dispatches,omitempty"`
+	MedicFirstDispatchAt   time.Time `json:"medic_first_dispatch_at,omitempty"`
+	MedicKickedAttempt     int       `json:"medic_kicked_attempt,omitempty"`
+	MedicDispatchAtAttempt int       `json:"medic_dispatch_at_attempt,omitempty"`
+	MedicLastAction        string    `json:"medic_last_action,omitempty"`
+	MedicLastAt            time.Time `json:"medic_last_at,omitempty"`
+	MedicLastBy            string    `json:"medic_last_by,omitempty"`
 }
 
 // Approval is the steward decision bound to the exact prepared state.
