@@ -35,7 +35,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +43,7 @@ import (
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/appdef"
 	"kitsoki/internal/applicationconversation"
 	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/applicationmaintenance"
@@ -106,13 +106,45 @@ type entry struct {
 	frames   *server.JournalFrameRecorder
 	feedback *server.JSONLFeedbackSink
 
-	// turnsInFlight counts driver calls currently executing against this
-	// session (Turn/SubmitDirect/ContinueTurn/AskOffPath/Teleport/RewindRoute,
-	// via trackingDriver). >0 means "mid-turn" — ensureCapacityLocked never
-	// picks such a session as an eviction victim. Accessed with sync/atomic so
-	// trackingDriver's begin/end calls don't need the registry mutex held for
-	// the call's whole duration.
-	turnsInFlight int32
+	// gate serializes definition swaps against turns for this session: a
+	// turn (Turn/SubmitDirect/ContinueTurn/AskOffPath/Teleport/RewindRoute,
+	// via trackingDriver's begin/endTurn) waits for an in-progress swap; a
+	// swap is REFUSED while a turn runs. It replaces the bare turnsInFlight
+	// counter this field used to be — that counter was only an eviction
+	// hint and never a correctness barrier, so it could not also guard
+	// Orchestrator.Reload against racing a turn. ensureCapacityLocked reads
+	// gate.TurnsActive() for the same eviction-hint purpose the old counter
+	// served. Built once, alongside binding, wherever the entry is
+	// constructed (newSessionWithOrigin, AttachExternal).
+	gate *appdef.Gate
+
+	// binding is the session's revision pin — which appdef.Revision digest
+	// it is logically serving — and the lifetime of the materialised tree
+	// backing it. Built eagerly (newSessionWithOrigin, AttachExternal)
+	// because a Binding captures nothing until the first appdef.* call: an
+	// ordinary session that never touches the definition control plane pays
+	// nothing extra for having one.
+	binding *appdef.Binding
+
+	// pinnedDigest caches the digest binding last confirmed this session is
+	// serving, stamped by registry_appdef.go's markPinned every time an
+	// AppDefCurrent/AppDefPatch/AppDefRevisions/AppDefReload call succeeds.
+	// "" means the session has never made an appdef.* call and remains free
+	// for a plain disk reload.
+	//
+	// This is a registry-level cache, not a live read of appdef.Binding's own
+	// pinned state, DELIBERATELY: Binding exposes no side-effect-free way to
+	// peek at whether it is pinned — its only read, Current(ctx), captures
+	// and pins an unpinned session as a side effect. Reload/Staleness must
+	// consult "is this session pinned" on every call (Staleness is polled
+	// continuously), and calling Current(ctx) there would silently pin every
+	// session the first time its staleness was ever checked, which
+	// contradicts Binding's own doc comment ("a session starts UNPINNED …
+	// and costs nothing extra"). Tracking the digest here, updated only at
+	// the moment a genuine appdef.* call already pinned the binding, gives
+	// the same answer without that side effect. Guarded by the registry
+	// mutex, like every other entry field.
+	pinnedDigest string
 
 	// lastActive is stamped by trackingDriver when a turn-advancing call
 	// completes (and seeded to session-creation time), so
@@ -121,6 +153,14 @@ type entry struct {
 	// turns; one nobody has touched since it was opened ranks oldest. Guarded
 	// by the registry mutex (all entry field access is).
 	lastActive time.Time
+}
+
+// pinnedRevision returns the digest e.binding last confirmed this session is
+// serving, or "" if the session has never made an appdef.* call. Callers must
+// hold r.mu (every entry field is guarded by it) — see pinnedDigest's comment
+// for why this reads a local cache instead of calling into e.binding.
+func (e *entry) pinnedRevision() string {
+	return e.pinnedDigest
 }
 
 type storyLoad struct {
@@ -177,6 +217,16 @@ type SessionRegistry struct {
 	mu       sync.Mutex
 	stories  []webconfig.StoryMeta
 	sessions map[string]*entry
+
+	// appdefs is the definition control plane shared by every live session:
+	// one append-only revision store, so a revision produced against one
+	// session is addressable from any of them (see appdef.Service's doc
+	// comment). In-memory today (appdef.NewMemStorage) — a revision does not
+	// survive a process restart, matching the rest of this registry's
+	// in-memory-sessions posture. Always present on the live registry, with
+	// no config flag or opt-in: the least-surprising shape, matching how
+	// EditorApp is always present.
+	appdefs *appdef.Service
 
 	// maxSessions caps the live-session count (swarm-session-cap). Set from
 	// $KITSOKI_WEB_MAX_SESSIONS (or DefaultMaxLiveSessions) at construction;
@@ -260,6 +310,7 @@ func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *Sess
 		base:                       base,
 		dirs:                       dirs,
 		sessions:                   map[string]*entry{},
+		appdefs:                    appdef.NewService(appdef.NewMemStorage()),
 		feedbackBackends:           map[string]host.FeedbackBackend{},
 		feedbackFederationBackends: map[string]host.FeedbackBackend{},
 		feedbackCaptureSources:     map[string]reviewedfeedback.CaptureSource{},
@@ -645,8 +696,8 @@ func (r *SessionRegistry) SetMaxSessions(n int) {
 }
 
 // ErrNoEvictableSession is returned by NewSession/AttachExternal when the live
-// -session cap is reached and every live session is mid-turn (turnsInFlight >
-// 0) — there is nothing safe to evict. Returning this beats the alternatives:
+// -session cap is reached and every live session is mid-turn (gate.TurnsActive()
+// > 0) — there is nothing safe to evict. Returning this beats the alternatives:
 // silently exceeding the cap (defeats the point of having one) or blocking
 // until something finishes (an operator-facing hang with no visible cause).
 var ErrNoEvictableSession = errors.New("kitsoki web: live-session cap reached and every session is mid-turn; no idle session is evictable")
@@ -668,7 +719,7 @@ func (r *SessionRegistry) ensureCapacityLocked() (*entry, error) {
 	var victimID string
 	var victim *entry
 	for id, e := range r.sessions {
-		if atomic.LoadInt32(&e.turnsInFlight) > 0 {
+		if e.gate != nil && e.gate.TurnsActive() > 0 {
 			continue // never evict a session mid-turn
 		}
 		if victim == nil || e.lastActive.Before(victim.lastActive) {
@@ -710,6 +761,15 @@ func (r *SessionRegistry) cleanupEvicted(e *entry) {
 	if e == nil {
 		return
 	}
+	if e.binding != nil {
+		// Release the served handle FIRST, before e.rt.Close() tears down
+		// the orchestrator it was installed into — Binding.Close is a pure
+		// refcount release against appdef.Service and does not touch e.rt,
+		// so the order between this and e.rt.Close() doesn't matter for
+		// correctness, but doing it first keeps "release what this session
+		// owns" grouped before "tear down its runtime" for readability.
+		e.binding.Close()
+	}
 	if e.sink != nil {
 		_ = e.sink.Close()
 	}
@@ -718,27 +778,38 @@ func (r *SessionRegistry) cleanupEvicted(e *entry) {
 	}
 }
 
-// beginTurn marks id as mid-turn (turnsInFlight+1), protecting it from
-// idle eviction for the duration of the call. No-op if id is no longer live
-// (e.g. it raced an eviction — vanishingly unlikely since the caller can only
-// reach beginTurn through a Driver obtained from a still-registered entry, but
-// defensive rather than a nil-deref). Called by trackingDriver.
+// beginTurn marks id as mid-turn via its Gate, protecting it from idle
+// eviction and from racing a definition swap (appdef.Gate.BeginTurn blocks
+// until any in-progress swap finishes — see the Gate doc comment). No-op if
+// id is no longer live (e.g. it raced an eviction — vanishingly unlikely
+// since the caller can only reach beginTurn through a Driver obtained from a
+// still-registered entry, but defensive rather than a nil-deref). Called by
+// trackingDriver.
+//
+// r.mu is held ONLY to look up the entry, then RELEASED before calling
+// e.gate.BeginTurn(): BeginTurn can block on an in-progress swap, and holding
+// the registry mutex across that wait would deadlock the whole registry —
+// every other RPC (including the one running the swap this call is waiting
+// on, if it also needs r.mu) would stall behind it.
 func (r *SessionRegistry) beginTurn(id string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if e, ok := r.sessions[id]; ok {
-		atomic.AddInt32(&e.turnsInFlight, 1)
+	e, ok := r.sessions[id]
+	r.mu.Unlock()
+	if ok && e.gate != nil {
+		e.gate.BeginTurn()
 	}
 }
 
-// endTurn clears the mid-turn mark and stamps lastActive to now — the signal
-// ensureCapacityLocked ranks idle victims on. Called by trackingDriver via
-// defer, so it runs whether the call succeeded or errored.
+// endTurn clears the mid-turn mark via its Gate and stamps lastActive to
+// now — the signal ensureCapacityLocked ranks idle victims on. Called by
+// trackingDriver via defer, so it runs whether the call succeeded or errored.
 func (r *SessionRegistry) endTurn(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if e, ok := r.sessions[id]; ok {
-		atomic.AddInt32(&e.turnsInFlight, -1)
+		if e.gate != nil {
+			e.gate.EndTurn()
+		}
 		e.lastActive = time.Now()
 	}
 }
@@ -986,6 +1057,9 @@ func (r *SessionRegistry) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.sessions {
+		if e.binding != nil {
+			e.binding.Close()
+		}
 		if e.sink != nil {
 			_ = e.sink.Close()
 		}
@@ -1067,8 +1141,25 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	}
 
 	rtCfg := r.base.config(abs, def)
+	// Every session gets an injected reloader now, not just synthesized
+	// roots: loaded.reloader (set for the implicit-root / agent:<name>
+	// synthesis paths) is used when present; every ordinary on-disk story
+	// falls back to the SAME loadAppWithEnv call that produced THIS
+	// session's initial def. That is a deliberate behaviour change from the
+	// historical posture, where an on-disk story with no reloader left
+	// Orchestrator.Reload to fall through to its own bare app.Load(appPath)
+	// — a call with no import resolver, so a story with @kitsoki/<name>
+	// imports reloaded incorrectly. Giving every session an injected
+	// reloader also means a disk reload and a revision reload (the
+	// pending-def cell SessionBinding arms — see appdef_binding.go) travel
+	// one path.
+	fallback := loaded.reloader
+	if fallback == nil {
+		storyPath := loaded.path
+		fallback = func() (*app.AppDef, error) { return loadAppWithEnv(storyPath) }
+	}
+	rtCfg.Reloader = fallback
 	if loaded.reloader != nil {
-		rtCfg.Reloader = loaded.reloader
 		rtCfg.MiningRepoPath = loaded.repoRoot
 	}
 	rt, err := buildSessionRuntime(rtCfg)
@@ -1223,6 +1314,8 @@ func (r *SessionRegistry) newSessionWithOrigin(
 		lastActive:    time.Now(),
 	}
 	e.driver = newTrackingDriver(r, id, e.driver)
+	e.gate = appdef.NewGate()
+	e.binding = appdef.NewBinding(r.appdefs, &orchestrator.SessionBinding{Orch: orch, SID: sid}, e.gate)
 
 	// Register a per-session notification relay so the orchestrator's
 	// background-turn fan-out reaches the cross-session SSE feed. The relay is
@@ -1331,8 +1424,25 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	}
 
 	rtCfg := r.base.config(abs, def)
+	// Every session gets an injected reloader now, not just synthesized
+	// roots: loaded.reloader (set for the implicit-root / agent:<name>
+	// synthesis paths) is used when present; every ordinary on-disk story
+	// falls back to the SAME loadAppWithEnv call that produced THIS
+	// session's initial def. That is a deliberate behaviour change from the
+	// historical posture, where an on-disk story with no reloader left
+	// Orchestrator.Reload to fall through to its own bare app.Load(appPath)
+	// — a call with no import resolver, so a story with @kitsoki/<name>
+	// imports reloaded incorrectly. Giving every session an injected
+	// reloader also means a disk reload and a revision reload (the
+	// pending-def cell SessionBinding arms — see appdef_binding.go) travel
+	// one path.
+	fallback := loaded.reloader
+	if fallback == nil {
+		storyPath := loaded.path
+		fallback = func() (*app.AppDef, error) { return loadAppWithEnv(storyPath) }
+	}
+	rtCfg.Reloader = fallback
 	if loaded.reloader != nil {
-		rtCfg.Reloader = loaded.reloader
 		rtCfg.MiningRepoPath = loaded.repoRoot
 	}
 	rt, err := buildSessionRuntime(rtCfg)
@@ -1448,6 +1558,8 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 		lastActive:    time.Now(),
 	}
 	e.driver = newTrackingDriver(r, id, e.driver)
+	e.gate = appdef.NewGate()
+	e.binding = appdef.NewBinding(r.appdefs, &orchestrator.SessionBinding{Orch: orch, SID: sid}, e.gate)
 
 	r.mu.Lock()
 	victim, evictErr := r.ensureCapacityLocked()
@@ -2316,8 +2428,26 @@ func (r *SessionRegistry) syncDaemonJob(id string) {
 // Reload mirrors the FULL TUI /reload path (tui.go handleReloadSlash), which is
 // more than a bare Orchestrator.Reload:
 //
+//  0. a session pinned to an appdef revision (a client has already made at
+//     least one runstatus.appdef.* call for it) is handed off to
+//     reloadPinnedFromDisk instead of steps 1-4 below: silently re-reading
+//     disk over a pinned revision would discard whatever fix that revision
+//     carries with no record of it, so the pinned path captures the current
+//     disk content as its own NEW revision and moves the session onto it —
+//     the least-surprising behaviour available, and the one that keeps this
+//     same RPC working for a client that only ever calls plain
+//     session.reload (docs/web/README.md's edit -> reload_requested ->
+//     session.reload flow) even after some OTHER surface has separately
+//     engaged the definition control plane for the same session. See
+//     reloadPinnedFromDisk's doc comment.
 //  1. read currentState from the session's live snapshot;
-//  2. orch.Reload(StoryPath, currentState) → swaps the def + machine in;
+//  2. orch.ReloadForSession(StoryPath, currentState, sid) → swaps the def +
+//     machine in, serialized against any turn/background-job-completion for
+//     this session via the orchestrator's own per-session lock (closes the
+//     race Orchestrator.Reload's doc warns about); also take the Gate here
+//     (BeginReload/EndReload) for the immediate, NAMED refusal
+//     (codeBusy/-32005) a client can retry on, rather than blocking the RPC
+//     handler behind an in-flight turn that could run for minutes.
 //  3. RecordEffectiveStory so the trace stays self-contained across the reload;
 //  4. when the prior state still exists, RerunOnEnter to re-fire the entered
 //     state's on_enter chain (view-template / on_enter / prompt edits take
@@ -2330,9 +2460,23 @@ func (r *SessionRegistry) syncDaemonJob(id string) {
 func (r *SessionRegistry) Reload(ctx context.Context, sessionID string) (bool, error) {
 	r.mu.Lock()
 	e, ok := r.sessions[sessionID]
+	var pinned string
+	if ok {
+		pinned = e.pinnedRevision()
+	}
 	r.mu.Unlock()
 	if !ok {
 		return false, fmt.Errorf("reload: unknown session %q", sessionID)
+	}
+	if pinned != "" {
+		return r.reloadPinnedFromDisk(ctx, e)
+	}
+
+	if e.gate != nil {
+		if err := e.gate.BeginReload(); err != nil {
+			return false, busyWrap(err)
+		}
+		defer e.gate.EndReload()
 	}
 
 	// (1) Read the current state from the live snapshot — this is where the
@@ -2346,7 +2490,7 @@ func (r *SessionRegistry) Reload(ctx context.Context, sessionID string) (bool, e
 	orch := e.rt.Orch
 
 	// (2) Swap the freshly loaded def + machine into the orchestrator.
-	res, err := orch.Reload(e.StoryPath, currentState)
+	res, err := orch.ReloadForSession(e.StoryPath, currentState, e.sid)
 	if err != nil {
 		return false, fmt.Errorf("reload: %w", err)
 	}
@@ -2378,6 +2522,61 @@ func (r *SessionRegistry) Reload(ctx context.Context, sessionID string) (bool, e
 	}
 
 	return res.PrevStateExists, nil
+}
+
+// reloadPinnedFromDisk implements the least-surprising behaviour for a
+// PLAIN (no revision) session.reload call against a session that has
+// already engaged the definition control plane (e.pinnedRevision() != "").
+// Rather than refusing outright — which would permanently break the
+// documented edit -> reload_requested -> session.reload SPA flow
+// (docs/web/README.md) the moment ANY surface also calls a
+// runstatus.appdef.* RPC for the same session — it captures whatever is on
+// disk right now as a NEW revision (via e.binding.CaptureAndReloadTo) and
+// moves the session onto it through the exact same Gate-guarded ReloadTo
+// path an explicit session.reload{revision} call uses. This can never
+// silently discard a fix a revision carries: the disk content becomes its
+// own new revision in the store, so a later runstatus.appdef.revisions call
+// still shows the full lineage instead of an untracked side channel.
+//
+// A synthetic session (no app.yaml on disk to begin with) has nothing to
+// re-capture from disk, so it gets a named refusal instead — the caller
+// must pass an explicit revision.
+func (r *SessionRegistry) reloadPinnedFromDisk(ctx context.Context, e *entry) (bool, error) {
+	if e.synthetic {
+		return false, fmt.Errorf("reload: session %q is pinned to a revision and is synthetic (no on-disk story to re-capture); pass an explicit revision to runstatus.session.reload", e.sid)
+	}
+
+	// Load through the SAME path session start/disk-reload already uses, so
+	// the captured closure matches store.CollectEffectiveStory's own notion
+	// of "the effective story" (imports, includes, prompts — everything the
+	// loader touched) rather than just the one entry file.
+	fresh, err := loadAppWithEnv(e.StoryPath)
+	if err != nil {
+		return false, fmt.Errorf("reload: %w", err)
+	}
+	es, err := store.CollectEffectiveStory(fresh)
+	if err != nil {
+		return false, fmt.Errorf("reload: collect effective story: %w", err)
+	}
+
+	// NOTE: e.binding.ReloadTo (called by CaptureAndReloadTo) takes the Gate
+	// itself — do not also BeginReload/EndReload here, that would be a
+	// second acquire of the SAME *appdef.Gate and the inner one would
+	// observe ErrReloadInProgress from the outer.
+	rev, prevStateExists, err := e.binding.CaptureAndReloadTo(ctx, appdef.Closure{Entry: es.Entry, Files: es.Files})
+	if err != nil {
+		return prevStateExists, busyWrap(err)
+	}
+	r.markPinned(string(e.sid), rev.Digest)
+
+	freshContent, _ := os.ReadFile(e.StoryPath)
+	r.mu.Lock()
+	e.Def = fresh
+	e.loadedContent = freshContent
+	e.metaController = nil
+	r.mu.Unlock()
+
+	return prevStateExists, nil
 }
 
 // ListStories returns the cached catalogue mapped onto server.StoryHeader, with
@@ -2419,7 +2618,20 @@ func (r *SessionRegistry) ListAgents() ([]server.AgentInfo, error) {
 // file on disk. stale is true when they differ; diff is a unified-diff string
 // (context-3 lines) the UI can render in a modal. Returns no error on a missing
 // file — that is treated as stale (content = "") rather than an error.
-func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale bool, diff string, err error) {
+//
+// A synthetic session has no on-disk story at all, so there is no baseline
+// to diff against: (false, "", nil) unconditionally.
+//
+// A PINNED session (one at least one runstatus.appdef.* call has already
+// engaged) still has an on-disk baseline — the session just isn't serving
+// it directly any more. Comparing disk against the PINNED REVISION's own
+// entry-file bytes (not e.loadedContent, which tracks the last disk read
+// from before the session pinned) keeps this call honest: a pinned session
+// whose disk file has since diverged from the revision it is serving is
+// genuinely stale, and a client polling this RPC for a badge must see that
+// rather than an unconditional "not stale" that would be true only by
+// definition-plane coincidence.
+func (r *SessionRegistry) Staleness(ctx context.Context, sessionID string) (stale bool, diff string, err error) {
 	r.mu.Lock()
 	e, ok := r.sessions[sessionID]
 	if !ok {
@@ -2429,10 +2641,30 @@ func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale 
 	loaded := e.loadedContent
 	path := e.StoryPath
 	synthetic := e.synthetic
+	pinned := e.pinnedRevision()
+	binding := e.binding
 	r.mu.Unlock()
 
 	if synthetic {
 		return false, "", nil
+	}
+
+	fromLabel := "loaded"
+	if pinned != "" {
+		rev, curErr := binding.Current(ctx)
+		if curErr != nil {
+			return false, "", fmt.Errorf("staleness: read pinned revision: %w", curErr)
+		}
+		pinnedBytes, ok := rev.Files[rev.Entry]
+		if !ok {
+			// Defensive: a stored revision missing its own entry file
+			// should be unreachable (Patch refuses RejectEntryRemoved,
+			// Capture never strips it), but never claim staleness off data
+			// that isn't there.
+			return false, "", nil
+		}
+		loaded = pinnedBytes
+		fromLabel = "pinned revision"
 	}
 
 	disk, readErr := os.ReadFile(path)
@@ -2447,7 +2679,7 @@ func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale 
 	ud := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(loaded)),
 		B:        difflib.SplitLines(string(disk)),
-		FromFile: "loaded",
+		FromFile: fromLabel,
 		ToFile:   "on-disk",
 		Context:  3,
 	}
@@ -2702,6 +2934,7 @@ var (
 	_ server.RegisteredApplicationProvider = (*SessionRegistry)(nil)
 	_ server.ExternalAttachProvider        = (*SessionRegistry)(nil)
 	_ server.CurrentSessionProvider        = (*SessionRegistry)(nil)
+	_ server.AppDefProvider                = (*SessionRegistry)(nil)
 )
 
 // seedFlowInitialState honors a flow fixture's initial_state / initial_world on

@@ -15,7 +15,7 @@ package main
 
 import (
 	"context"
-	"sync/atomic"
+	"os"
 	"testing"
 	"time"
 
@@ -65,9 +65,9 @@ func setBusy(t *testing.T, reg *SessionRegistry, id string, busy bool) {
 	reg.mu.Unlock()
 	require.True(t, ok, "setBusy: unknown session %q", id)
 	if busy {
-		atomic.AddInt32(&e.turnsInFlight, 1)
+		e.gate.BeginTurn()
 	} else {
-		atomic.AddInt32(&e.turnsInFlight, -1)
+		e.gate.EndTurn()
 	}
 }
 
@@ -220,6 +220,52 @@ func TestSessionRegistry_CapAndEviction(t *testing.T) {
 				// cleanupEvicted ran rather than just deleting the map entry.
 				appendErr := entryA.sink.Append(store.Event{Kind: store.TransitionApplied, Turn: 0})
 				assert.Error(t, appendErr, "the evicted session's trace sink must be closed")
+			},
+		},
+		{
+			// Regression for the appdef-live-edit review's major finding:
+			// appdef.Binding had no Close/Release and nothing called one, so
+			// every revision-reloaded session permanently leaked its
+			// materialised temp tree (os.MkdirTemp("kitsoki-story-*")) and
+			// held the Service's refcount for that digest at >=1 forever on
+			// eviction. cleanupEvicted now calls e.binding.Close().
+			name: "eviction releases the reloaded session's served appdef revision handle",
+			run: func(t *testing.T) {
+				reg, appPath := swarmCapRegistry(t, 1)
+
+				idA, err := reg.NewSession(ctx, appPath)
+				require.NoError(t, err)
+
+				// Move A onto a real, materialised revision (not just
+				// captured-and-pinned) so entryA.binding has a served
+				// handle whose temp tree cleanupEvicted must release.
+				rev, err := reg.AppDefCurrent(ctx, idA)
+				require.NoError(t, err)
+				_, err = reg.AppDefReload(ctx, idA, rev.Digest)
+				require.NoError(t, err)
+
+				reg.mu.Lock()
+				entryA := reg.sessions[idA]
+				reg.mu.Unlock()
+				require.NotNil(t, entryA)
+				require.NotNil(t, entryA.binding, "reloaded session must have an appdef binding")
+
+				servedDir := entryA.rt.Orch.AppDef().BaseDir
+				require.NotEmpty(t, servedDir)
+				_, statErr := os.Stat(servedDir)
+				require.NoError(t, statErr, "served revision's materialised tree must exist before eviction")
+
+				// A second session.new beyond the cap of 1 evicts A.
+				idB, err := reg.NewSession(ctx, appPath)
+				require.NoError(t, err)
+				_ = idB
+
+				_, ok := reg.Get(idA)
+				assert.False(t, ok, "evicted session must be fully gone from Get")
+
+				_, statErr = os.Stat(servedDir)
+				assert.True(t, os.IsNotExist(statErr),
+					"eviction must release the served revision's materialised tree (binding leak), stat err = %v", statErr)
 			},
 		},
 	}

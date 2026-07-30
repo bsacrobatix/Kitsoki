@@ -24,8 +24,6 @@ package storydigest
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -35,6 +33,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/appclosure"
 	"kitsoki/internal/basestories"
 	"kitsoki/internal/kitrepo"
 )
@@ -144,8 +143,11 @@ func Compute(projectRoot, storyPath string) (Result, error) {
 		logical = append(logical, path)
 	}
 	sort.Strings(logical)
-	h := sha256.New()
-	_, _ = h.Write([]byte(Schema + "\n"))
+	// The actual hashing byte layout lives in internal/appclosure.Digest, not
+	// here — see that package's doc for why. This loop only resolves each
+	// logical path down to (mode, bytes), preserving the exact stat/read
+	// error messages this digest has always returned.
+	closure := make(map[string]appclosure.File, len(logical))
 	for _, rel := range logical {
 		path := files[rel]
 		info, err := os.Lstat(path)
@@ -159,11 +161,9 @@ func Compute(projectRoot, storyPath string) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("capsule story digest: read %s: %w", rel, err)
 		}
-		fmt.Fprintf(h, "%s\x00%04o\x00%d\x00", rel, info.Mode().Perm(), len(raw))
-		_, _ = h.Write(raw)
-		_, _ = h.Write([]byte{0})
+		closure[rel] = appclosure.File{Mode: info.Mode().Perm(), Bytes: raw}
 	}
-	return Result{Schema: Schema, Digest: "sha256:" + hex.EncodeToString(h.Sum(nil)), Files: logical}, nil
+	return Result{Schema: Schema, Digest: appclosure.Digest(Schema, closure), Files: logical}, nil
 }
 
 // collectRoot walks dir (a loaded manifest's own directory) collecting every

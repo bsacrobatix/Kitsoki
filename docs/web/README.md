@@ -272,6 +272,21 @@ re-enter it, so the session stays put and the UI shows the warning **"current
 state removed; staying put"**, matching the TUI's "re-render only" notice. When
 true, the normal SSE-driven refresh repaints.
 
+**A session that has separately engaged the definition control plane**
+(any `runstatus.appdef.current` / `.patch` / `.revisions` / `.reload{revision}`
+call) is "pinned" to an immutable revision digest rather than the file at
+`storyPath`. A plain
+`session.reload {session_id}` against a pinned session does NOT read disk
+directly into the live def (that would silently discard whatever fix the
+pinned revision carries, with no record of it): it captures the current
+on-disk content as its own new revision first, then moves the session onto
+THAT — the same `{ok, prev_state_exists}` response, and this same flow keeps
+working unmodified. `runstatus.appdef.revisions` will show that captured
+revision in the lineage. A synthetic session (no on-disk story) that has
+somehow been pinned has no disk content to capture and returns a named
+error asking for an explicit `revision` instead — this does not happen via
+any surface documented here, only via direct `runstatus.appdef.*` RPC use.
+
 The reload mechanics themselves are documented once, canonically, in the engine:
 see the **Hot reload** bullet under [the turn loop in
 `docs/stories/state-machine.md`](../stories/state-machine.md#8-the-turn-loop-state-machine-of-the-orchestrator)

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"kitsoki/internal/app"
@@ -13,6 +14,17 @@ import (
 	"kitsoki/internal/study"
 	"kitsoki/internal/video"
 )
+
+// ErrSessionBusy is the sentinel a provider wraps around a refused definition
+// swap: a turn is in flight, or another swap is already running for that
+// session (internal/appdef's Gate is the thing actually enforcing this — see
+// its ErrTurnInFlight / ErrReloadInProgress). The server cannot import
+// internal/appdef, so it cannot errors.Is against those sentinels directly;
+// a provider (cmd/kitsoki's SessionRegistry) is expected to cross that
+// boundary itself, e.g. fmt.Errorf("%w: %w", server.ErrSessionBusy, err), so
+// the server maps the result to [codeBusy] and a client can retry rather than
+// guessing at a generic server error.
+var ErrSessionBusy = errors.New("session is busy")
 
 // SessionProvider is the multi-session seam the [Server] dispatches against.
 // Where v1 served a single [Source] + [Driver], the provider owns a set of live

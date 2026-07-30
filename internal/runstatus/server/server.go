@@ -33,8 +33,11 @@
 //	runstatus.kits.list          {}                                  → []KitHeader (S3b/c)
 //	kit.<kit>.<iface>.<op>       {...}                                → kit endpoint result (S3b fallback)
 //	runstatus.session.new        {story_path, initial_world?}        → {session_id}
-//	runstatus.session.reload     {session_id}                        → {ok, prev_state_exists}
+//	runstatus.session.reload     {session_id[, revision]}            → {ok, prev_state_exists, revision}
 //	runstatus.session.staleness  {session_id}                        → {stale, diff}
+//	runstatus.appdef.current     {session_id}                        → {revision}
+//	runstatus.appdef.patch       {session_id, ops[, base_digest]}    → {rejected, reject_reasons, reject_details, revision?}
+//	runstatus.appdef.revisions   {session_id}                        → {revisions: [...]}
 //	runstatus.sessions.list      {}                                  → []SessionHeader
 //	runstatus.work.list          {}                                  → {summary, sessions[], items[]}
 //	runstatus.chat.show          {session_id, chat_id, since_seq?}   → {ok, chat, pty?, messages[]}
@@ -975,6 +978,13 @@ const (
 	// in-memory sources). The client falls back to runstatus.session.trace +
 	// session.subscribe — the polling contract, unchanged.
 	codeStreamUnsupported = -32004
+	// codeBusy makes a definition-plane refusal actionable: the session is
+	// mid-turn (or mid-swap) so the requested definition swap was refused
+	// rather than raced. The client retries after the turn completes. This is
+	// the deliberate alternative to blocking an RPC handler behind a
+	// possibly-minutes-long agent turn, and to the silent def/machine race
+	// Orchestrator.Reload's own doc warns about.
+	codeBusy = -32005
 
 	// maxRPCBodyBytes caps a single /rpc request body. The largest legitimate
 	// payload is a bug.report with a base64'd rrweb session buffer (~last 30s of
@@ -1740,11 +1750,27 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if rerr != nil {
 			return nil, rerr
 		}
+		// An optional revision param moves the session onto a specific,
+		// digest-addressed definition revision instead of re-reading disk —
+		// the live-edit path (appdef.go). Empty revision keeps the original
+		// disk-reload behaviour unchanged.
+		revision, _ := params["revision"].(string)
+		if revision != "" {
+			ap, ok := s.appDefProvider()
+			if !ok {
+				return nil, readOnlyErr(method)
+			}
+			prevStateExists, err := ap.AppDefReload(ctx, sid, revision)
+			if err != nil {
+				return nil, lifecycleOrBusyErr(err)
+			}
+			return map[string]any{"ok": true, "prev_state_exists": prevStateExists, "revision": revision}, nil
+		}
 		prevStateExists, err := s.provider.Reload(ctx, sid)
 		if err != nil {
-			return nil, lifecycleErr(err)
+			return nil, lifecycleOrBusyErr(err)
 		}
-		return map[string]any{"ok": true, "prev_state_exists": prevStateExists}, nil
+		return map[string]any{"ok": true, "prev_state_exists": prevStateExists, "revision": ""}, nil
 
 	case "runstatus.session.staleness":
 		sid, rerr := sessionIDParam(params)
@@ -2575,6 +2601,15 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		return demoRPC(ctx, "doctor", params)
 
 	default:
+		// ── Definition control plane (per-session, appdef.go) ────────────────
+		// runstatus.appdef.* reads/patches/lists the immutable revisions a
+		// session serves. Chained first so it takes priority over the (also
+		// per-story) editor family below, mirroring the RPC method table's
+		// ordering (appdef.go's methods sit in the lifecycle block next to
+		// session.reload).
+		if result, rerr, handled := s.dispatchAppDef(ctx, method, params); handled {
+			return result, rerr
+		}
 		// ── Story editor (per-story, no session) ─────────────────────────────
 		// The editor.* family operates on a story selected from the registry
 		// catalogue rather than a live session; dispatchEditor reports handled
@@ -2692,6 +2727,30 @@ func lifecycleErr(err error) *rpcError {
 		return &rpcError{Code: codeReadOnly, Message: err.Error()}
 	}
 	return serverErr(err)
+}
+
+// busyErr maps a refused definition swap to codeBusy: the message is
+// sanitized via userfacing.Error (matching serverErr), and Data preserves the
+// full chain for logs/dev tools.
+func busyErr(err error) *rpcError {
+	return &rpcError{Code: codeBusy, Message: userfacing.Error(err), Data: err.Error()}
+}
+
+// lifecycleOrBusyErr is lifecycleErr extended with the definition-plane busy
+// sentinel: a provider wraps a refused swap (a turn in flight, or another
+// swap already running) in [ErrSessionBusy], and that becomes codeBusy rather
+// than a generic read-only or server error. The server cannot import
+// internal/appdef to errors.Is against its own sentinels directly — Error
+// wrapping ErrSessionBusy is the boundary a provider (cmd/kitsoki's
+// SessionRegistry) is expected to cross. Both runstatus.session.reload and
+// every runstatus.appdef.* method route their errors through this, not
+// lifecycleErr, so a busy definition plane is never mistaken for a read-only
+// surface.
+func lifecycleOrBusyErr(err error) *rpcError {
+	if errors.Is(err, ErrSessionBusy) {
+		return busyErr(err)
+	}
+	return lifecycleErr(err)
 }
 
 func appendWorkflowValidationEvent(receipt *dynamicworkflow.Receipt) error {

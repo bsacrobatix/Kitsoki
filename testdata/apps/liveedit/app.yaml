@@ -1,0 +1,69 @@
+# Fixture for the appdef live-edit acceptance scenario
+# (.context/appdef-live-edit-implementation-spec.md).
+#
+# `work`'s on_enter invokes host.probe.fail, which the test's host registry
+# registers as an always-failing handler. The invoke has NO on_error: of its
+# own, so `on_error_default: builtin` routes the failure into the builtin
+# __error__ room with world.error_origin = "work".
+#
+# The FIX applied by the typed patch is exactly one substitution:
+# host.probe.fail → host.probe.ok. Deliberately NOT a state rename — the retry
+# transition targets {{ world.error_origin }}, so renaming `work` would make
+# error_origin dangle and the retry would silently stay put instead of failing
+# loudly.
+#
+# There is deliberately NO `once: true` on the failing invoke: `once` would let
+# the machine elide the retried call if its bind target were already set, which
+# is precisely the behaviour this scenario must prove does not happen.
+app:
+  id: liveedit
+  version: 0.1.0
+  title: "Live definition edit fixture"
+
+on_error_default: builtin
+
+hosts:
+  - host.probe.fail
+  - host.probe.ok
+
+world:
+  probe_result: { type: string, default: "" }
+
+root: start
+
+intents:
+  begin:
+    title: "Begin"
+    description: "Run the probe."
+    examples: ["begin"]
+    priority: 10
+  done:
+    title: "Done"
+    description: "Finish."
+    examples: ["done"]
+    priority: 10
+
+states:
+  start:
+    description: "Entry room."
+    view: "Ready. Say begin."
+    on:
+      begin:
+        - target: work
+
+  work:
+    description: "The room whose on_enter host call is broken."
+    view: 'Probe said: {{ world.probe_result|default:"(nothing)" }}'
+    on_enter:
+      - invoke: host.probe.fail
+        with: {}
+        bind:
+          probe_result: value
+    on:
+      done:
+        - target: finish
+
+  finish:
+    description: "Done."
+    terminal: true
+    view: "Finished with: {{ world.probe_result }}"
