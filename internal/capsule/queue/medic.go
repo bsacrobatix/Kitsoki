@@ -351,7 +351,7 @@ func medicHandleConflict(c *Candidate, state *State, deps MedicDeps, now time.Ti
 //     as "re-driven", so the reaper stays quiet rather than escalating on
 //     incomplete history.)
 //   - No worker is demonstrably working this protected target: see
-//     medicWorkerActivitySince. medicHandleConflict deliberately dispatches
+//     medicWorkerActivity. medicHandleConflict deliberately dispatches
 //     to the back of the line, so on a deep train a correctly dispatched
 //     candidate can easily sit queued for longer than the deadline with
 //     nothing wrong with it at all — the workers are simply busy ahead of
@@ -369,35 +369,20 @@ func medicHandleStrandedDispatch(c *Candidate, state *State, deps MedicDeps, now
 	if c.Attempt != c.MedicDispatchAtAttempt {
 		return MedicAction{}, false
 	}
-	if medicWorkerActivitySince(state, c, medicLastDispatchAt(c)) {
+	if medicWorkerActivity(state, c, now) {
 		return MedicAction{}, false
 	}
 	return medicEscalate(c, now, deps.medicID(), "medic_deadline_exceeded", ReasonBudgetExhausted), true
 }
 
-// medicLastDispatchAt is when the medic most recently dispatched c. For a
-// Queued/Reprepare candidate with MedicDispatches > 0 — the only kind the
-// reaper arm looks at — MedicLastAt is exactly that: the medic's only
-// possible last actions on such a candidate are dispatch_resolver and
-// kick_gate_retry (an escalate would have left it in needs_human, which the
-// switch never matches). MedicFirstDispatchAt is the fallback for a durable
-// record written before MedicLastAt existed.
-func medicLastDispatchAt(c *Candidate) time.Time {
-	if !c.MedicLastAt.IsZero() {
-		return c.MedicLastAt
-	}
-	return c.MedicFirstDispatchAt
-}
-
-// medicWorkerActivitySince reports whether some worker has demonstrably been
-// working c's own protected target at or after since — i.e. whether c is
-// waiting behind a moving train rather than stranded. Any of four durable
-// timestamps on another candidate for the same TargetRef counts, because each
-// is written only by a worker actually doing work: Started (set when
-// claimPreparation claims), PhaseStartedAt (set by every lease transition),
-// Completed (set when finalization lands), and LeaseExpiresAt (extended by
-// the heartbeat for as long as a worker holds an in-flight phase, which is
-// what a single multi-hour gate run ahead of c looks like).
+// medicWorkerActivity reports whether some worker demonstrably holds a live
+// lease on c's protected target right now — i.e. whether c is waiting behind
+// a moving train rather than stranded. Historical Started/Completed timestamps
+// and expired leases are not liveness: treating one old event as permanent
+// activity suppresses stranded escalation forever after a worker dies. A
+// continuously running worker renews LeaseExpiresAt by heartbeat, so a live
+// multi-hour gate ahead of c remains protected without inventing a second
+// liveness clock.
 //
 // Scoping to c.TargetRef rather than to deps.TargetRef is deliberate and
 // stricter: workers are target-scoped (Worker.matchesTarget), so activity on
@@ -405,14 +390,15 @@ func medicLastDispatchAt(c *Candidate) time.Time {
 // an unscoped medic pass (empty MedicDeps.TargetRef, which matches every
 // candidate) must not read one target's healthy train as liveness for
 // another target that has no worker at all.
-func medicWorkerActivitySince(state *State, c *Candidate, since time.Time) bool {
+func medicWorkerActivity(state *State, c *Candidate, now time.Time) bool {
 	for i := range state.Candidates {
 		other := &state.Candidates[i]
 		if other.ID == c.ID || other.TargetRef != c.TargetRef {
 			continue
 		}
-		if other.Started.After(since) || other.PhaseStartedAt.After(since) ||
-			other.Completed.After(since) || other.LeaseExpiresAt.After(since) {
+		if other.WorkerID != "" &&
+			(other.phase() == Preparing || other.phase() == Gating || other.phase() == Finalizing) &&
+			!other.LeaseExpiresAt.IsZero() && now.Before(other.LeaseExpiresAt) {
 			return true
 		}
 	}

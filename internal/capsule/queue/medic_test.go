@@ -856,6 +856,90 @@ func TestMdStrandedDispatchBehindAMovingTrainIsLeftAlone(t *testing.T) {
 	}
 }
 
+func TestMdHistoricalCompletionAndExpiredLeaseDoNotSuppressStrandedEscalation(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	stranded := wltSubmit(t, store, "stranded-after-old-activity")
+	historical := wltSubmit(t, store, "historical-worker-activity")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	now := dispatchedAt.Add(3 * time.Hour)
+
+	wltMutate(t, store, stranded.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.Attempt = 1
+		cand.MedicDispatches = 1
+		cand.MedicDispatchAtAttempt = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAction, cand.MedicLastAt = "dispatch_resolver", dispatchedAt
+	})
+	wltMutate(t, store, historical.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Landed, Landed
+		cand.WorkerID = ""
+		cand.Started = dispatchedAt.Add(10 * time.Minute)
+		cand.PhaseStartedAt = dispatchedAt.Add(20 * time.Minute)
+		cand.Completed = dispatchedAt.Add(time.Hour)
+		cand.LeaseExpiresAt = dispatchedAt.Add(90 * time.Minute)
+	})
+
+	deps := MedicDeps{Now: mdClock(now), MedicID: "medic-1", MaxDispatches: 3, Deadline: 2 * time.Hour}
+	first, err := store.MedicRunOnce(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Actions) != 1 || first.Actions[0].CandidateID != stranded.ID || first.Actions[0].Verb != "escalate" {
+		t.Fatalf("historical activity permanently suppressed escalation: actions=%#v", first.Actions)
+	}
+	second, err := store.MedicRunOnce(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Actions) != 0 {
+		t.Fatalf("stranded candidate escalated more than once: actions=%#v", second.Actions)
+	}
+}
+
+func TestMdContinuouslyRenewedLiveLeaseSuppressesStrandedEscalation(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	stranded := wltSubmit(t, store, "stranded-behind-renewed-lease")
+	active := wltSubmit(t, store, "active-renewed-worker")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	now := dispatchedAt.Add(3 * time.Hour)
+
+	before := wltMutate(t, store, stranded.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.Attempt = 1
+		cand.MedicDispatches = 1
+		cand.MedicDispatchAtAttempt = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAction, cand.MedicLastAt = "dispatch_resolver", dispatchedAt
+	})
+	wltMutate(t, store, active.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Gating, Gating
+		cand.WorkerID = "worker-live"
+		cand.LeaseExpiresAt = now.Add(30 * time.Second)
+	})
+
+	deps := MedicDeps{Now: mdClock(now), MedicID: "medic-1", MaxDispatches: 3, Deadline: 2 * time.Hour}
+	if result, err := store.MedicRunOnce(deps); err != nil {
+		t.Fatal(err)
+	} else if len(result.Actions) != 0 {
+		t.Fatalf("live lease did not suppress escalation: actions=%#v", result.Actions)
+	}
+
+	now = now.Add(20 * time.Second)
+	wltMutate(t, store, active.ID, func(cand *Candidate) {
+		cand.LeaseExpiresAt = now.Add(30 * time.Second)
+	})
+	deps.Now = mdClock(now)
+	if result, err := store.MedicRunOnce(deps); err != nil {
+		t.Fatal(err)
+	} else if len(result.Actions) != 0 {
+		t.Fatalf("renewed live lease did not suppress escalation: actions=%#v", result.Actions)
+	}
+	if after := mustGet(t, store, stranded.ID); !reflect.DeepEqual(before, after) {
+		t.Fatalf("live worker caused stranded candidate mutation:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
 // TestMdStrandedDispatchIgnoresOtherTargetsLiveness pins that the liveness
 // signal is scoped to the stranded candidate's own protected target. Workers
 // are target-scoped (Worker.matchesTarget), so a busy train on another target
