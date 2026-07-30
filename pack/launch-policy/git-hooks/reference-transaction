@@ -8,6 +8,18 @@ gitdir="$(git rev-parse --git-dir 2>/dev/null || true)"
 commondir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 [ -n "$gitdir" ] && [ "$gitdir" = "$commondir" ] || exit 0
 
+# `git worktree add/move` points the NEW worktree's HEAD at a non-default branch,
+# and that ref update runs in the primary's git-dir context — so it looks exactly
+# like a primary branch switch (git-dir==common-dir, old=0…0,
+# new=ref:refs/heads/<branch>). The only reliable tell is the invoking command;
+# the immediate parent of this hook is always the git process itself (never the
+# wrapping shell), so matching it is safe. Without this, creating the `unlimited`
+# arm's worktree is indistinguishable from switching the primary checkout.
+parent_cmd="$(ps -o command= -p "$PPID" 2>/dev/null || true)"
+case "$parent_cmd" in
+  *git*worktree*) exit 0 ;;   # creating/moving a worktree — allowed
+esac
+
 default_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 if [ -z "$default_branch" ]; then
   if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then default_branch=main; else default_branch=master; fi

@@ -302,13 +302,20 @@ mechanical, not advisory — the shims, hooks, and capsule CI enforce them:
   interactive shells can hook this on `cd`). Every launch passes
   `agent_launch_policy` preflight: this repo's root and its sibling repos
   are protected roots; agent work happens in `.capsules/workspaces/`
-  (or legacy `.worktrees/`) via `kitsoki agent launch --exec`, with
-  `--profile pog-drive` as the sanctioned catalog-drive entry.
-- **Full-permissions agents are a last resort.** Use the sanctioned escape
-  hatch (the `claude superagent` / `codex superagent` aliases, or
-  `kitsoki agent launch --raw --interactive`) only when the governed path
-  cannot do the job — and file the gap that forced it (feedback or
-  requirement node) so the workaround becomes unnecessary next time.
+  (or, for the direct-git `unlimited` arm below, `.worktrees/`) via
+  `kitsoki agent launch --exec`, with `--profile pog-drive` as the
+  sanctioned catalog-drive entry.
+- **Full-permissions agents are a last resort.** Use a sanctioned escape
+  hatch only when the governed path cannot do the job — and file the gap that
+  forced it (feedback or requirement node) so the workaround becomes
+  unnecessary next time. Two arms exist, and the difference is governance:
+  `claude superagent` / `codex superagent` runs in a **Capsule workspace**
+  (`.capsules/workspaces/<id>`: governed, Capsule CI, receipts), while
+  `claude unlimited` / `codex unlimited` runs in a **plain git worktree**
+  (`.worktrees/<name>`, reused across launches: direct `git commit`, no
+  Capsule, no Capsule CI). `kitsoki agent launch --raw --interactive` is the
+  underlying command both use. Prefer `superagent` when the work should end up
+  with a receipt; use `unlimited` when you specifically need direct git.
 - **Never edit a sibling repo.** Anything this repo needs from another is
   proposed as a typed requirement/bug node into that repo's federated
   catalog via `graph_propose`; its own fleet prioritizes it.

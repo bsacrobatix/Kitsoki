@@ -7,4 +7,7 @@ agent_launch_policy:
 {{PROTECTED_ROOTS}}
   protected_branches: [main]
   allowed_roots:
+    # Governed Capsule workspaces (`superagent`, capsule CI, dev-workspace.sh).
     - .capsules/workspaces
+    # Plain git worktrees (the `unlimited` shim arm): direct git, no Capsule.
+    - .worktrees

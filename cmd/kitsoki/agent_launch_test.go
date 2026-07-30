@@ -1104,6 +1104,49 @@ agent_launch_policy:
 	}
 }
 
+// TestPrepareProtectedRootLaunch_PreservesAllowedRootWorktreeWorkingDir pins
+// the `unlimited` shim arm: its working dir is a plain `.worktrees/<name>` git
+// worktree inside the protected root, carved out by allowed_roots and
+// deliberately carrying NO Capsule sentinel (direct git is the whole point).
+// Provisioning a Capsule here would silently abandon the worktree the shim
+// just created/reused.
+func TestPrepareProtectedRootLaunch_PreservesAllowedRootWorktreeWorkingDir(t *testing.T) {
+	project := t.TempDir()
+	worktree := filepath.Join(project, ".worktrees", "unlimited-claude")
+	require.NoError(t, os.MkdirAll(worktree, 0755))
+	require.NoFileExists(t, filepath.Join(worktree, capsule.SentinelFile))
+	cfgPath := filepath.Join(project, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  protected_roots: [.]
+  allowed_roots: [.capsules/workspaces, .worktrees]
+`), 0644))
+	failCreate := func(context.Context, string, string, string) (control.Instance, error) {
+		t.Fatal("must not provision a Capsule for an allowed-root git worktree")
+		return control.Instance{}, nil
+	}
+	prevInteractive := createProtectedRootInteractiveCapsule
+	prevCodeact := createProtectedRootCodeactCapsule
+	createProtectedRootInteractiveCapsule = failCreate
+	createProtectedRootCodeactCapsule = failCreate
+	t.Cleanup(func() {
+		createProtectedRootInteractiveCapsule = prevInteractive
+		createProtectedRootCodeactCapsule = prevCodeact
+	})
+
+	for _, backend := range []string{"claude", "codex"} {
+		t.Run(backend, func(t *testing.T) {
+			opts, provenance, err := prepareProtectedRootLaunch(context.Background(), agentLaunchOptions{
+				RawInteractive: true, Interactive: true, Backend: backend, ConfigPath: cfgPath, WorkingDir: worktree,
+			})
+			require.NoError(t, err)
+			require.Nil(t, provenance)
+			require.Equal(t, worktree, opts.WorkingDir)
+		})
+	}
+}
+
 // TestPrepareProtectedRootLaunch_RawInteractiveOutsideProtectedRootNoCapsule
 // pins the pass-through: a raw interactive launch from an ordinary directory
 // provisions nothing and leaves the working dir untouched.

@@ -331,10 +331,50 @@ materialized workspace, never the protected checkout:
   provenance prints the exact resume command); abandoned workspaces are
   reclaimed by capsule hygiene.
 
-A working directory that is already inside a managed Capsule workspace is
-preserved verbatim — the launcher never reclassifies it as protected-root or
-redirects it into a different Capsule. This is how the `superagent` shim arm's
-pre-created workspace stays the actual session workspace.
+Two working-directory shapes are preserved verbatim instead of being
+reclassified as protected-root and redirected into a fresh Capsule:
+
+- **already inside a managed Capsule workspace.** This is how the `superagent`
+  shim arm's pre-created workspace stays the actual session workspace.
+- **inside a configured `allowed_roots` entry.** The operator has explicitly
+  carved that path out of the protected root, so it is already approved. This
+  is what makes the `unlimited` shim arm's plain `.worktrees/<name>` git
+  worktree usable: it deliberately carries no Capsule sentinel. The preflight
+  stays authoritative either way — a protected branch inside an allowed root is
+  still denied.
+
+## Full-permissions shim arms
+
+Both are last resorts (see the operating principles in `AGENTS.md`): reach for
+them only when the governed path cannot do the job, and file the gap that
+forced it so the workaround becomes unnecessary next time.
+
+| | `claude superagent` / `codex superagent` | `claude unlimited` / `codex unlimited` |
+| --- | --- | --- |
+| Working dir | `.capsules/workspaces/<id>` (fresh per launch) | `.worktrees/<name>` (**reused** across launches) |
+| Created by | `kitsoki capsule workspace create-script` | `git worktree add` |
+| Governance | Capsule workspace: sentinel, lease/owner, Capsule CI, receipts | none — plain git worktree |
+| Landing work | `kitsoki capsule workspace commit` / `reconcile` / `capsule promote` | plain `git commit` in the worktree |
+
+Both arms fall through to the same
+`kitsoki agent launch --raw --interactive --backend … --working-dir … --config …`
+tail and preserve native backend argv verbatim through `--raw-arg`, so
+`claude unlimited --model fast -- --native-flag=1` reaches the backend unchanged.
+
+`unlimited` names its worktree, in precedence order:
+
+1. an explicit first argument — `claude unlimited <name> [native args…]`
+   (anything starting with `-` is treated as native argv, not a name);
+2. `KITSOKI_UNLIMITED_WORKTREE=<name>`, for callers that cannot reorder argv;
+3. the default `unlimited-<backend>` (`unlimited-claude`, `unlimited-codex`).
+
+The name must be a single path segment. A missing worktree is created — branched
+off `staging/local` when that ref exists, else the repo's default branch — and an
+existing one is **reused**, so repeated launches do not accumulate worktrees.
+For `unlimited` to work, `.worktrees` must be in the policy's `allowed_roots`
+(the launch-policy pack's template ships it) and the pack's Claude PreToolUse
+guard must exempt `$root/.worktrees` so direct `git commit` / `git checkout`
+there is not blocked.
 
 Materialization follows the project's `development` capsule definition: a
 `dev-workspace-script` definition goes through `scripts/dev-workspace.sh`,

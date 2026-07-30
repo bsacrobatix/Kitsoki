@@ -17,7 +17,13 @@ root="$(cd "$root" && pwd -P)"
 case "$cwd" in /*) ;; *) cwd="$root/$cwd" ;; esac
 cwd="$(cd "$cwd" 2>/dev/null && pwd -P || printf '%s' "$cwd")"
 
-case "$cwd" in "$root"/.capsules/workspaces|"$root"/.capsules/workspaces/*) exit 0 ;; esac
+# Sanctioned agent work trees are exempt: a managed Capsule workspace
+# (`superagent`, dev-workspace.sh) and a plain git worktree (the `unlimited`
+# shim arm, whose whole point is direct `git commit` / `git checkout`).
+case "$cwd" in
+  "$root"/.capsules/workspaces|"$root"/.capsules/workspaces/*) exit 0 ;;
+  "$root"/.worktrees|"$root"/.worktrees/*) exit 0 ;;
+esac
 
 deny() {
   printf '%s\n' "Blocked by Kitsoki launch policy: $1" >&2

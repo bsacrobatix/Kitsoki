@@ -20,6 +20,12 @@ grep -q 'KITSOKI_AGENT_CLAUDE_BIN' "$repo/.kitsoki/launch-policy.sh"
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$repo/.claude/settings.json"
 grep -q 'require_capsule: false' "$repo/.kitsoki.local.yaml"
 grep -q '\.capsules/workspaces' "$repo/.kitsoki.local.yaml"
+# `unlimited` needs .worktrees carved out of the protected root, and the Claude
+# guard must not police direct git there — that mode is direct git by design.
+grep -q '^    - \.worktrees$' "$repo/.kitsoki.local.yaml" \
+  || { echo "FAIL: allowed_roots is missing .worktrees" >&2; exit 1; }
+grep -q '\.worktrees/\*) exit 0' "$repo/.claude/hooks/block-bare-checkout.sh" \
+  || { echo "FAIL: Claude guard does not exempt .worktrees" >&2; exit 1; }
 
 if git -C "$repo" checkout -q -b should-be-blocked 2>/dev/null; then
   echo "FAIL: reference-transaction did not pin primary checkout" >&2
@@ -35,6 +41,10 @@ sed_i 's/capsule workspace create-script/capsule workspace create \\\n    --defi
 "$pack_dir/install.sh" "$repo" --no-siblings >/dev/null
 grep -q 'capsule workspace create-script' "$repo/.kitsoki/bin/codex" || { echo "FAIL: stale codex shim was not upgraded" >&2; exit 1; }
 grep -q 'capsule workspace create-script' "$repo/.kitsoki/bin/claude" || { echo "FAIL: claude shim missing create-script" >&2; exit 1; }
+for shim in claude codex; do
+  grep -q '"${1:-}" = "unlimited"' "$repo/.kitsoki/bin/$shim" \
+    || { echo "FAIL: $shim shim missing the unlimited arm" >&2; exit 1; }
+done
 
 out="$("$pack_dir/install.sh" "$repo" --no-siblings)"
 grep -q 'no changes' <<<"$out" || { echo "FAIL: installer was not idempotent" >&2; exit 1; }

@@ -304,6 +304,23 @@ func (p AgentLaunchPolicy) MatchProtectedRoot(path string) string {
 	return ""
 }
 
+// MatchAllowedRoot is MatchProtectedRoot's counterpart: it returns the
+// configured allowed root containing path, or "" when no allowed root does (a
+// policy with no allowed_roots therefore always returns ""). Check already
+// treats an allowed root as an explicit operator carve-out that outranks
+// protected-root containment; callers that must decide whether a working
+// directory is *already* policy-approved — rather than something to redirect
+// into a freshly provisioned workspace — use this instead of re-deriving the
+// containment rule.
+func (p AgentLaunchPolicy) MatchAllowedRoot(path string) string {
+	for _, root := range p.Normalized().AllowedRoots {
+		if root != "" && pathContains(root, path) {
+			return resolveExistingPath(root)
+		}
+	}
+	return ""
+}
+
 func CheckAgentLaunchPolicy(ctx context.Context, verb, agentName, workingDir string) (AgentLaunchDecision, error) {
 	return AgentLaunchPolicyFromContext(ctx).Check(ctx, verb, agentName, workingDir)
 }

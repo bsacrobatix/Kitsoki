@@ -465,11 +465,20 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 //     (the provenance's Resume command); abandoned workspaces are owned by
 //     capsule hygiene, not by id reuse.
 //
-// A working directory that already sits inside a managed Capsule workspace is
-// preserved verbatim: the caller (e.g. the `superagent` shim arm) has already
-// materialized its own isolated Capsule, and redirecting that launch into a
-// different Capsule would abandon it. Every other launch shape keeps the
-// plain preflight denial.
+// Two working-directory shapes are preserved verbatim instead:
+//
+//   - already inside a managed Capsule workspace: the caller (e.g. the
+//     `superagent` shim arm) materialized its own isolated Capsule, and
+//     redirecting the launch into a different Capsule would abandon it.
+//   - inside a configured `allowed_roots` entry: the operator has explicitly
+//     carved that path out of the protected root, so it is already a
+//     policy-approved place for agent work. This is what makes the
+//     `unlimited` shim arm's plain `.worktrees/<name>` git worktree usable —
+//     it deliberately has no Capsule sentinel, so the check above cannot see
+//     it. checkLaunchPolicy stays authoritative either way: a protected
+//     branch inside an allowed root is still denied.
+//
+// Every other launch shape keeps the plain preflight denial.
 func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (agentLaunchOptions, *agentLaunchCapsuleProvenance, error) {
 	mode, err := normalizeAgentLaunchMode(opts.Mode)
 	if err != nil {
@@ -493,6 +502,9 @@ func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (a
 		return opts, nil, nil
 	}
 	if capsuleRoot := managedCapsuleRootWithin(workingDir, projectRoot); capsuleRoot != "" {
+		return opts, nil, nil
+	}
+	if launchCfg.AgentLaunchPolicy.MatchAllowedRoot(workingDir) != "" {
 		return opts, nil, nil
 	}
 

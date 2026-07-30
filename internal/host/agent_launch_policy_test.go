@@ -110,6 +110,36 @@ func TestAgentLaunchPolicy_DeniesProtectedRootUnlessAllowedRootCarvesOut(t *test
 	}
 }
 
+// TestAgentLaunchPolicy_MatchAllowedRoot pins the accessor the launcher uses to
+// tell "already policy-approved" from "redirect this into a fresh workspace".
+// The `unlimited` shim arm's plain `.worktrees/<name>` git worktree has no
+// Capsule sentinel, so allowed-root containment is the only signal available.
+func TestAgentLaunchPolicy_MatchAllowedRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	worktrees := filepath.Join(root, ".worktrees")
+	session := filepath.Join(worktrees, "unlimited-claude")
+	if err := os.MkdirAll(session, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	policy := host.AgentLaunchPolicy{Enabled: true, ProtectedRoots: []string{root}}
+	if got := policy.MatchAllowedRoot(session); got != "" {
+		t.Fatalf("no allowed_roots must match nothing, got %q", got)
+	}
+	policy.AllowedRoots = []string{worktrees}
+	got := policy.MatchAllowedRoot(session)
+	want, err := filepath.EvalSymlinks(worktrees)
+	if err != nil {
+		t.Fatalf("resolve worktrees root: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected allowed root %q, got %q", want, got)
+	}
+	if got := policy.MatchAllowedRoot(root); got != "" {
+		t.Fatalf("the protected root itself must not match an allowed root, got %q", got)
+	}
+}
+
 func TestAgentLaunchPolicy_CheckPlacement(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

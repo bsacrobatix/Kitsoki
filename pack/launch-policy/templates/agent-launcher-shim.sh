@@ -105,6 +105,43 @@ if [ "${1:-}" = "superagent" ]; then
   [ -d "$working_dir" ] || { echo "Kitsoki launcher shim: Capsule workspace was not created: $working_dir" >&2; exit 1; }
   echo "Kitsoki launcher shim: starting $backend superagent in $working_dir" >&2
 fi
+if [ "${1:-}" = "unlimited" ]; then
+  shift
+  # Same full-permissions session as `superagent`, but in a plain git worktree:
+  # direct `git commit` in the worktree is the intended workflow, so there is no
+  # Capsule workspace, no sentinel, no Capsule CI, and no reconcile/promote step.
+  # The worktree is REUSED across launches — an operator must not accumulate one
+  # per session. Name it explicitly with `claude unlimited <name> [native args…]`
+  # or KITSOKI_UNLIMITED_WORKTREE; anything starting with `-` is native argv.
+  worktree_name="${KITSOKI_UNLIMITED_WORKTREE:-unlimited-$backend}"
+  case "${1:-}" in ""|-*) ;; *) worktree_name="$1"; shift ;; esac
+  case "$worktree_name" in
+    ""|.*|*/*) echo "Kitsoki launcher shim: unlimited worktree name must be a single path segment: $worktree_name" >&2; exit 2 ;;
+  esac
+  working_dir="$install_root/.worktrees/$worktree_name"
+  if [ ! -d "$working_dir" ]; then
+    # Fresh worktrees branch off staging/local when it exists, else the repo's
+    # default branch (same resolution the pack's reference-transaction hook uses).
+    base="staging/local"
+    if ! git -C "$install_root" show-ref --verify --quiet "refs/heads/$base"; then
+      base="$(git -C "$install_root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
+      if [ -z "$base" ]; then
+        if git -C "$install_root" show-ref --verify --quiet refs/heads/main; then base=main; else base=master; fi
+      fi
+    fi
+    # No hook opt-out here: the pack's reference-transaction hook recognizes
+    # `git worktree add` by its invoking command and lets it through, so the
+    # primary checkout's branch pin stays fully enforced for this call.
+    git_add=(git -C "$install_root" worktree add)
+    if git -C "$install_root" show-ref --verify --quiet "refs/heads/$worktree_name"; then
+      "${git_add[@]}" "$working_dir" "$worktree_name" >&2
+    else
+      "${git_add[@]}" -b "$worktree_name" "$working_dir" "$base" >&2
+    fi
+  fi
+  [ -d "$working_dir" ] || { echo "Kitsoki launcher shim: git worktree was not created: $working_dir" >&2; exit 1; }
+  echo "Kitsoki launcher shim: starting $backend unlimited in $working_dir (plain git worktree; direct git, no Capsule)" >&2
+fi
 
 args=(agent launch --raw --interactive --backend "$backend" --working-dir "$working_dir" --config "$config_path")
 for arg in "$@"; do args+=(--raw-arg "$arg"); done

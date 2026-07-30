@@ -62,6 +62,12 @@ throwaway git repositories inside capsule workspaces.
 Use [`kitsoki capsule open`](../development/capsules.md) to create an opened capsule
 workspace, then pass that path as the agent `working_dir`.
 
+An `allowed_roots` entry is also the signal that a working directory is
+*already* policy-approved rather than something to redirect into a freshly
+provisioned Capsule — see [the launch guide](launch.md#full-permissions-shim-arms)
+for how the `unlimited` shim arm relies on a `.worktrees` entry to run a
+full-permissions session in a plain git worktree with direct git access.
+
 ## Placement Policy (Federation)
 
 `agent_launch_policy.placement:` is the launch-preflight gate for **remote**
