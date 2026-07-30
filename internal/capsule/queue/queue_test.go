@@ -601,7 +601,7 @@ func setCandidatePhase(t *testing.T, store Store, id string, phase Status) {
 }
 
 func TestCandidateScopedWorkerLandsWithoutTakingEarlierCandidateCustody(t *testing.T) {
-	for _, phase := range []Status{Queued, ReadyToFinalize, RetryWait} {
+	for _, phase := range []Status{Queued, ReadyToFinalize, RetryWait, NeedsInput} {
 		t.Run(string(phase), func(t *testing.T) {
 			store, first, second := queuedPair(t)
 			if phase != Queued {

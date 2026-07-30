@@ -405,6 +405,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		GateTimeout:        opts.GateTimeout,
 		GateAdmission:      gateCapacity,
 		TargetRef:          opts.TargetRef,
+		CandidateID:        qcandidate.ID,
 		GateMemo:           queue.FileGateMemo{ProjectRoot: root, QueueRoot: opts.QueueRoot},
 	})
 	if err != nil {
