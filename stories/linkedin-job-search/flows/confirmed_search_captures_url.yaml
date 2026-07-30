@@ -4,20 +4,14 @@ initial_state: parameters
 host_handlers:
   host.agent.task:
     by_call:
-      prepare_linkedin_jobs_form:
+      navigate_confirmed_linkedin_jobs_url:
         data:
           ok: true
           submitted:
-            keywords: "Product Manager"
-            location: "Bangkok"
-      submit_confirmed_linkedin_jobs_search:
-        data:
-          ok: true
-          submitted:
-            results_url: "https://www.linkedin.com/jobs/search/?keywords=Product%20Manager&location=Bangkok"
+            results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
             parameters:
               keywords: "Product Manager"
-              location: "Bangkok"
+              location: "Remote, United States"
 turns:
   - intent:
       name: prepare
@@ -26,16 +20,15 @@ turns:
     expect_world:
       search_status: "awaiting_confirmation"
       confirmed: false
-      prepared_parameters: { keywords: "Product Manager", location: "Bangkok" }
-    expect_host_calls:
-      - handler: host.agent.task
-        args: { call: "prepare_linkedin_jobs_form" }
+      prepared_parameters: { keywords: "Product Manager", location: "Remote, United States" }
+      search_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
+    expect_no_host_calls: [host.agent.task]
   - intent: { name: confirm_search }
     expect_state: complete
     expect_world:
       search_status: "complete"
-      results_url: "https://www.linkedin.com/jobs/search/?keywords=Product%20Manager&location=Bangkok"
-      used_parameters: { keywords: "Product Manager", location: "Bangkok" }
+      results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
+      used_parameters: { keywords: "Product Manager", location: "Remote, United States" }
     expect_host_calls:
       - handler: host.agent.task
-        args: { call: "submit_confirmed_linkedin_jobs_search" }
+        args: { call: "navigate_confirmed_linkedin_jobs_url" }

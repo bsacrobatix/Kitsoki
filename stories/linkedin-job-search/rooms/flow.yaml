@@ -1,38 +1,40 @@
 states:
   parameters:
-    description: "Collect LinkedIn Jobs search parameters without browser activity."
-    relevant_world: [keywords, location, search_status]
+    description: "Collect LinkedIn Jobs keywords without browser activity."
+    relevant_world: [keywords, location, search_url, search_status]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "I will only prepare a LinkedIn Jobs search. No browser action or submission happens until you review the parameters and explicitly confirm."
+          - prose: "I will construct one remote-only LinkedIn Jobs URL. No browser action happens until you review it and explicitly confirm."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords|default:'(not yet chosen)' }}"
-                Location: "{{ world.location|default:'(any location)' }}"
+                Location: "Remote, United States (fixed)"
+                Direct URL: "{{ world.search_url|default:'(created after prepare)' }}"
                 Status: "{{ world.search_status }}"
         choices:
           - heading: "Actions"
           - list:
               items:
-                - label: "prepare keywords=… location=…"
-                  hint: "review parameters before any search"
+                - label: "prepare keywords=…"
+                  hint: "review the direct remote-only URL before navigation"
                 - label: "cancel"
                   hint: "end without opening or searching LinkedIn"
                 - label: "look"
     on:
       prepare:
-        - target: preparing
+        - target: review
           effects:
             - set:
                 keywords: "{{ slots.keywords }}"
-                location: "{{ slots.location ?? '' }}"
+                location: "Remote, United States"
+                search_url: "https://www.linkedin.com/jobs/search-results/?keywords={{ urlqueryescape(slots.keywords) }}&geoId=103644278&f_WT=2"
                 search_status: "awaiting_confirmation"
                 confirmed: false
                 results_url: ""
                 used_parameters: {}
-                prepared_parameters: {}
+                prepared_parameters: { keywords: "{{ slots.keywords }}", location: "Remote, United States" }
                 search_result: {}
                 error_detail: ""
       cancel:
@@ -40,69 +42,26 @@ states:
       look:
         - target: .
 
-  preparing:
-    description: "Navigate to LinkedIn Jobs and fill the reviewed parameters without submitting."
-    relevant_world: [keywords, location, search_status, prepared_parameters, error_detail]
-    view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "Preparing the LinkedIn Jobs form through the configured bridge. This phase may navigate, snapshot, and fill only; it never presses a search control."
-          - kv:
-              pairs:
-                Keywords: "{{ world.keywords }}"
-                Location: "{{ world.location|default:'(any location)' }}"
-                Status: "{{ world.search_status }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "look"
-    on_enter:
-      - invoke: host.agent.task
-        id: prepare_linkedin_jobs_form
-        once: true
-        with:
-          agent: linkedin_searcher
-          acceptance:
-            schema: schemas/prepared-search.json
-          context:
-            prompt: prompts/prepare-search.md
-            args:
-              keywords: "{{ world.keywords }}"
-              location: "{{ world.location }}"
-        bind:
-          prepared_parameters: submitted
-        on_error: failed
-      - when: "world.prepared_parameters.keywords != ''"
-        emit_intent: ready_to_confirm
-    on:
-      ready_to_confirm:
-        - target: review
-          effects:
-            - set: { search_status: "awaiting_confirmation" }
-      look:
-        - target: .
-
   review:
-    description: "Require explicit confirmation immediately before LinkedIn Jobs search submission."
-    relevant_world: [keywords, location, search_status, confirmed]
+    description: "Require explicit confirmation immediately before direct LinkedIn Jobs navigation."
+    relevant_world: [keywords, location, search_url, search_status, confirmed]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The LinkedIn Jobs form is filled but not submitted. Confirm to press exactly one Jobs search control; it will not open jobs, apply, message, save, paginate, or bulk-scrape."
+          - prose: "Confirm one direct remote-only LinkedIn Jobs URL navigation. Chrome will show one Allow confirmation for the navigation; the story will then snapshot the safe current URL."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords }}"
                 Location: "{{ world.location|default:'(any location)' }}"
+                Direct URL: "{{ world.search_url }}"
                 Status: "{{ world.search_status }}"
         choices:
           - heading: "Required decision"
           - list:
               items:
                 - label: "confirm_search"
-                  hint: "submit this one search now"
+                  hint: "navigate once to this direct Jobs URL"
                 - label: "revise"
                   hint: "return without submitting"
                 - label: "cancel"
@@ -125,18 +84,19 @@ states:
         - target: .
 
   searching:
-    description: "Run the single confirmed LinkedIn Jobs search through the Sassfully browser bridge."
-    relevant_world: [keywords, location, search_status, results_url, used_parameters, error_detail]
+    description: "Navigate once to the confirmed direct LinkedIn Jobs URL and verify it."
+    relevant_world: [keywords, location, search_url, search_status, results_url, used_parameters, error_detail]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to a LinkedIn Jobs search submission and results URL capture."
+          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to one direct Jobs URL navigation and one safe URL snapshot."
           - kv:
               pairs:
                 Status: "{{ world.search_status }}"
                 Keywords: "{{ world.keywords }}"
                 Location: "{{ world.location|default:'(any location)' }}"
+                Direct URL: "{{ world.search_url }}"
                 Results URL: "{{ world.results_url|default:'(pending)' }}"
                 Error: "{{ world.error_detail|default:'(none)' }}"
         choices:
@@ -146,7 +106,7 @@ states:
                 - label: "look"
     on_enter:
       - invoke: host.agent.task
-        id: submit_confirmed_linkedin_jobs_search
+        id: navigate_confirmed_linkedin_jobs_url
         once: true
         with:
           agent: linkedin_searcher
@@ -157,6 +117,7 @@ states:
             args:
               keywords: "{{ world.keywords }}"
               location: "{{ world.location }}"
+              search_url: "{{ world.search_url }}"
               confirmation: "{{ world.confirmed }}"
         bind:
           search_result: submitted
@@ -174,14 +135,14 @@ states:
         - target: .
 
   complete:
-    description: "Confirmed LinkedIn Jobs search completed with its results URL captured."
+    description: "Confirmed LinkedIn Jobs direct URL navigation completed with its URL captured."
     terminal: true
     relevant_world: [keywords, location, search_status, results_url, used_parameters]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The attended LinkedIn Jobs search completed. The story captured the requested parameters and final results URL; it did not inspect job details or collect result rows."
+          - prose: "The attended LinkedIn Jobs navigation completed. The story captured the requested parameters and verified URL; it did not inspect job details or collect result rows."
           - kv:
               pairs:
                 Status: "{{ world.search_status }}"

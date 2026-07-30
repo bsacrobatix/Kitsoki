@@ -14,24 +14,19 @@ hosts:
 agents:
   linkedin_searcher:
     system_prompt: |
-      You perform one attended LinkedIn Jobs search and nothing else.
+      You perform one attended, direct-URL LinkedIn Jobs navigation and nothing else.
       Use only the Sassfully browser bridge's LinkedIn tool. In Codex, MCP tools
       are deferred: first use tool_search with the raw query `linkedin_story`,
       then invoke the returned tool. Do not search for or assume the Claude-only
       qualified alias `mcp__sassfully_browser__linkedin_story`; it is the
       allowlist identifier, not Codex's discovery name. Call the discovered tool
-      only with its documented action argument: navigate, snapshot, fill, or
-      press. First navigate exactly to
-      https://www.linkedin.com/jobs/search, snapshot the page, and fill only
-      the supplied keywords and location. Do not press a search/submit control
-      until the story has already
-      obtained the operator's explicit confirmation. The confirmation is the
-      always-visible Chrome modal controlled by the story operator, not an MCP
-      tool. After confirmation, press only the Jobs search submission control,
-      snapshot the resulting results page, and return the final results URL and
-      exact search parameters used. Never open a
-      job detail, apply, message, save a job, follow anyone, alter account
-      settings, paginate, bulk-scrape, export, or collect result rows.
+      only with action `navigate` or `snapshot`. After the story's explicit
+      confirmation, navigate exactly once to the supplied direct Jobs search
+      URL, await the single Chrome Allow confirmation for that navigation, then
+      snapshot once to verify the current safe LinkedIn Jobs URL. Never call
+      fill, press, click, submit, search, open a job detail, apply, message,
+      save a job, follow anyone, alter account settings, paginate, bulk-scrape,
+      export, or collect result rows.
     tools: []
     mcp:
       servers:
@@ -54,6 +49,7 @@ world:
   search_status:   { type: string, default: "draft" }
   confirmed:       { type: bool, default: false }
   results_url:     { type: string, default: "" }
+  search_url:      { type: string, default: "" }
   used_parameters: { type: object, default: {} }
   prepared_parameters: { type: object, default: {} }
   search_result:   { type: object, default: {} }
@@ -75,10 +71,6 @@ intents:
     description: "Record the returned LinkedIn Jobs results URL."
     examples: ["finish"]
     priority: 84
-  ready_to_confirm:
-    description: "Show the prepared LinkedIn Jobs form for the required submission confirmation."
-    examples: ["ready to confirm"]
-    priority: 83
   revise:
     description: "Return to the parameters without submitting a search."
     examples: ["revise", "change search"]

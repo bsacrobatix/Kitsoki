@@ -1,10 +1,11 @@
 # Attended LinkedIn job search
 
-This story first navigates, snapshots, and fills the LinkedIn **Jobs** form.
-Only after the operator explicitly chooses `confirm_search` does it press one
-search control. It records the submitted parameters and final results URL in
-world state. It does not open job details, apply, message, save, follow,
-paginate, or bulk-scrape.
+This v0 story deterministically constructs
+`https://www.linkedin.com/jobs/search-results/?keywords=<urlencoded>&geoId=103644278&f_WT=2`
+for a remote-only search, then waits for `confirm_search`. The only browser
+effect is one Chrome-confirmed navigation to that URL followed by one safe
+snapshot of the current Jobs URL. It does not fill fields, press controls,
+open job details, apply, message, save, follow, paginate, or bulk-scrape.
 
 ## Sassfully bridge binding
 
@@ -20,10 +21,10 @@ agents.linkedin_searcher.mcp.servers.sassfully_browser:
 ```
 
 The bridge exposes one tool under the `sassfully_browser` MCP server namespace:
-`linkedin_story`. The agent calls it with the documented `action` argument set
-to `navigate`, `snapshot`, `fill`, or `press` and the matching documented
-arguments. Confirmation is an always-visible Chrome modal supplied by the
-bridge; it is the story's `confirm_search` operator decision, not an MCP tool.
+`linkedin_story`. It may advertise `navigate`, `snapshot`, `fill`, and `press`,
+but this v0 agent may use only `navigate` and `snapshot`. The bridge must accept
+the exact direct-URL route above and require one visible Chrome confirmation for
+its `navigate` action.
 The story agent receives no native filesystem, shell, web, or editor tools.
 
 Set `SASSFULLY_LINKEDIN_PAIRING_CODE` in the environment that launches Kitsoki.

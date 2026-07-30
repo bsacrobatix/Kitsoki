@@ -8,6 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestURLQueryEscapeBuiltin(t *testing.T) {
+	p, err := expr.Compile("urlqueryescape(slots.keywords)")
+	require.NoError(t, err)
+	got, err := expr.EvalAny(p, expr.Env{Slots: map[string]any{"keywords": "principal engineer & go"}})
+	require.NoError(t, err)
+	require.Equal(t, "principal+engineer+%26+go", got)
+}
+
 // ─── CompileBool tests ───────────────────────────────────────────────────────
 
 func TestCompileBool_ValidGuards(t *testing.T) {

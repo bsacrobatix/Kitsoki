@@ -1,18 +1,12 @@
 test_kind: flow
 app: ../app.yaml
 initial_state: parameters
-host_handlers:
-  host.agent.task:
-    by_call:
-      prepare_linkedin_jobs_form:
-        data:
-          ok: true
-          submitted: { keywords: "Designer", location: "Remote" }
 turns:
   - intent:
       name: prepare
       slots: { keywords: "Designer", location: "Remote" }
     expect_state: review
+    expect_no_host_calls: [host.agent.task]
   - intent: { name: revise }
     expect_state: parameters
     expect_world: { confirmed: false, search_status: "draft" }
@@ -20,6 +14,7 @@ turns:
       name: prepare
       slots: { keywords: "Designer", location: "Remote" }
     expect_state: review
+    expect_no_host_calls: [host.agent.task]
   - intent: { name: cancel }
     expect_state: cancelled
     expect_no_host_calls: [host.agent.task]

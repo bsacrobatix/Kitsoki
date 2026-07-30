@@ -3,6 +3,7 @@ package expr
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -50,10 +51,11 @@ type Env struct {
 	// evaluation), these remain nil — they're not callable from non-view
 	// contexts, which is fine because authors only reference them from
 	// view: prose.
-	Available     func(name string) bool   `expr:"available"`
-	Blocked       func(name string) bool   `expr:"blocked"`
-	BlockedReason func(name string) string `expr:"blocked_reason"`
-	IntentStatus  func(name string) string `expr:"intent_status"`
+	Available      func(name string) bool    `expr:"available"`
+	Blocked        func(name string) bool    `expr:"blocked"`
+	BlockedReason  func(name string) string  `expr:"blocked_reason"`
+	IntentStatus   func(name string) string  `expr:"intent_status"`
+	URLQueryEscape func(value string) string `expr:"urlqueryescape"`
 
 	// Item is the current element inside a {{ range expr }} block. The
 	// template engine sets this on a per-iteration copy of the env; field
@@ -220,6 +222,7 @@ var allowedFunctions = map[string]bool{
 	"blocked":        true, // blocked(name)   → bool: name is in menu.blocked
 	"blocked_reason": true, // blocked_reason(name) → string: reason or ""
 	"intent_status":  true, // intent_status(name) → "available"|"blocked"|"unknown"
+	"urlqueryescape": true, // urlqueryescape(value) → RFC 3986 query value
 }
 
 // whitelistVisitor accumulates violations found during the AST walk.
@@ -374,6 +377,7 @@ func CompileBool(source string) (*Program, error) {
 // a turn error rather than a misread branch. EvalBool only reads p and env,
 // so a single *Program may be evaluated concurrently with different envs.
 func EvalBool(p *Program, env Env) (bool, error) {
+	ensureBuiltinFunctions(&env)
 	out, err := vm.Run(p.program, env)
 	if err != nil {
 		return false, fmt.Errorf("expr eval %q: %w", p.source, err)
@@ -390,11 +394,18 @@ func EvalBool(p *Program, env Env) (bool, error) {
 // [EvalBool] it only reads its arguments, so one *Program is safe to evaluate
 // concurrently; it errors only when the underlying VM faults.
 func EvalAny(p *Program, env Env) (any, error) {
+	ensureBuiltinFunctions(&env)
 	out, err := vm.Run(p.program, env)
 	if err != nil {
 		return nil, fmt.Errorf("expr eval %q: %w", p.source, err)
 	}
 	return out, nil
+}
+
+func ensureBuiltinFunctions(env *Env) {
+	if env.URLQueryEscape == nil {
+		env.URLQueryEscape = url.QueryEscape
+	}
 }
 
 // ─── Render / template engine ─────────────────────────────────────────────────
