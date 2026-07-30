@@ -170,6 +170,95 @@ fixes the POG-side consumers, not by accident. Anyone acting on this list
 should re-grep POG for the literal `needs_input` before bumping rather than
 trusting this enumeration to have stayed current.
 
+## The medic: bounded productive retries on stalled parked candidates
+
+Before this item, nothing watched `needs_conflict_input` (candidates could
+sit parked indefinitely even though the configured or embedded git-ops
+resolver might well succeed on a second try — a flaky launch, a transient
+story-harness hiccup, an operator having just fixed the resolver
+configuration) or a repeated gate-failed `retry_wait` streak (a configured
+`Repairer` only ever gets its shot after the full exponential backoff, never
+sooner). `queue.Store.MedicRunOnce` (`internal/capsule/queue/medic.go`)
+closes both gaps using only existing queue mechanics — it never calls
+`queue override`, never waives a gate, never skips a test:
+
+- **`needs_conflict_input`** → dispatch the resolver again by returning the
+  candidate to `queued`; the ordinary worker's next `prepare()` re-runs
+  `Speculate`, which re-drives `resolveConflicts` with whatever resolver is
+  configured. The medic itself never launches an agent or runs git.
+- **`retry_wait` with a repeated gate-failed streak, only when a `Repairer`
+  is actually configured for this worker** → clear the backoff timer early
+  (exactly what `kick` does), once per attempt, so the repairer gets its
+  shot sooner. With no repairer configured the medic leaves these alone
+  entirely: kicking would just burn the ordinary attempt budget faster for
+  no benefit.
+
+Both cases carry their own bounded productive-retry budget, tracked durably
+on the candidate (`medic_dispatches` / `medic_first_dispatch_at` /
+`medic_kicked_attempt`) and separate from the ordinary `attempt` budget: a
+wall-clock deadline (checked first, always escalates with the generic
+`budget-exhausted` — "ran out of time" is a different claim from "kept
+failing") and a dispatch-count ceiling (escalates with the specific
+`resolver-exhausted` or `repairer-exhausted`). Exhaustion always lands on
+`needs_human` with a `needs_human_evidence_ref`, exactly like `parkHuman`.
+`resume`/`override` reset this budget too — a human declaring the underlying
+cause fixed gets the medic a fresh budget, not a mid-exhaustion one.
+
+`needs_input` and `needs_human` are never touched. `needs_input` is exactly
+what an operator's own `queue park` verb produces; acting on it would mean
+silently overriding a human's explicit decision to leave a candidate alone.
+`needs_human` is the terminal that says automation is already out of
+options — the medic is part of "automation" for this purpose and must not
+re-litigate its own prior verdict outside the one exhaustion transition
+above.
+
+Every medic action is one lock-protected read-mutate-write, exactly like
+`Worker.claimPreparation`'s own lease-expiry sweep: there is no separate
+medic lease to fence, because a candidate a prior (or concurrent, or
+pre-restart) pass already moved out of `needs_conflict_input`/`retry_wait`
+is simply not matched by the next pass. A worker restart between two medic
+passes cannot double-dispatch — the durable write is atomic, so a crash
+before it lands leaves the candidate exactly as if the pass never ran.
+
+`queue status` renders the medic's last action per candidate
+(`medic_last=<verb>@<time> medic_dispatches=<n>`, appended the same
+append-never-insert way `reason_code=`/`needs_human_evidence=` are) and a
+`medic_actions[...]` roll-up in the summary line, alongside `reason_codes[...]`.
+
+### Enabling the medic (what POG must set)
+
+Two equivalent surfaces, both wrapping `queue.Store.MedicRunOnce`:
+
+- **`kitsoki queue worker --medic`** runs one medic pass per outer worker
+  cycle, inside the same process (`runQueueWorkerLoop`'s `medic` parameter).
+  This is the intended production wiring: POG's worker invocation
+  (`scripts/kitsoki-queue-worker.sh` → `kitsoki queue worker`) should add
+  `--medic` alongside its existing `--repair` (when configured — see below)
+  and `--resolver` flags. Under `--concurrency > 1` only the base
+  (`-1`-suffixed) loop runs the medic; the others do not duplicate the scan.
+- **`kitsoki queue medic`** is the identical pass as a standalone,
+  independently-scheduled process (`--once` for a single pass, otherwise a
+  1s-polling loop), for an operator who runs the worker without `--medic`
+  or wants the medic on its own cadence.
+
+Flags (both surfaces; the standalone command omits the `medic-` prefix):
+
+| `queue worker` flag                  | `queue medic` flag       | Default | Meaning |
+| ------------------------------------- | ------------------------ | ------- | ------- |
+| `--medic`                             | *(always on)*             | off     | enable the medic pass |
+| `--medic-max-dispatches`               | `--max-dispatches`        | 3       | productive retries per candidate before escalating |
+| `--medic-deadline`                     | `--deadline`              | 2h      | wall-clock bound since a candidate's first medic touch |
+| `--medic-gate-failure-threshold`       | `--gate-failure-threshold`| 2       | consecutive gate-failed attempts before a `retry_wait` candidate is medic-actionable |
+| *(derived from `--repair`)*            | `--repairer-configured`   | false   | whether this worker actually has a repairer configured; the standalone command cannot see the worker's own `--repair`, so it must be told explicitly |
+
+`queue worker --medic` derives `RepairerConfigured` automatically from
+whether `--repair` is non-empty. The standalone `queue medic` process has no
+visibility into a separate worker process's flags, so if POG runs the medic
+standalone against a worker that has `--repair` configured, it must also
+pass `--repairer-configured` — otherwise the medic correctly, silently,
+leaves repeated-gate-failure candidates alone (the safe default) instead of
+accelerating them.
+
 ## External worker results: verify privately, then admit
 
 `kitsoki queue submit-external` admits source produced by a disposable worker
@@ -306,7 +395,9 @@ the typed `queue.ErrBusy` result within the configured lock wait.
   [--actor --reason --project]`, plus `submit`, `submit-external`,
   `serve-admission`, `status`, `worker`
   (`--retry-delay`, `--max-retry-delay`, `--max-attempts`,
-  `--env-retry-delay`, `--max-env-duration`, `--max-env-repeat`).
+  `--env-retry-delay`, `--max-env-duration`, `--max-env-repeat`, `--medic`
+  and its `--medic-*` flags — see "The medic" above), and the standalone
+  `medic` command for the same pass as an independently-scheduled process.
 - **JSON-RPC** (runstatus server): `queue.status`, `queue.kick`, `queue.park`,
   `queue.resume`, `queue.emergency`, `queue.override`, `queue.reject` with
   params `{id, actor, reason, project?}` — the portal-UI surface.
@@ -413,3 +504,11 @@ byte-completeness (including control-state survival), disjoint auto-merge,
 conflict resolution via an injected resolver runner (no LLM in automated
 tests), conflict retention without a resolver, and concurrent workers +
 operator traffic under `-race`.
+The medic (`medic_test.go`) is covered separately: exactly-once dispatch on
+a stalled `needs_conflict_input` candidate (real conflicting repo, fake
+resolver command), a successful retry after dispatch actually landing,
+wall-clock-deadline vs dispatch-count exhaustion producing the distinct
+`budget-exhausted` vs `resolver-exhausted`/`repairer-exhausted` codes,
+`needs_human`/`needs_input` immunity, `resume`/`override` resetting the
+medic budget, and a simulated worker restart (two independent `Store`
+values against the same directory) never double-dispatching.

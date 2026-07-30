@@ -162,7 +162,10 @@ func (s Store) Park(op Op) (Candidate, error) {
 
 // Resume returns a parked candidate to the queue. The attempt budget is reset:
 // a human resuming a candidate is asserting the underlying cause was repaired,
-// and the prior count stays in evidence.
+// and the prior count stays in evidence. The medic's own bounded
+// productive-retry budget (MedicDispatches/MedicFirstDispatchAt — see
+// medic.go) is reset for the same reason: a human declaring the cause fixed
+// gets the medic a fresh budget too, not a mid-exhaustion one.
 func (s Store) Resume(op Op) (Candidate, error) {
 	return s.operate(op, "resume", func(_ *State, c *Candidate) error {
 		if !parked(c.phase()) && c.phase() != RetryWait {
@@ -178,6 +181,7 @@ func (s Store) Resume(op Op) (Candidate, error) {
 		c.ReasonCode, c.NeedsHumanEvidenceRef = "", ""
 		c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
 		c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
+		resetMedicBudget(c)
 		return nil
 	})
 }
@@ -228,6 +232,7 @@ func (s Store) Override(op Op) (Candidate, error) {
 			// against an unrelated later failure.
 			c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
 			c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
+			resetMedicBudget(c)
 		}
 		// Override remains the explicit human emergency/waiver path. It is
 		// distinct from a normal steward approval and can release its hold.

@@ -21,7 +21,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueImportCapsuleSourceCmd(), queueCapsulePromotionExecutorCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueGateRunCmd(), queueMigrateCmd(), queueSweepCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueSubmitExternalCmd(), queueAdmissionServeCmd(), queueImportCapsuleSourceCmd(), queueCapsulePromotionExecutorCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueGateRunCmd(), queueMigrateCmd(), queueSweepCmd(), queueMedicCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -156,6 +156,53 @@ func queueSweepCmd() *cobra.Command {
 	cmd.Flags().StringVar(&reason, "reason", "", "override the per-entry sweep reason recorded in evidence for --apply")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", queue.DefaultSweepStaleAfter, "how long a parked candidate sits untouched before it is classified stale")
 	cmd.Flags().BoolVar(&apply, "apply", false, "execute the plan's proposed actions (reject superseded candidates); without this flag the sweep only reports the plan")
+	return cmd
+}
+
+// queueMedicCmd runs the merge-queue medic (P1.7 part 2) standalone: retry
+// productively on stalled needs_conflict_input candidates (dispatch the
+// resolver again) and repairer-eligible repeated-gate-failure retry_wait
+// candidates (kick their backoff early), escalating honestly to
+// needs_human on exhaustion. It never touches needs_input or needs_human,
+// never calls `queue override`, and never skips a test — see
+// queue.MedicDeps's doc and docs/architecture/merge-queue.md. `queue worker
+// --medic` runs the identical pass once per worker cycle instead of as a
+// separate process; this standalone form exists for operators who run the
+// worker without --medic, or who want the medic on its own schedule.
+func queueMedicCmd() *cobra.Command {
+	var project, queueRoot, medicID string
+	var maxDispatches, gateFailureThreshold int
+	var deadline time.Duration
+	var repairerConfigured, once bool
+	cmd := &cobra.Command{Use: "medic", Short: "Retry productively on stalled needs_conflict_input / repeated-gate-failure candidates via existing verbs; escalate honestly to needs_human on exhaustion", RunE: func(cmd *cobra.Command, _ []string) error {
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: queueWorkerLockWait}
+		deps := queue.MedicDeps{MedicID: medicID, MaxDispatches: maxDispatches, Deadline: deadline, RepairerConfigured: repairerConfigured, GateFailureThreshold: gateFailureThreshold}
+		for {
+			result, err := store.MedicRunOnce(deps)
+			if err != nil {
+				return err
+			}
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+				return err
+			}
+			if once {
+				return nil
+			}
+			select {
+			case <-cmd.Context().Done():
+				return cmd.Context().Err()
+			case <-time.After(time.Second):
+			}
+		}
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
+	cmd.Flags().StringVar(&medicID, "medic-id", "", "durable medic identity recorded in evidence and needs_human parked_by (default queue-medic)")
+	cmd.Flags().IntVar(&maxDispatches, "max-dispatches", queue.DefaultMedicMaxDispatches, "productive retries (resolver dispatch / gate kick) per candidate before escalating to needs_human")
+	cmd.Flags().DurationVar(&deadline, "deadline", queue.DefaultMedicDeadline, "wall-clock bound since a candidate's first medic touch before escalating to needs_human, independent of the dispatch count")
+	cmd.Flags().BoolVar(&repairerConfigured, "repairer-configured", false, "set when the worker processing this queue has a --repair command configured, so the medic will accelerate repeated-gate-failure retry_wait candidates")
+	cmd.Flags().IntVar(&gateFailureThreshold, "gate-failure-threshold", queue.DefaultMedicGateFailureThreshold, "consecutive gate-failed attempts before a retry_wait candidate is medic-actionable")
+	cmd.Flags().BoolVar(&once, "once", false, "perform exactly one medic pass instead of looping")
 	return cmd
 }
 
@@ -374,6 +421,17 @@ func queueSummaryLine(s queue.StatusSummary) string {
 		sort.Strings(codes)
 		line += " reason_codes[" + strings.Join(codes, " ") + "]"
 	}
+	// The medic's own telemetry (P1.7 part 2): "what did the medic do last,
+	// and how often" — dispatch_resolver / kick_gate_retry / escalate:<reason>
+	// — alongside the reason-code roll-up it feeds into on exhaustion.
+	if len(s.MedicActionCounts) > 0 {
+		actions := make([]string, 0, len(s.MedicActionCounts))
+		for verb, n := range s.MedicActionCounts {
+			actions = append(actions, fmt.Sprintf("%s=%d", verb, n))
+		}
+		sort.Strings(actions)
+		line += " medic_actions[" + strings.Join(actions, " ") + "]"
+	}
 	return line
 }
 
@@ -386,6 +444,9 @@ func queueWorkerCmd() *cobra.Command {
 	var concurrency, capacity int
 	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration, gateTimeout time.Duration
 	var maxAttempts, maxEnvRepeat int
+	var medicEnabled bool
+	var medicMaxDispatches, medicGateFailureThreshold int
+	var medicDeadline time.Duration
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
 		if strings.TrimSpace(gate) != "" && strings.TrimSpace(executorName) != "" {
 			return fmt.Errorf("queue worker: --gate and --executor are mutually exclusive")
@@ -428,19 +489,23 @@ func queueWorkerCmd() *cobra.Command {
 		if n < 1 {
 			n = 1
 		}
-		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}
-		if n > 1 {
-			// n goroutines in this one process share the same durable
-			// state.json and its file lock. That contention is brief (the
-			// lock is held only for the short claim/update, never across a
-			// gate run — see the queue package doc), but with the default
-			// zero LockWait any two goroutines racing that file lock at the
-			// same instant fail each other outright with ErrBusy instead of
-			// the brief wait a real conflict deserves.
-			store.LockWait = 2 * time.Second
+		store := queueWorkerStore(project, queueRoot)
+		// The medic (P1.7 part 2) runs at most once per outer worker cycle,
+		// from the base worker only (see below), never from every
+		// concurrent goroutine under --concurrency: its scan is idempotent
+		// either way (MedicRunOnce's lock-protected read-mutate-write means
+		// a redundant concurrent pass just finds nothing left to act on),
+		// but there is no reason to pay for N-1 wasted scans every tick.
+		var medic *queue.MedicDeps
+		if medicEnabled {
+			medic = &queue.MedicDeps{
+				MedicID: first(workerID, "queue-worker"), MaxDispatches: medicMaxDispatches,
+				Deadline: medicDeadline, RepairerConfigured: strings.TrimSpace(repair) != "",
+				GateFailureThreshold: medicGateFailureThreshold,
+			}
 		}
 		if n == 1 {
-			if err := runQueueWorkerLoop(cmd.Context(), store, deps, once); err != nil {
+			if err := runQueueWorkerLoop(cmd.Context(), store, deps, once, medic); err != nil {
 				return err
 			}
 		} else {
@@ -455,11 +520,15 @@ func queueWorkerCmd() *cobra.Command {
 			for i := 1; i <= n; i++ {
 				workerDeps := deps
 				workerDeps.WorkerID = fmt.Sprintf("%s-%d", base, i)
+				workerMedic := medic
+				if i != 1 {
+					workerMedic = nil
+				}
 				wg.Add(1)
-				go func(d queue.ProcessDeps) {
+				go func(d queue.ProcessDeps, m *queue.MedicDeps) {
 					defer wg.Done()
-					errs <- runQueueWorkerLoop(cmd.Context(), store, d, once)
-				}(workerDeps)
+					errs <- runQueueWorkerLoop(cmd.Context(), store, d, once, m)
+				}(workerDeps, workerMedic)
 			}
 			wg.Wait()
 			close(errs)
@@ -504,20 +573,39 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&envRetryDelay, "env-retry-delay", queue.DefaultEnvRetryDelay, "fixed backoff before retrying an environmental failure (fetch/lock/workspace-create); does not consume the attempt budget")
 	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_human")
 	cmd.Flags().IntVar(&maxEnvRepeat, "max-env-repeat", queue.DefaultMaxEnvRepeat, "consecutive byte-identical environmental failure messages before parking as needs_human, regardless of --max-env-duration; a changed message resets the count")
+	cmd.Flags().BoolVar(&medicEnabled, "medic", false, "run the merge-queue medic (P1.7 part 2) once per worker cycle: retry stalled needs_conflict_input and repeated-gate-failure candidates through existing verbs (dispatch the resolver again / kick the backoff), escalating honestly to needs_human on exhaustion; see docs/architecture/merge-queue.md")
+	cmd.Flags().IntVar(&medicMaxDispatches, "medic-max-dispatches", queue.DefaultMedicMaxDispatches, "medic: productive retries per candidate before escalating to needs_human")
+	cmd.Flags().DurationVar(&medicDeadline, "medic-deadline", queue.DefaultMedicDeadline, "medic: wall-clock bound since a candidate's first medic touch before escalating to needs_human")
+	cmd.Flags().IntVar(&medicGateFailureThreshold, "medic-gate-failure-threshold", queue.DefaultMedicGateFailureThreshold, "medic: consecutive gate-failed attempts before a retry_wait candidate is medic-actionable (only when --repair is also set)")
 	return cmd
 }
 
+const queueWorkerLockWait = 2 * time.Second
+
+func queueWorkerStore(project, queueRoot string) queue.Store {
+	return queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: queueWorkerLockWait}
+}
+
 // runQueueWorkerLoop drives one worker's claim/prepare/finalize loop to
-// completion (--once: exactly one step) or until ctx is cancelled. It never
-// prints; the caller decides when and how often to report state, so running
-// several of these concurrently under --concurrency does not interleave or
-// duplicate output.
-func runQueueWorkerLoop(ctx context.Context, store queue.Store, deps queue.ProcessDeps, once bool) error {
+// completion (--once: exactly one step, plus exactly one medic pass when
+// medic is non-nil) or until ctx is cancelled. It never prints; the caller
+// decides when and how often to report state, so running several of these
+// concurrently under --concurrency does not interleave or duplicate output.
+// medic, when non-nil, runs one queue.Store.MedicRunOnce pass every outer
+// iteration — the "medic loop in the queue worker" this item asks for; nil
+// disables it entirely (the default, and every existing caller's behavior
+// before this item).
+func runQueueWorkerLoop(ctx context.Context, store queue.Store, deps queue.ProcessDeps, once bool, medic *queue.MedicDeps) error {
 	worker := queue.Worker{Store: store, Deps: deps}
 	for {
 		progressed, err := worker.RunOnce(ctx)
 		if err != nil {
 			return err
+		}
+		if medic != nil {
+			if _, err := store.MedicRunOnce(*medic); err != nil {
+				return err
+			}
 		}
 		if once {
 			return nil

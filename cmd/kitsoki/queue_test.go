@@ -289,7 +289,7 @@ func TestRunQueueWorkerLoopOnceProcessesExactlyOneStep(t *testing.T) {
 		}},
 		Gate: fakeCLIGate{}, GateVersion: "test/v1",
 	}
-	require.NoError(t, runQueueWorkerLoop(context.Background(), store, deps, true))
+	require.NoError(t, runQueueWorkerLoop(context.Background(), store, deps, true, nil))
 
 	state, err := store.List()
 	require.NoError(t, err)
@@ -330,7 +330,7 @@ func TestQueueWorkerConcurrencyDrainsMultipleCandidatesInOnePass(t *testing.T) {
 		wg.Add(1)
 		go func(d queue.ProcessDeps) {
 			defer wg.Done()
-			errs <- runQueueWorkerLoop(context.Background(), store, d, true)
+			errs <- runQueueWorkerLoop(context.Background(), store, d, true, nil)
 		}(workerDeps)
 	}
 	wg.Wait()
@@ -420,6 +420,103 @@ func TestQueueSweepCmdDryRunReportsWithoutMutatingAndApplyRejectsSuperseded(t *t
 	require.Equal(t, queue.Rejected, byID[superseded.ID].Phase)
 	require.Contains(t, byID[superseded.ID].EjectionReason, "identical commit")
 	require.Equal(t, queue.NeedsInput, byID[other.ID].Phase, "a merely-parked, non-superseded candidate must never be auto-rejected")
+}
+
+// TestQueueWorkerMedicFlagDispatchesStalledConflictCandidate pins the
+// worker-loop wiring for P1.7 part 2: passing a non-nil medic to
+// runQueueWorkerLoop (what queueWorkerCmd's RunE does when --medic is set)
+// actually runs one queue.Store.MedicRunOnce pass per outer iteration, even
+// on a --once run where the ordinary claim/finalize step has nothing to do
+// (a needs_conflict_input candidate is never claimable). The candidate is
+// seeded directly onto state.json — every field on queue.State/Candidate is
+// exported for exactly this kind of durable-record fixture — so this test
+// never has to reconstruct a real git conflict just to exercise the CLI
+// wiring (internal/capsule/queue's own tests already cover the resolver
+// dispatch semantics end to end).
+func TestQueueWorkerMedicFlagDispatchesStalledConflictCandidate(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(project, ".capsules", "queue")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	state := queue.State{Schema: queue.Schema, Candidates: []queue.Candidate{{
+		ID: "queue-medic-cli-test", ProjectID: "p", TargetRef: "main", TargetPolicy: queue.WaveAutoPolicy,
+		Sequence: 1, Position: 1, Branch: "agent/conflict", SHA: strings.Repeat("c", 40),
+		Admission: queue.ReceiptAdmission, ReceiptID: "sha256:receipt",
+		Status: queue.NeedsConflictInput, Phase: queue.NeedsConflictInput,
+		ConflictContinuation: "cont-1",
+	}}}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600))
+
+	store := queueWorkerStore(project, "")
+	deps := queue.ProcessDeps{Integration: fakeCLIIntegration{}, Gate: fakeCLIGate{}}
+	medic := &queue.MedicDeps{MedicID: "cli-medic", MaxDispatches: 3, Deadline: time.Hour}
+	require.NoError(t, runQueueWorkerLoop(context.Background(), store, deps, true, medic))
+
+	got, err := store.Get("queue-medic-cli-test")
+	require.NoError(t, err)
+	require.Equal(t, queue.Queued, got.Phase, "the medic pass inside the worker loop must have dispatched the stalled conflict candidate")
+	require.Equal(t, 1, got.MedicDispatches)
+	require.Equal(t, "cli-medic", got.MedicLastBy)
+}
+
+// TestQueueWorkerLoopWithNilMedicNeverTouchesConflictCandidate is the
+// control: the existing (--medic unset) behavior must be exactly preserved
+// — a needs_conflict_input candidate sits untouched, as it always has.
+func TestQueueWorkerLoopWithNilMedicNeverTouchesConflictCandidate(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(project, ".capsules", "queue")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	state := queue.State{Schema: queue.Schema, Candidates: []queue.Candidate{{
+		ID: "queue-no-medic-cli-test", ProjectID: "p", TargetRef: "main", TargetPolicy: queue.WaveAutoPolicy,
+		Sequence: 1, Position: 1, Branch: "agent/conflict", SHA: strings.Repeat("e", 40),
+		Admission: queue.ReceiptAdmission, ReceiptID: "sha256:receipt",
+		Status: queue.NeedsConflictInput, Phase: queue.NeedsConflictInput,
+		ConflictContinuation: "cont-1",
+	}}}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600))
+
+	store := queueWorkerStore(project, "")
+	deps := queue.ProcessDeps{Integration: fakeCLIIntegration{}, Gate: fakeCLIGate{}}
+	require.NoError(t, runQueueWorkerLoop(context.Background(), store, deps, true, nil))
+
+	got, err := store.Get("queue-no-medic-cli-test")
+	require.NoError(t, err)
+	require.Equal(t, queue.NeedsConflictInput, got.Phase)
+	require.Zero(t, got.MedicDispatches)
+}
+
+// TestQueueMedicCmdOnceDispatchesConflictCandidate exercises the standalone
+// `kitsoki queue medic` command end to end.
+func TestQueueMedicCmdOnceDispatchesConflictCandidate(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(project, ".capsules", "queue")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	state := queue.State{Schema: queue.Schema, Candidates: []queue.Candidate{{
+		ID: "queue-medic-standalone-test", ProjectID: "p", TargetRef: "main", TargetPolicy: queue.WaveAutoPolicy,
+		Sequence: 1, Position: 1, Branch: "agent/conflict", SHA: strings.Repeat("f", 40),
+		Admission: queue.ReceiptAdmission, ReceiptID: "sha256:receipt",
+		Status: queue.NeedsConflictInput, Phase: queue.NeedsConflictInput,
+		ConflictContinuation: "cont-1",
+	}}}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600))
+
+	cmd := queueMedicCmd()
+	cmd.SetArgs([]string{"--project", project, "--once"})
+	var out strings.Builder
+	cmd.SetOut(&out)
+	require.NoError(t, cmd.Execute())
+	require.Contains(t, out.String(), "dispatch_resolver")
+
+	store := queue.Store{ProjectRoot: project}
+	got, err := store.Get("queue-medic-standalone-test")
+	require.NoError(t, err)
+	require.Equal(t, queue.Queued, got.Phase)
+	require.Equal(t, 1, got.MedicDispatches)
 }
 
 func testCLIReceipt(t *testing.T, sha string) receipt.Receipt {

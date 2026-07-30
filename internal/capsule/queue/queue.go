@@ -177,6 +177,26 @@ type Candidate struct {
 	// parks the candidate well before MaxEnvDuration's wall-clock bound would.
 	EnvFailureSignature string `json:"env_failure_signature,omitempty"`
 	EnvRepeatStreak     int    `json:"env_repeat_streak,omitempty"`
+	// Medic bookkeeping (P1.7 part 2 — see medic.go's MedicDeps doc). A
+	// bounded, medic-owned productive-retry budget distinct from the
+	// ordinary Attempt/RetryAt machinery: MedicDispatches and
+	// MedicFirstDispatchAt track how many times, and since when, the medic
+	// has productively retried this exact candidate (dispatching the
+	// conflict resolver on needs_conflict_input, or kicking a repeated
+	// gate failure early on retry_wait) before it must escalate to
+	// needs_human instead of continuing forever. MedicKickedAttempt records
+	// the last Attempt value the medic already kicked, so a single
+	// retry_wait streak is never kicked more than once. MedicLastAction/At/By
+	// are the "what did the medic do last, and why" telemetry `queue status`
+	// renders. Resume/Override reset all of these — a human declaring the
+	// underlying cause fixed gets the medic a fresh budget too, exactly like
+	// the ordinary attempt budget.
+	MedicDispatches      int       `json:"medic_dispatches,omitempty"`
+	MedicFirstDispatchAt time.Time `json:"medic_first_dispatch_at,omitempty"`
+	MedicKickedAttempt   int       `json:"medic_kicked_attempt,omitempty"`
+	MedicLastAction      string    `json:"medic_last_action,omitempty"`
+	MedicLastAt          time.Time `json:"medic_last_at,omitempty"`
+	MedicLastBy          string    `json:"medic_last_by,omitempty"`
 }
 
 // Approval is the steward decision bound to the exact prepared state.
@@ -1110,6 +1130,14 @@ func StatusLine(c Candidate, at time.Time) string {
 	// exists), so it is rendered explicitly rather than left to coincide.
 	if c.NeedsHumanEvidenceRef != "" {
 		line += " needs_human_evidence=" + c.NeedsHumanEvidenceRef
+	}
+	// The medic's last action is durable, per-candidate telemetry (P1.7 part
+	// 2): an operator eyeballing `queue status` should see what automation
+	// already tried on a stalled candidate without opening --json or
+	// grepping evidence. Appended last, same append-never-insert rule as
+	// reason_code/needs_human_evidence above.
+	if c.MedicLastAction != "" {
+		line += fmt.Sprintf(" medic_last=%s@%s medic_dispatches=%d", c.MedicLastAction, c.MedicLastAt.Format(time.RFC3339), c.MedicDispatches)
 	}
 	return line
 }
