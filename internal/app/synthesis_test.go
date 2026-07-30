@@ -63,7 +63,7 @@ func TestDevStoryKitRootHostsCoverExpandedStory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dev-story: %v", err)
 	}
-	story, parseErrs := parseAndMerge(bytes, storyPath, filepath.Dir(storyPath))
+	story, parseErrs := parseAndMerge(bytes, storyPath, filepath.Dir(storyPath), nil)
 	if len(parseErrs) != 0 {
 		t.Fatalf("parse dev-story: %v", parseErrs)
 	}

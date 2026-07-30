@@ -255,7 +255,10 @@ func applyApplicationPackageSelection(def *AppDef, selection *componentpackage.S
 			agent.Toolbox = qualifySelectedPackageRef(owner, agent.Toolbox, selection.Toolboxes)
 			agent.Provider = qualifySelectedPackageRef(owner, agent.Provider, selection.Providers)
 		}
-		temp := &AppDef{Agents: selectedAgents, Toolboxes: def.Toolboxes}
+		// Propagate the parent def's envLookup so a package-selected agent's
+		// cwd: expansion sees the same per-load override the importer's own
+		// agents: block does (see AppDef.envLookup).
+		temp := &AppDef{Agents: selectedAgents, Toolboxes: def.Toolboxes, envLookup: def.envLookup}
 		if agentErrs := resolveAgentDecls(temp, file, packageDir); len(agentErrs) > 0 {
 			for _, err := range agentErrs {
 				add(err.Error())

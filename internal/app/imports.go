@@ -412,7 +412,11 @@ func loadImportedChild(path string, parents []string, resolver ImportResolver) (
 		return nil, []error{&ValidationError{File: path, Message: fmt.Sprintf("read: %v", err)}}
 	}
 	baseDir := filepath.Dir(path)
-	def, mergeErrs := parseAndMerge(b, path, baseDir)
+	// Imported children don't inherit the importer's envLookup override
+	// (out of scope for the LoadFromFiles de-globalisation slice — an
+	// imported child's own cwd: expansion still reads the real process
+	// environment; only the root/entry manifest's env reads are overridden).
+	def, mergeErrs := parseAndMerge(b, path, baseDir, nil)
 	if len(mergeErrs) > 0 {
 		return nil, mergeErrs
 	}

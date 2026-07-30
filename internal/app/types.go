@@ -415,6 +415,21 @@ type AppDef struct {
 	// alongside RegisterBuiltins, before the allow-list check runs (def.Hosts
 	// already includes every synthetic name — see resolveAllInterfaces).
 	StarlarkHostBindings map[string]string `yaml:"-"`
+
+	// envLookup replaces os.LookupEnv for `cwd:` expansion (agents: and
+	// meta_modes:, see expandMetaCwdWith) during THIS load only. It exists so
+	// app.LoadFromFiles can point ${KITSOKI_APP_DIR} at its own temp tree
+	// without mutating a process-global (os.Setenv) that would race two
+	// concurrently-loading revisions against each other. Load-time plumbing
+	// only, exactly like BaseDir — never authored, never serialized (no yaml
+	// tag, unexported so goyaml's reflection-based (un)marshal never touches
+	// it either way).
+	//
+	// MUST stay nil unless a caller explicitly injects one via LoadOptions:
+	// internal/app/workbench_test.go and internal/app/kit_synthesis_test.go
+	// compare AppDefs with reflect.DeepEqual, and two non-nil func values are
+	// never DeepEqual — a stray non-nil default here would break both.
+	envLookup func(name string) (string, bool)
 }
 
 // PromptsConfig declares a story's prompt search roots for prompt extension.

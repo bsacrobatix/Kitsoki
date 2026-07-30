@@ -85,7 +85,12 @@ func resolveProviders(def *AppDef, file string) []error {
 			continue
 		}
 		for k, v := range decl.Env {
-			expanded, missing := expandEnvVar(v)
+			// def.envLookup, when non-nil, is a per-load override (see
+			// AppDef.envLookup) that keeps a materialised revision closure's
+			// ${KITSOKI_APP_DIR} reads scoped to its own temp tree instead of
+			// the process-global env var — same rationale as
+			// resolveAgentPlugins' identical substitution.
+			expanded, missing := expandEnvVar(v, def.envLookup)
 			if missing != "" {
 				addErr(fmt.Sprintf("providers.%s: env var %s referenced in env.%s not set", name, missing, k))
 				continue

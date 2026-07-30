@@ -113,21 +113,7 @@ func LoadWithOverrides(path string, ifaceOverrides map[string]string) (*AppDef, 
 // child loads so an embedded base story can itself import siblings via
 // `@kitsoki/<name>`.
 func LoadWithResolver(path string, ifaceOverrides map[string]string, resolver ImportResolver) (*AppDef, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("load %s: %w", path, err)
-	}
-
-	// Parse just enough to find the include: list before full validation.
-	baseDir := filepath.Dir(path)
-	if abs, absErr := filepath.Abs(baseDir); absErr == nil {
-		baseDir = abs
-	}
-	merged, mergeErrs := parseAndMerge(b, path, baseDir)
-	if len(mergeErrs) > 0 {
-		return nil, errors.Join(mergeErrs...)
-	}
-	return runLoadPipeline(merged, path, baseDir, ifaceOverrides, resolver)
+	return LoadWithOptions(path, LoadOptions{IfaceOverrides: ifaceOverrides, Resolver: resolver})
 }
 
 // runLoadPipeline takes a parsed (or in-memory synthesized) AppDef and runs the
@@ -143,12 +129,23 @@ func LoadWithResolver(path string, ifaceOverrides map[string]string, resolver Im
 // import resolution and is stashed on AppDef.BaseDir; path is the canonical key
 // seeded into LoadedManifests and used in error messages. A synthesized root
 // passes a synthetic path (no file on disk) with the repo root as baseDir.
-func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[string]string, resolver ImportResolver) (*AppDef, error) {
+//
+// opts carries the trailing knobs that used to be positional parameters
+// (IfaceOverrides, Resolver) plus EnvLookup — see [LoadOptions]. Callers that
+// predate LoadOptions (SynthesizeRoot, SynthesizeKit) pass a LoadOptions with
+// only Resolver set; their EnvLookup is the zero value (nil), identical to
+// pre-LoadOptions behaviour.
+func runLoadPipeline(merged *AppDef, path, baseDir string, opts LoadOptions) (*AppDef, error) {
 	// Stash the loader's base directory so downstream consumers
 	// (notably internal/render.AppRenderer, which roots its template
 	// loader at <BaseDir>/views/) don't have to recompute it from
 	// the manifest path. See docs/stories/story-style.md.
 	merged.BaseDir = baseDir
+	// Stash the per-load env override (see AppDef.envLookup) next to BaseDir:
+	// both are load-time-only plumbing set once here and read by downstream
+	// passes for the remainder of this call. Most callers leave this nil,
+	// preserving today's os.LookupEnv-backed cwd: expansion exactly.
+	merged.envLookup = opts.EnvLookup
 
 	// Resolve imports recursively, folding each child into merged.
 	canonical := canonicalPath(path)
@@ -157,10 +154,10 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 	// metamode controller reads this list to auto-watch every file the
 	// loader actually touched.
 	merged.LoadedManifests = appendUnique(merged.LoadedManifests, canonical)
-	if importErrs := resolveImports(merged, path, baseDir, []string{canonical}, resolver); len(importErrs) > 0 {
+	if importErrs := resolveImports(merged, path, baseDir, []string{canonical}, opts.Resolver); len(importErrs) > 0 {
 		return nil, errors.Join(importErrs...)
 	}
-	if packageErrs := resolveApplicationPackages(merged, path, baseDir, resolver); len(packageErrs) > 0 {
+	if packageErrs := resolveApplicationPackages(merged, path, baseDir, opts.Resolver); len(packageErrs) > 0 {
 		return nil, errors.Join(packageErrs...)
 	}
 
@@ -203,7 +200,7 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 	// production parent's host_bindings: block would. Runs BEFORE
 	// resolveAllInterfaces so the new binding propagates the same way
 	// as the original `default:`.
-	for name, binding := range ifaceOverrides {
+	for name, binding := range opts.IfaceOverrides {
 		if iface, ok := merged.HostInterfaces[name]; ok && iface != nil {
 			iface.Default = binding
 		}
@@ -356,8 +353,19 @@ func rewriteExitsInStates(states map[string]*State) {
 
 // parseAndMerge parses the main YAML file, resolves include: patterns, and
 // merges all included files into a single AppDef.
-func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
-	var def AppDef
+//
+// envLookup is threaded straight onto def (and each included file's own
+// AppDef) BEFORE their own resolveAgentDecls call below, so a root or
+// included agents: block's cwd: expansion sees it too — not just the
+// downstream passes that run inside runLoadPipeline after this function
+// returns. It's the same value LoadWithOptions later also stamps onto the
+// finished, folded AppDef (see runLoadPipeline); setting it here as well
+// is what makes it visible to THIS pass's own env reads. goyaml's
+// reflection-based unmarshal only ever touches exported struct fields, so
+// pre-setting the unexported envLookup field before UnmarshalWithOptions
+// survives the unmarshal untouched.
+func parseAndMerge(b []byte, file, baseDir string, envLookup func(name string) (string, bool)) (*AppDef, []error) {
+	def := AppDef{envLookup: envLookup}
 	if err := goyaml.UnmarshalWithOptions(b, &def, goyaml.Strict()); err != nil {
 		var yamlErr *goyaml.SyntaxError
 		ve := &ValidationError{File: file, Message: err.Error()}
@@ -398,7 +406,7 @@ func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
 				errs = append(errs, &ValidationError{File: matchPath, Message: fmt.Sprintf("include read: %v", err)})
 				continue
 			}
-			var inclDef AppDef
+			inclDef := AppDef{envLookup: envLookup}
 			if err := goyaml.UnmarshalWithOptions(inclBytes, &inclDef, goyaml.Strict()); err != nil {
 				errs = append(errs, &ValidationError{File: matchPath, Message: err.Error()})
 				continue
@@ -648,7 +656,7 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 
 		// Env-expand cwd.
 		if decl.Cwd != "" {
-			expanded, missing := expandMetaCwd(decl.Cwd)
+			expanded, missing := expandMetaCwdWith(decl.Cwd, def.envLookup)
 			if missing != "" {
 				addErr(fmt.Sprintf("agent %q: cwd %q references unset env var %s", name, decl.Cwd, missing))
 				continue
@@ -3277,7 +3285,7 @@ func validateMetaModes(file string, def *AppDef, errs *[]error) {
 			}
 		}
 		if m.Cwd != "" {
-			expanded, expErr := expandMetaCwd(m.Cwd)
+			expanded, expErr := expandMetaCwdWith(m.Cwd, def.envLookup)
 			if expErr != "" {
 				addErr(fmt.Sprintf("meta_mode %q: cwd %q references unset env var %s", name, m.Cwd, expErr))
 				continue
@@ -3597,18 +3605,31 @@ func checkStateTargetsAgainstWrappers(statePath string, s *State, wrappers map[s
 	}
 }
 
-// expandMetaCwd resolves `$VAR` / `${VAR}` tokens in s against os.Environ.
+// expandMetaCwdWith resolves `$VAR` / `${VAR}` tokens in s against lookup — a
+// name -> (value, ok) resolver shaped exactly like os.LookupEnv. Passing a
+// nil lookup preserves today's behaviour byte-for-byte: env vars come from
+// the process environment via os.LookupEnv, matching os.ExpandEnv. A non-nil
+// lookup (see AppDef.envLookup) lets a caller — currently only
+// app.LoadFromFiles — override where `${KITSOKI_APP_DIR}` and friends
+// resolve for THIS load only, without mutating the process environment.
+//
 // Returns (expanded, "") on success, or ("", varName) when any referenced
 // var is unset. Bare `$$` literals are passed through.
-func expandMetaCwd(s string) (string, string) {
+func expandMetaCwdWith(s string, lookup func(name string) (string, bool)) (string, string) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	matches := metaEnvVarRE.FindAllStringSubmatchIndex(s, -1)
 	for _, m := range matches {
 		name := s[m[2]:m[3]]
-		if _, ok := os.LookupEnv(name); !ok {
+		if _, ok := lookup(name); !ok {
 			return "", name
 		}
 	}
-	return os.ExpandEnv(s), ""
+	return os.Expand(s, func(k string) string {
+		v, _ := lookup(k)
+		return v
+	}), ""
 }
 
 // validateRouting walks every Intent (global + per-state) and every Slot

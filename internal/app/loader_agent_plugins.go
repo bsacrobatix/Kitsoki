@@ -76,18 +76,25 @@ func resolveAgentPlugins(def *AppDef, file string) []error {
 			addErr(fmt.Sprintf("agent_plugins.%s: builtin.local_llm plugin requires model: or endpoint:", name))
 			continue
 		}
-		// Interpolate ${VAR} in Env map.
+		// Interpolate ${VAR} in Env map. def.envLookup, when non-nil, is a
+		// per-load override (see AppDef.envLookup's doc comment) that a
+		// caller materialising a definition closure (app.LoadFromFiles) uses
+		// to point ${KITSOKI_APP_DIR} at its own temp tree WITHOUT mutating
+		// the process-global env var — otherwise this read, unlike cwd:'s
+		// expandMetaCwdWith, would still resolve against whichever session
+		// most recently called os.Setenv(KITSOKI_APP_DIR, ...), corrupting a
+		// concurrent revision compile.
 		for k, v := range decl.Env {
-			expanded, missing := expandEnvVar(v)
+			expanded, missing := expandEnvVar(v, def.envLookup)
 			if missing != "" {
 				addErr(fmt.Sprintf("agent_plugins.%s: env var %s referenced in env.%s not set", name, missing, k))
 				continue
 			}
 			decl.Env[k] = expanded
 		}
-		// Interpolate ${VAR} in Headers map.
+		// Interpolate ${VAR} in Headers map — same envLookup rationale.
 		for k, v := range decl.Headers {
-			expanded, missing := expandEnvVar(v)
+			expanded, missing := expandEnvVar(v, def.envLookup)
 			if missing != "" {
 				addErr(fmt.Sprintf("agent_plugins.%s: env var %s referenced in headers.%s not set", name, missing, k))
 				continue
@@ -108,7 +115,15 @@ func resolveAgentPlugins(def *AppDef, file string) []error {
 	return nil
 }
 
-// expandEnvVar performs a single-pass ${VAR} substitution in s.
+// expandEnvVar performs a single-pass ${VAR} substitution in s, resolving
+// each VAR against lookup — os.LookupEnv when lookup is nil, so every
+// existing caller (and every existing test) sees identical behaviour.
+// lookup is AppDef.envLookup: non-nil only for a caller materialising a
+// definition closure (app.LoadFromFiles) that needs ${KITSOKI_APP_DIR} to
+// resolve against its own temp tree for THIS load only, without mutating
+// the process-global env var a concurrent load or turn also reads. See
+// expandMetaCwdWith (loader.go), which resolves the same tension for cwd:.
+//
 // Returns (expanded, "") on success.
 // Returns ("", "VAR") when any ${VAR} token references an unset env var.
 //
@@ -117,7 +132,10 @@ func resolveAgentPlugins(def *AppDef, file string) []error {
 // written to the output buffer but the scanner does NOT re-scan it — any ${
 // sequences inside a replacement value pass through verbatim.  This prevents
 // injection attacks and matches the documented ${VAR} substitution contract.
-func expandEnvVar(s string) (expanded, missing string) {
+func expandEnvVar(s string, lookup func(name string) (string, bool)) (expanded, missing string) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	var buf strings.Builder
 	i := 0
 	for i < len(s) {
@@ -143,7 +161,7 @@ func expandEnvVar(s string) (expanded, missing string) {
 		varName := s[i : i+end]
 		i += end + 1 // skip past varName + "}"
 
-		val, ok := os.LookupEnv(varName)
+		val, ok := lookup(varName)
 		if !ok {
 			return "", varName
 		}

@@ -125,7 +125,7 @@ func SynthesizeRootWithResolver(spec *RootSpec, repoRoot string, resolver Import
 	// Run the identical fold pipeline a file-backed Load runs. The synthetic
 	// path has no file on disk; pass a sentinel so error messages read clearly
 	// and LoadedManifests is seeded with a stable canonical key.
-	return runLoadPipeline(def, syntheticRootPath(abs), abs, nil, resolver)
+	return runLoadPipeline(def, syntheticRootPath(abs), abs, LoadOptions{Resolver: resolver})
 }
 
 // BuildRootImporter constructs the UN-folded importer AppDef — a thin importer
@@ -479,7 +479,7 @@ func SynthesizeKitWithResolver(manifest *kit.Def, storyName, alias string, spec 
 	if err != nil {
 		return nil, err
 	}
-	return runLoadPipeline(def, syntheticKitPath(abs, manifest, storyName), abs, nil, resolver)
+	return runLoadPipeline(def, syntheticKitPath(abs, manifest, storyName), abs, LoadOptions{Resolver: resolver})
 }
 
 // applyKitOverrides folds a KitImportSpec's overrides into the synthesized
