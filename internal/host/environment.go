@@ -3,7 +3,12 @@ package host
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"kitsoki/internal/environment"
 )
@@ -51,6 +56,80 @@ func NewEnvironmentHandler(plans environment.PlanInputReader, controller environ
 			return Result{Error: fmt.Sprintf("host.environment: unknown op %q (want plan_inputs, read, submit, poll, or verify)", op)}, nil
 		}
 	}
+}
+
+// NewEnvironmentPlanInputsHandler binds plan-input reads to the repository
+// containing the invoking Story. Request paths are relative to that fixed
+// root: a Story can choose a bundle within its own repository, but cannot
+// redirect the host to another checkout or to the operator's filesystem.
+//
+// This handler deliberately wires only plan_inputs. It grants no provider,
+// remote-execution, process, or credential authority.
+func NewEnvironmentPlanInputsHandler(storyRepoRoot string) Handler {
+	return func(ctx context.Context, args map[string]any) (Result, error) {
+		if op, _ := args["op"].(string); op != "plan_inputs" {
+			return NewEnvironmentHandler(nil, nil)(ctx, args)
+		}
+		loader, err := profileBundleLoaderForRequest(storyRepoRoot, args)
+		if err != nil {
+			outcome := environment.Blocked(environment.ReasonInvalidRequest, "environment plan-input paths must stay within the invoking Story repository", "provide relative profile_root and integrity_manifest paths beneath the Story repository", environment.Evidence{Kind: "environment_plan_inputs", Detail: err.Error()})
+			return Result{Data: planInputsData(environment.PlanInputs{Integrity: outcome}), Error: outcome.Reason.Message}, nil
+		}
+		return NewEnvironmentHandler(loader, nil)(ctx, args)
+	}
+}
+
+func profileBundleLoaderForRequest(storyRepoRoot string, args map[string]any) (environment.ProfileBundleLoader, error) {
+	root, err := filepath.Abs(strings.TrimSpace(storyRepoRoot))
+	if err != nil {
+		return environment.ProfileBundleLoader{}, fmt.Errorf("resolve Story repository root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return environment.ProfileBundleLoader{}, fmt.Errorf("resolve Story repository root symlinks: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return environment.ProfileBundleLoader{}, fmt.Errorf("stat Story repository root: %w", err)
+	}
+	if !info.IsDir() {
+		return environment.ProfileBundleLoader{}, fmt.Errorf("Story repository root is not a directory")
+	}
+	profileRoot, err := environmentPlanRelativePath(root, args, "profile_root")
+	if err != nil {
+		return environment.ProfileBundleLoader{}, err
+	}
+	manifest, err := environmentPlanRelativePath(root, args, "integrity_manifest")
+	if err != nil {
+		return environment.ProfileBundleLoader{}, err
+	}
+	return environment.ProfileBundleLoader{ProfileRoot: profileRoot, DigestFile: manifest, FS: os.DirFS(root)}, nil
+}
+
+func environmentPlanRelativePath(root string, args map[string]any, field string) (string, error) {
+	raw, ok := args[field].(string)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return "", fmt.Errorf("%s is required", field)
+	}
+	raw = strings.TrimSpace(raw)
+	if filepath.IsAbs(raw) || path.IsAbs(filepath.ToSlash(raw)) {
+		return "", fmt.Errorf("%s must be relative", field)
+	}
+	clean := path.Clean(filepath.ToSlash(raw))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || !fs.ValidPath(clean) {
+		return "", fmt.Errorf("%s escapes the Story repository", field)
+	}
+	// os.DirFS rejects lexical traversal but follows symlinks. Reject a resolved
+	// request path that leaves the Story repository before handing it to the
+	// loader. A not-yet-existing path remains a normal loader-level not-found
+	// result rather than a path-validation error.
+	if resolved, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(clean))); err == nil {
+		rel, relErr := filepath.Rel(root, resolved)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return "", fmt.Errorf("%s resolves outside the Story repository", field)
+		}
+	}
+	return clean, nil
 }
 
 func unavailableEnvironmentResult() Result {

@@ -87,6 +87,14 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	reg := host.NewRegistry()
 	host.RegisterBuiltins(reg)
 	host.RegisterStarlarkBindings(reg, def.StarlarkHostBindings)
+	projectRoot := l.ProjectRoot
+	if projectRoot == "" {
+		projectRoot = ProjectRootForStory(path)
+	}
+	// Environment plan inputs are constrained to the Story's repository. The
+	// handler remains read-only; ConfigureHosts may still install an explicitly
+	// configured provider/controller for a deployment session.
+	reg.Replace("host.environment", host.NewEnvironmentPlanInputsHandler(projectRoot))
 	if l.ConfigureHosts != nil {
 		if err := l.ConfigureHosts(reg); err != nil {
 			return ci.Verdict{}, err
@@ -122,10 +130,6 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 		opts = append(opts, orchestrator.WithAgentLaunchPolicy(l.AgentLaunchPolicy))
 	}
 	orch := orchestrator.New(def, m, s, directHarness{}, opts...)
-	projectRoot := l.ProjectRoot
-	if projectRoot == "" {
-		projectRoot = findProjectRoot(path)
-	}
 	// Drive the story THROUGH its rooms to a terminal verdict (not a single
 	// operator turn): a CI/worker run has no human to advance each phase, so the
 	// bugfix loop per-room emit_intent auto-advances and gate self-arcs must
