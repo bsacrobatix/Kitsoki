@@ -1,24 +1,23 @@
 states:
   parameters:
     description: "Collect LinkedIn Jobs keywords without browser activity."
-    relevant_world: [keywords, location, search_url, search_status]
+    relevant_world: [keywords, location, search_status]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "I will construct one base US LinkedIn Jobs URL. No browser action happens until you review it and explicitly confirm."
+          - prose: "I will prepare one US Remote LinkedIn Jobs search. No browser action happens until you review it and explicitly confirm."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords|default:'(not yet chosen)' }}"
-                Location: "United States; Remote filter selected after confirmation"
-                Direct URL: "{{ world.search_url|default:'(created after prepare)' }}"
+                Location: "United States; Remote"
                 Status: "{{ world.search_status }}"
         choices:
           - heading: "Actions"
           - list:
               items:
                 - label: "prepare keywords=…"
-                  hint: "review the direct US URL before navigation and remote selection"
+                  hint: "review the one confirmed US Remote search"
                 - label: "cancel"
                   hint: "end without opening or searching LinkedIn"
                 - label: "look"
@@ -29,7 +28,6 @@ states:
             - set:
                 keywords: "{{ slots.keywords }}"
                 location: "United States; Remote"
-                search_url: "https://www.linkedin.com/jobs/search-results/?keywords={{ urlqueryescape(slots.keywords) }}&geoId=103644278"
                 search_status: "awaiting_confirmation"
                 confirmed: false
                 results_url: ""
@@ -37,6 +35,7 @@ states:
                 prepared_parameters: { keywords: "{{ slots.keywords }}", location: "United States; Remote" }
                 search_result: {}
                 remote_selected: false
+                remote_already_selected: false
                 error_detail: ""
       cancel:
         - target: cancelled
@@ -44,25 +43,24 @@ states:
         - target: .
 
   review:
-    description: "Require explicit confirmation immediately before direct LinkedIn Jobs navigation."
-    relevant_world: [keywords, location, search_url, search_status, confirmed]
+    description: "Require explicit confirmation immediately before the bounded LinkedIn Jobs search."
+    relevant_world: [keywords, location, search_status, confirmed]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "Confirm one direct US LinkedIn Jobs URL navigation. Chrome will show Allow confirmations for navigation and the constrained Remote filter selection; the story will then snapshot the safe current URL."
+          - prose: "Confirm one bounded US Remote LinkedIn Jobs search. Chrome will show one Allow confirmation for the bridge's navigation, Remote selection, and readiness wait."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords }}"
                 Location: "{{ world.location|default:'(any location)' }}"
-                Direct URL: "{{ world.search_url }}"
                 Status: "{{ world.search_status }}"
         choices:
           - heading: "Required decision"
           - list:
               items:
                 - label: "confirm_search"
-                  hint: "navigate once, select Remote once, then verify"
+                  hint: "run the one confirmed US Remote search"
                 - label: "revise"
                   hint: "return without submitting"
                 - label: "cancel"
@@ -85,21 +83,21 @@ states:
         - target: .
 
   searching:
-    description: "Navigate once to the confirmed direct LinkedIn Jobs URL and verify it."
-    relevant_world: [keywords, location, search_url, search_status, results_url, used_parameters, remote_selected, error_detail]
+    description: "Run the one confirmed atomic US Remote search and capture its ready URL."
+    relevant_world: [keywords, location, search_status, results_url, used_parameters, remote_selected, remote_already_selected, error_detail]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to one direct Jobs URL navigation, one constrained Remote selection, and one safe URL snapshot."
+          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to one atomic Jobs search with Remote selected and a ready results URL."
           - kv:
               pairs:
                 Status: "{{ world.search_status }}"
                 Keywords: "{{ world.keywords }}"
                 Location: "{{ world.location|default:'(any location)' }}"
-                Direct URL: "{{ world.search_url }}"
                 Results URL: "{{ world.results_url|default:'(pending)' }}"
                 Remote selected: "{{ world.remote_selected }}"
+                Remote was already selected: "{{ world.remote_already_selected }}"
                 Error: "{{ world.error_detail|default:'(none)' }}"
         choices:
           - heading: "Actions"
@@ -108,7 +106,7 @@ states:
                 - label: "look"
     on_enter:
       - invoke: host.agent.task
-        id: navigate_confirmed_linkedin_jobs_url
+        id: search_confirmed_linkedin_jobs
         once: true
         with:
           agent: linkedin_searcher
@@ -119,33 +117,43 @@ states:
             args:
               keywords: "{{ world.keywords }}"
               location: "{{ world.location }}"
-              search_url: "{{ world.search_url }}"
               confirmation: "{{ world.confirmed }}"
         bind:
           search_result: submitted
-          results_url: submitted.results_url
+          results_url: submitted.finalUrl
           used_parameters: submitted.parameters
-          remote_selected: submitted.remote_selected
+          remote_selected: submitted.remoteSelected
+          remote_already_selected: submitted.alreadySelected
         on_error: failed
-      - when: "world.results_url != ''"
+      - when: "world.results_url != '' && world.remote_selected == true"
         emit_intent: finish
+      - when: "world.results_url != '' && world.remote_selected == false"
+        emit_intent: verification_failed
     on:
       finish:
         - target: complete
           effects:
             - set: { search_status: "complete" }
+      verification_failed:
+        - target: failed
+          effects:
+            - set:
+                search_status: "failed"
+                error_detail: "The atomic bridge result did not prove Remote was selected."
+                results_url: ""
+                used_parameters: {}
       look:
         - target: .
 
   complete:
-    description: "Confirmed LinkedIn Jobs direct URL navigation completed with its URL captured."
+    description: "Confirmed atomic LinkedIn Jobs search completed with its ready URL captured."
     terminal: true
-    relevant_world: [keywords, location, search_status, results_url, used_parameters, remote_selected]
+    relevant_world: [keywords, location, search_status, results_url, used_parameters, remote_selected, remote_already_selected]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The attended LinkedIn Jobs navigation completed. The story captured the requested parameters and verified URL; it did not inspect job details or collect result rows."
+          - prose: "The attended LinkedIn Jobs search completed. The story captured the requested parameters and ready URL; it did not inspect job details or collect result rows."
           - kv:
               pairs:
                 Status: "{{ world.search_status }}"
@@ -153,6 +161,7 @@ states:
                 Location: "{{ world.used_parameters.location|default:world.location }}"
                 Results URL: "{{ world.results_url }}"
                 Remote selected: "{{ world.remote_selected }}"
+                Remote was already selected: "{{ world.remote_already_selected }}"
 
   failed:
     description: "Configured bridge or search operation failed without a retrying side effect."
@@ -164,7 +173,7 @@ states:
           - prose: "No additional browser action will be attempted automatically. Check the local Sassfully bridge configuration, then prepare the search again if you still want to submit it."
           - kv:
               pairs:
-                Error: "{{ world.host_error.message|default:world.last_error|default:'(bridge did not return a result)' }}"
+                Error: "{{ world.error_detail|default:world.host_error.message|default:world.last_error|default:'(bridge did not return a result)' }}"
         choices:
           - heading: "Actions"
           - list:

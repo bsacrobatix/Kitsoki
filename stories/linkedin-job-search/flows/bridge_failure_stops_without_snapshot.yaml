@@ -4,8 +4,8 @@ initial_state: parameters
 host_handlers:
   host.agent.task:
     by_call:
-      navigate_confirmed_linkedin_jobs_url:
-        error: "The visible LinkedIn Remote filter is unavailable"
+      search_confirmed_linkedin_jobs:
+        error: "LinkedIn search readiness did not complete"
 turns:
   - intent:
       name: prepare
@@ -20,4 +20,4 @@ turns:
       results_url: ""
     expect_host_calls:
       - handler: host.agent.task
-        args: { call: "navigate_confirmed_linkedin_jobs_url" }
+        args: { call: "search_confirmed_linkedin_jobs" }

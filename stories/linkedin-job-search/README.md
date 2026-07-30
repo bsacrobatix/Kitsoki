@@ -1,90 +1,59 @@
 # Attended LinkedIn job search
 
-This v0 story deterministically constructs
-`https://www.linkedin.com/jobs/search-results/?keywords=<urlencoded>&geoId=103644278`
-for a base US search, then waits for `confirm_search`. The only browser effects
-are one Chrome-confirmed navigation, one Chrome-confirmed constrained
-`select_remote` action, and one safe snapshot that verifies the Remote filter.
-Completion requires bridge evidence that `remote_selected` is true and that the
-only action sequence was `navigate`, `select_remote`, `snapshot`.
-It does not fill fields, press controls, open job details, apply, message, save,
-follow, paginate, or bulk-scrape.
+After the user supplies keywords and confirms, this Story makes exactly one
+Sassfully bridge call: `linkedin_story.search_jobs`. The bridge owns the bounded
+navigation, Remote selection, and results-readiness wait behind one visible
+Chrome Allow confirmation. The Story records only the ready results URL and
+whether Remote was already selected; it never extracts job rows or opens job
+details.
+
+The atomic bridge request is:
+
+```json
+{"action":"search_jobs","keywords":"<user keywords>","geoId":"103644278","remote":true}
+```
+
+The bridge must return:
+
+```json
+{"finalUrl":"https://www.linkedin.com/jobs/search-results/...","remoteSelected":true,"alreadySelected":false}
+```
+
+`remoteSelected: true` is required before the Story can complete. A false value,
+missing ready URL, or bridge error goes to the visible failed state with no
+automatic retry. The agent cannot fill fields, press controls, open a job,
+apply, message, save, follow, paginate, export, scrape, or enumerate results.
 
 ## Sassfully bridge binding
 
-The story starts the local bridge with this stdio MCP configuration:
+The Story starts the local bridge with the checked-in stdio MCP configuration in
+`app.yaml`. Set `SASSFULLY_LINKEDIN_PAIRING_CODE` only in the process that
+launches Kitsoki. It is an environment interpolation token, never story state,
+source, or a trace payload.
 
-```yaml
-agents.linkedin_searcher.mcp.servers.sassfully_browser:
-  command: node
-  args:
-    - /Users/brad/code/studio-sassfully/.capsules/workspaces/extension-local-test-20260730/packages/feedback-extension/story-bridge/stdio-server.mjs
-    - --pairing-code
-    - ${SASSFULLY_LINKEDIN_PAIRING_CODE}
-```
+The only allowlisted bridge tool is `linkedin_story`; its only Story action is
+`search_jobs`. Do not reintroduce client-side `navigate`, `select_remote`, or
+`snapshot` choreography. Any new atomic contract must be added deliberately to
+the schema and deterministic test lane first.
 
-The bridge exposes one tool under the `sassfully_browser` MCP server namespace:
-`linkedin_story`. This v0 agent may use only `navigate`, `select_remote`, and
-`snapshot`. The bridge must accept a same-origin LinkedIn
-`/jobs/search-results/` page after the approved navigation (including
-LinkedIn's harmless query rewrites such as `currentJobId`), require a visible
-Chrome confirmation for each state-changing action, confine `select_remote` to
-the Remote filter/option, and return remote-selection evidence for the snapshot.
-The story agent receives no native filesystem, shell, web, or editor tools.
+## Deterministic lane and doctor expectation
 
-Set `SASSFULLY_LINKEDIN_PAIRING_CODE` in the environment that launches Kitsoki.
-The `${...}` token is intentionally passed as MCP configuration interpolation;
-the pairing code itself is never committed, rendered into the story, or put in
-world state.
-
-## Deterministic bridge-contract lane
-
-The bridge does not currently advertise an atomic `search_us_remote` action, so
-the Story intentionally orchestrates the three supported actions. Do not add
-that action to the Story allowlist or prompt until the bridge advertises it in
-its MCP tool schema and supplies an atomic contract test. If it is added later,
-replace the three-action instruction with that single declared action and keep
-the same no-application/no-message/no-scrape boundary.
-
-`flows/confirmed_search_captures_url.yaml` is the bridge-success fake: it
-returns the contract payload the task must produce after the three bridge calls.
-It proves, without an LLM or LinkedIn, that the generated base URL is preserved,
-the Story accepts only `remote_selected: true`, and the exact three-action trace
-is required. `flows/bridge_failure_stops_without_snapshot.yaml` is the
-readiness/failure fake: the Remote action is unavailable, the Story reaches
-`failed`, and no success URL can be recorded.
-
-Run the fast lane from the Kitsoki checkout:
+Run the no-LLM lane:
 
 ```sh
 go run ./cmd/kitsoki validate stories/linkedin-job-search/app.yaml
 go run ./cmd/kitsoki test flows stories/linkedin-job-search/app.yaml --v
 ```
 
-The Sassfully bridge remains the authority for a real MCP fake/test server,
-because it owns Chrome confirmation and the visible Remote control. Its contract
-suite should drive one paired-tab fixture through `navigate` → `select_remote`
-→ `snapshot`, assert `remote_selected: true`, and record the three-action trace;
-it should also cover a query-rewritten search URL and an unavailable Remote
-control. That suite must never call LinkedIn or an LLM.
+The success fixture proves that a valid atomic result reaches `complete`.
+`bridge_failure_stops_without_snapshot.yaml` proves bridge errors stop in the
+failed state, while `remote_false_never_completes.yaml` proves a result with
+`remoteSelected: false` cannot complete. These fakes never launch Chrome,
+contact LinkedIn, or use an LLM.
 
-## Live preflight (doctor expectation)
-
-Before one attended run, treat these as the Story's operator-facing doctor
-checks:
-
-1. The local bridge process starts with a process-local pairing code; do not
-   store the code in the Story, trace, or shell history.
-2. The connected Chrome tab is an authenticated LinkedIn page and can receive
-   the visible Allow confirmations.
-3. MCP discovery returns exactly `linkedin_story` with only `navigate`,
-   `select_remote`, and `snapshot`; `search_us_remote` is not assumed.
-4. The starting or post-navigation tab is same-origin LinkedIn
-   `/jobs/search-results/`. LinkedIn query rewrites are acceptable; a different
-   route is not.
-5. The visible Remote filter is available. If it is not, stop after that single
-   failed selection: do not snapshot, retry, open a result, or use another UI
-   control.
-
-Validate the bridge tool listing in the client that runs Kitsoki before a live
-session. Automated tests use the supplied fakes and never contact LinkedIn.
+Before an attended run, the operator-facing doctor expectation is: the paired
+receiver is available, the bridge advertises `search_jobs` with the atomic
+arguments above, Chrome can present its one confirmation, and the returned
+`finalUrl` is a LinkedIn `/jobs/search-results/` route with
+`remoteSelected: true`. If any check fails, stop—do not fall back to individual
+browser actions.

@@ -1,0 +1,29 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: parameters
+host_handlers:
+  host.agent.task:
+    by_call:
+      search_confirmed_linkedin_jobs:
+        data:
+          ok: true
+          submitted:
+            finalUrl: "https://www.linkedin.com/jobs/search-results/?keywords=Principal+Engineer&geoId=103644278"
+            remoteSelected: false
+            alreadySelected: false
+            parameters:
+              keywords: "Principal Engineer"
+              location: "United States; Remote"
+turns:
+  - intent:
+      name: prepare
+      slots: { keywords: "Principal Engineer", location: "United States" }
+    expect_state: review
+  - intent: { name: confirm_search }
+    expect_state: failed
+    expect_world:
+      results_url: ""
+      remote_selected: false
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "search_confirmed_linkedin_jobs" }

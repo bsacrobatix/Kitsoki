@@ -1,21 +1,11 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["results_url", "parameters", "remote_selected", "bridge_actions"],
+  "required": ["finalUrl", "remoteSelected", "alreadySelected", "parameters"],
   "properties": {
-    "results_url": {"type": "string", "minLength": 1, "pattern": "^https://(www\\.)?linkedin\\.com/jobs/"},
-    "remote_selected": {"const": true},
-    "bridge_actions": {
-      "type": "array",
-      "items": {"type": "string", "enum": ["navigate", "select_remote", "snapshot"]},
-      "minItems": 3,
-      "maxItems": 3,
-      "allOf": [
-        {"contains": {"const": "navigate"}},
-        {"contains": {"const": "select_remote"}},
-        {"contains": {"const": "snapshot"}}
-      ]
-    },
+    "finalUrl": {"type": "string", "minLength": 1, "pattern": "^https://(www\\.)?linkedin\\.com/jobs/search-results/"},
+    "remoteSelected": {"const": true},
+    "alreadySelected": {"type": "boolean"},
     "parameters": {
       "type": "object",
       "additionalProperties": false,

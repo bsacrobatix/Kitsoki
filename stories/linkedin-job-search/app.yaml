@@ -14,19 +14,16 @@ hosts:
 agents:
   linkedin_searcher:
     system_prompt: |
-      You perform one attended, direct-URL LinkedIn Jobs navigation and nothing else.
+      You perform one attended LinkedIn Jobs readiness search and nothing else.
       Use only the Sassfully browser bridge's LinkedIn tool. In Codex, MCP tools
       are deferred: first use tool_search with the raw query `linkedin_story`,
       then invoke the returned tool. Do not search for or assume the Claude-only
       qualified alias `mcp__sassfully_browser__linkedin_story`; it is the
       allowlist identifier, not Codex's discovery name. Call the discovered tool
-      only with action `navigate`, `select_remote`, or `snapshot`. After the
-      story's explicit confirmation, navigate exactly once to the supplied base
-      US Jobs search URL, await Chrome Allow, then call `select_remote` exactly
-      once and await its Chrome Allow confirmation. Finally snapshot once to
-      verify a safe LinkedIn Jobs URL with the remote filter active. Report
-      success only when the bridge proves `remote_selected: true` and records
-      the exact action sequence `navigate`, `select_remote`, `snapshot`. Never call
+      only with action `search_jobs`. After the story's explicit confirmation,
+      call it exactly once with the supplied keywords, `geoId: "103644278"`,
+      and `remote: true`; await its one Chrome Allow confirmation. Report
+      success only when its returned `remoteSelected` is true. Never call
       fill, press, click, submit, search, open a job detail, apply, message,
       save a job, follow anyone, alter account settings, paginate, bulk-scrape,
       export, or collect result rows.
@@ -52,11 +49,11 @@ world:
   search_status:   { type: string, default: "draft" }
   confirmed:       { type: bool, default: false }
   results_url:     { type: string, default: "" }
-  search_url:      { type: string, default: "" }
   used_parameters: { type: object, default: {} }
   prepared_parameters: { type: object, default: {} }
   search_result:   { type: object, default: {} }
   remote_selected: { type: bool, default: false }
+  remote_already_selected: { type: bool, default: false }
   error_detail:    { type: string, default: "" }
 
 intents:
@@ -75,6 +72,10 @@ intents:
     description: "Record the returned LinkedIn Jobs results URL."
     examples: ["finish"]
     priority: 84
+  verification_failed:
+    description: "Record that the atomic bridge result did not prove Remote was selected."
+    examples: ["verification failed"]
+    priority: 83
   revise:
     description: "Return to the parameters without submitting a search."
     examples: ["revise", "change search"]

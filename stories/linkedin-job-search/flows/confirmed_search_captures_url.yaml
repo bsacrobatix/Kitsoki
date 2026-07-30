@@ -4,13 +4,13 @@ initial_state: parameters
 host_handlers:
   host.agent.task:
     by_call:
-      navigate_confirmed_linkedin_jobs_url:
+      search_confirmed_linkedin_jobs:
         data:
           ok: true
           submitted:
-            results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
-            remote_selected: true
-            bridge_actions: [navigate, select_remote, snapshot]
+            finalUrl: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
+            remoteSelected: true
+            alreadySelected: false
             parameters:
               keywords: "Product Manager"
               location: "United States; Remote"
@@ -23,7 +23,6 @@ turns:
       search_status: "awaiting_confirmation"
       confirmed: false
       prepared_parameters: { keywords: "Product Manager", location: "United States; Remote" }
-      search_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278"
     expect_no_host_calls: [host.agent.task]
   - intent: { name: confirm_search }
     expect_state: complete
@@ -34,4 +33,4 @@ turns:
       remote_selected: true
     expect_host_calls:
       - handler: host.agent.task
-        args: { call: "navigate_confirmed_linkedin_jobs_url" }
+        args: { call: "search_confirmed_linkedin_jobs" }
