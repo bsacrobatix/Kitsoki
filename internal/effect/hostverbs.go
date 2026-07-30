@@ -350,6 +350,10 @@ var builtinVerbTable = map[string]verbEffect{
 			"snapshot": {class: Read, deterministic: true},
 		},
 	},
+	// Environment planning may inspect configured filesystem/provider evidence;
+	// future submit/poll/verify adapters can reach an external topology. Keep
+	// the shared carrier conservative until per-op configured adapters land.
+	"host.environment":         {class: External, deterministic: false},
 	"host.work_queue.enqueue":  {class: Write, deterministic: true},
 	"host.work_queue.get":      {class: Read, deterministic: true},
 	"host.work_queue.snapshot": {class: Read, deterministic: true},

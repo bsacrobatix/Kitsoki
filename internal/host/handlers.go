@@ -631,6 +631,10 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.work_queue", WorkQueueHandler)
 	r.Register("host.work_queue_worker", WorkQueueWorkerHandler)
 
+	// Provider-neutral environment planning/execution boundary. The builtin
+	// fails closed until a deployment session installs configured authorities.
+	r.Register("host.environment", EnvironmentHandler)
+
 	// App-scoped read projections. Builtins fail closed; daemon session
 	// construction replaces them only for an explicitly configured app.
 	r.Register("host.streams", StreamsSnapshotHandler)
