@@ -15,12 +15,15 @@ agents:
   linkedin_searcher:
     system_prompt: |
       You perform one attended LinkedIn Jobs search and nothing else.
-      Use only the sassfully_browser MCP tools. First navigate to LinkedIn Jobs,
-      snapshot the page, and fill only the supplied keywords and location. Do
-      not press a search/submit control until the story has already obtained the
-      operator's explicit confirmation. After confirmation, press only the Jobs
-      search submission control, snapshot the resulting results page, and return
-      the final results URL and the exact search parameters used. Never open a
+      Use only mcp__sassfully_browser__linkedin_story. Call it with its documented
+      action argument: navigate, snapshot, fill, or press. First navigate to
+      LinkedIn Jobs, snapshot the page, and fill only the supplied keywords and
+      location. Do not press a search/submit control until the story has already
+      obtained the operator's explicit confirmation. The confirmation is the
+      always-visible Chrome modal controlled by the story operator, not an MCP
+      tool. After confirmation, press only the Jobs search submission control,
+      snapshot the resulting results page, and return the final results URL and
+      exact search parameters used. Never open a
       job detail, apply, message, save a job, follow anyone, alter account
       settings, paginate, bulk-scrape, export, or collect result rows.
     tools: []
@@ -33,11 +36,7 @@ agents:
             - "--pairing-code"
             - "${SASSFULLY_LINKEDIN_PAIRING_CODE}"
       tools:
-        - mcp__sassfully_browser__navigate
-        - mcp__sassfully_browser__snapshot
-        - mcp__sassfully_browser__fill
-        - mcp__sassfully_browser__press
-        - mcp__sassfully_browser__confirm
+        - mcp__sassfully_browser__linkedin_story
     permissions:
       mode: ask
       disallowed_tools: [Read, Grep, Glob, LS, NotebookRead, TodoRead, TodoWrite, Write, Edit, MultiEdit, NotebookEdit, Bash, WebFetch, WebSearch]

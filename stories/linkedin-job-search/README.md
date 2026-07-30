@@ -18,8 +18,11 @@ agents.linkedin_searcher.mcp.servers.sassfully_browser:
     - ${SASSFULLY_LINKEDIN_PAIRING_CODE}
 ```
 
-The bridge must expose exactly these tool names under the `sassfully_browser`
-MCP server namespace: `navigate`, `snapshot`, `fill`, `press`, and `confirm`.
+The bridge exposes one tool under the `sassfully_browser` MCP server namespace:
+`linkedin_story`. The agent calls it with the documented `action` argument set
+to `navigate`, `snapshot`, `fill`, or `press` and the matching documented
+arguments. Confirmation is an always-visible Chrome modal supplied by the
+bridge; it is the story's `confirm_search` operator decision, not an MCP tool.
 The story agent receives no native filesystem, shell, web, or editor tools.
 
 Set `SASSFULLY_LINKEDIN_PAIRING_CODE` in the environment that launches Kitsoki.
