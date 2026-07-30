@@ -243,8 +243,8 @@ func TestRepairGreenRequiresIndependentReview(t *testing.T) {
 				t.Fatal(err)
 			}
 			state, _ := store.List()
-			if state.Candidates[0].phase() != NeedsInput {
-				t.Fatalf("candidate=%#v, want blocked", state.Candidates[0])
+			if state.Candidates[0].phase() != NeedsHuman || state.Candidates[0].ReasonCode != ReasonRepairerExhausted {
+				t.Fatalf("candidate=%#v, want needs_human/repairer-exhausted", state.Candidates[0])
 			}
 		})
 	}
@@ -291,7 +291,7 @@ func TestRepairAndReviewStagesHaveHardTimeouts(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidate := state.Candidates[0]
-			if candidate.phase() != NeedsInput || !strings.Contains(candidate.Failure, stage+" timed out") {
+			if candidate.phase() != NeedsHuman || candidate.ReasonCode != ReasonRepairerExhausted || !strings.Contains(candidate.Failure, stage+" timed out") {
 				t.Fatalf("candidate=%#v, want bounded %s failure", candidate, stage)
 			}
 		})

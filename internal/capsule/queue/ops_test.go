@@ -28,7 +28,7 @@ func specIntegration() *fakeIntegration {
 func TestFailedCandidateBacksOffExponentiallyAndParksAtMaxAttempts(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	clock := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
-	deps := ProcessDeps{Integration: specIntegration(), Gate: failingGate(), MaxAttempts: 3, RetryDelay: time.Minute, MaxRetryDelay: 3 * time.Minute, Now: func() time.Time { return clock }}
+	deps := ProcessDeps{Integration: specIntegration(), Gate: failingGate(), MaxAttempts: 3, MaxProductRepeat: 1000, RetryDelay: time.Minute, MaxRetryDelay: 3 * time.Minute, Now: func() time.Time { return clock }}
 	worker := Worker{Store: store, Deps: deps}
 
 	expectDelay := []time.Duration{time.Minute, 2 * time.Minute}
