@@ -1,0 +1,21 @@
+kind: host_cassette
+app_id: capsule-ci
+match_on: [handler]
+episodes:
+  - id: project_checks_need_input
+    match:
+      handler: host.capsule_ci.project_checks
+    response:
+      data:
+        verdict:
+          schema: capsule-ci-verdict/v1
+          pipeline: change
+          outcome: needs_input
+          summary: "Project gate needs an approved input."
+          checks: []
+          promotion_eligible: false
+          source_digest: sha256:source
+          story_digest: sha256:story
+          environment_digest: sha256:environment
+          envelope_digest: sha256:envelope
+    replay: any

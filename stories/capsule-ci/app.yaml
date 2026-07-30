@@ -107,6 +107,35 @@ states:
     view:
       - heading: "Project checks"
       - prose: "The checked-in project profile supplied deterministic test/build facts and a typed verdict. Projects can replace this state with the richer prepare/review/refine composition below."
+    # A host project check has already produced a typed verdict at this point.
+    # Consume it immediately: leaving this reference room idle strands the
+    # executor after the child gate exits, so it cannot terminalize the CI job
+    # or issue its receipt.
+    on_enter:
+      - when: "world.ci_verdict.outcome == 'passed'"
+        emit_intent: checks_passed
+      - when: "world.ci_verdict.outcome == 'failed'"
+        emit_intent: checks_failed
+      - when: "world.ci_verdict.outcome == 'needs_input'"
+        emit_intent: needs_input
+    on:
+      checks_passed:
+        - target: passed
+          effects:
+            - set:
+                ci_outcome: "passed"
+      checks_failed:
+        - target: failed
+          effects:
+            - set:
+                ci_outcome: "failed"
+      needs_input:
+        - target: parked
+          effects:
+            - set:
+                ci_outcome: "needs_input"
+      look:
+        - target: .
   prepare:
     relevant_world: [ci_source, ci_workspace, ci_environment, ci_policy]
     view:

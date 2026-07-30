@@ -1,34 +1,33 @@
+# A deterministic project gate failure must still terminalize the story so the
+# executor records a typed, non-promotable result instead of an infra failure.
 test_kind: flow
 app: capsule-ci
 initial_state: idle
 initial_world:
-  ci_job_id: job-fixture
+  ci_job_id: job-fixture-fail
   ci_pipeline: change
   ci_source: { digest: sha256:source }
   ci_environment: { digest: sha256:environment }
   ci_trigger:
     story_digest: sha256:story
     envelope_digest: sha256:envelope
-host_cassette: cassettes/project-checks-pass.cassette.yaml
+host_cassette: cassettes/project-checks-fail.cassette.yaml
 turns:
   - intent: { name: run, slots: {} }
-    expect_state: passed
+    expect_state: failed
     expect_world:
+      ci_outcome: failed
       ci_verdict:
         schema: capsule-ci-verdict/v1
         pipeline: change
-        outcome: passed
-        summary: "Project test and build commands passed."
+        outcome: failed
+        summary: "Project test command failed."
         checks:
           - id: test
             kind: deterministic
-            outcome: passed
+            outcome: failed
             evidence: [capsule-ci:project-profile:test]
-          - id: build
-            kind: deterministic
-            outcome: passed
-            evidence: [capsule-ci:project-profile:build]
-        promotion_eligible: true
+        promotion_eligible: false
         source_digest: sha256:source
         story_digest: sha256:story
         environment_digest: sha256:environment
