@@ -9,7 +9,7 @@ host_handlers:
           submitted:
             visible_output: "Principal Engineer, Go — visible LinkedIn Jobs output"
             current_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang"
-            action_audit: ["navigate jobs URL", "snapshot", "click Remote", "snapshot", "extract"]
+            action_audit: ["navigate jobs URL", "snapshot (no extra fields)", "click Remote", "snapshot (no extra fields)", "extract"]
 turns:
   - intent:
       name: prepare

@@ -2,8 +2,9 @@
 
 Provide `prepare keywords=…` and the Story dispatches one paired-tab agent
 session. Its deterministic first action is the generated US LinkedIn Jobs URL:
-`/jobs/search-results/?keywords=<urlencoded>&geoId=103644278`. It snapshots the
-Jobs page, semantically selects Remote when needed, waits with another snapshot,
+`/jobs/search-results/?keywords=<urlencoded>&geoId=103644278`. Every snapshot
+is the bare `{ "action": "snapshot" }` request—never `captureEvidence` or
+other fields. It snapshots the Jobs page, semantically selects Remote when needed, waits with another snapshot,
 then stores visible job-result cards, the final Jobs URL, and the action audit.
 It must not use the LinkedIn People route or add USA/remote to the keyword query.
 
@@ -15,7 +16,7 @@ go run ./cmd/kitsoki test flows stories/linkedin-job-search/app.yaml --v
 ```
 
 `flows/paired_tab_visible_output.yaml` fakes the task result and pins the exact
-Jobs URL plus `navigate → snapshot → click Remote → snapshot → extract` audit.
+Jobs URL plus `navigate → bare snapshot → click Remote → bare snapshot → extract` audit.
 The result schema rejects a LinkedIn People URL. It does not launch Chrome, use
 an LLM, or contact LinkedIn.
 
