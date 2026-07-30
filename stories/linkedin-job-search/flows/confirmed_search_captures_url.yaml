@@ -11,7 +11,7 @@ host_handlers:
             results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
             parameters:
               keywords: "Product Manager"
-              location: "Remote, United States"
+              location: "United States; Remote"
 turns:
   - intent:
       name: prepare
@@ -20,15 +20,15 @@ turns:
     expect_world:
       search_status: "awaiting_confirmation"
       confirmed: false
-      prepared_parameters: { keywords: "Product Manager", location: "Remote, United States" }
-      search_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
+      prepared_parameters: { keywords: "Product Manager", location: "United States; Remote" }
+      search_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278"
     expect_no_host_calls: [host.agent.task]
   - intent: { name: confirm_search }
     expect_state: complete
     expect_world:
       search_status: "complete"
       results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
-      used_parameters: { keywords: "Product Manager", location: "Remote, United States" }
+      used_parameters: { keywords: "Product Manager", location: "United States; Remote" }
     expect_host_calls:
       - handler: host.agent.task
         args: { call: "navigate_confirmed_linkedin_jobs_url" }

@@ -6,11 +6,11 @@ states:
       extends: "base"
       blocks:
         body:
-          - prose: "I will construct one remote-only LinkedIn Jobs URL. No browser action happens until you review it and explicitly confirm."
+          - prose: "I will construct one base US LinkedIn Jobs URL. No browser action happens until you review it and explicitly confirm."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords|default:'(not yet chosen)' }}"
-                Location: "Remote, United States (fixed)"
+                Location: "United States; Remote filter selected after confirmation"
                 Direct URL: "{{ world.search_url|default:'(created after prepare)' }}"
                 Status: "{{ world.search_status }}"
         choices:
@@ -18,7 +18,7 @@ states:
           - list:
               items:
                 - label: "prepare keywords=…"
-                  hint: "review the direct remote-only URL before navigation"
+                  hint: "review the direct US URL before navigation and remote selection"
                 - label: "cancel"
                   hint: "end without opening or searching LinkedIn"
                 - label: "look"
@@ -28,13 +28,13 @@ states:
           effects:
             - set:
                 keywords: "{{ slots.keywords }}"
-                location: "Remote, United States"
-                search_url: "https://www.linkedin.com/jobs/search-results/?keywords={{ urlqueryescape(slots.keywords) }}&geoId=103644278&f_WT=2"
+                location: "United States; Remote"
+                search_url: "https://www.linkedin.com/jobs/search-results/?keywords={{ urlqueryescape(slots.keywords) }}&geoId=103644278"
                 search_status: "awaiting_confirmation"
                 confirmed: false
                 results_url: ""
                 used_parameters: {}
-                prepared_parameters: { keywords: "{{ slots.keywords }}", location: "Remote, United States" }
+                prepared_parameters: { keywords: "{{ slots.keywords }}", location: "United States; Remote" }
                 search_result: {}
                 error_detail: ""
       cancel:
@@ -49,7 +49,7 @@ states:
       extends: "base"
       blocks:
         body:
-          - prose: "Confirm one direct remote-only LinkedIn Jobs URL navigation. Chrome will show one Allow confirmation for the navigation; the story will then snapshot the safe current URL."
+          - prose: "Confirm one direct US LinkedIn Jobs URL navigation. Chrome will show Allow confirmations for navigation and the constrained Remote filter selection; the story will then snapshot the safe current URL."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords }}"
@@ -61,7 +61,7 @@ states:
           - list:
               items:
                 - label: "confirm_search"
-                  hint: "navigate once to this direct Jobs URL"
+                  hint: "navigate once, select Remote once, then verify"
                 - label: "revise"
                   hint: "return without submitting"
                 - label: "cancel"
@@ -90,7 +90,7 @@ states:
       extends: "base"
       blocks:
         body:
-          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to one direct Jobs URL navigation and one safe URL snapshot."
+          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to one direct Jobs URL navigation, one constrained Remote selection, and one safe URL snapshot."
           - kv:
               pairs:
                 Status: "{{ world.search_status }}"

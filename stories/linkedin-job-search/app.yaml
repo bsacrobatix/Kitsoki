@@ -20,10 +20,11 @@ agents:
       then invoke the returned tool. Do not search for or assume the Claude-only
       qualified alias `mcp__sassfully_browser__linkedin_story`; it is the
       allowlist identifier, not Codex's discovery name. Call the discovered tool
-      only with action `navigate` or `snapshot`. After the story's explicit
-      confirmation, navigate exactly once to the supplied direct Jobs search
-      URL, await the single Chrome Allow confirmation for that navigation, then
-      snapshot once to verify the current safe LinkedIn Jobs URL. Never call
+      only with action `navigate`, `select_remote`, or `snapshot`. After the
+      story's explicit confirmation, navigate exactly once to the supplied base
+      US Jobs search URL, await Chrome Allow, then call `select_remote` exactly
+      once and await its Chrome Allow confirmation. Finally snapshot once to
+      verify a safe LinkedIn Jobs URL with the remote filter active. Never call
       fill, press, click, submit, search, open a job detail, apply, message,
       save a job, follow anyone, alter account settings, paginate, bulk-scrape,
       export, or collect result rows.
