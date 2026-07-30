@@ -665,6 +665,33 @@ func TestCandidateScopedWorkerLandsWithoutTakingEarlierCandidateCustody(t *testi
 	}
 }
 
+func TestOrdinaryWorkerNeverStacksAnyPredecessorState(t *testing.T) {
+	for _, phase := range []Status{Queued, Gating, RetryWait, NeedsInput, Rejected} {
+		t.Run(string(phase), func(t *testing.T) {
+			store, first, second := queuedPair(t)
+			setCandidatePhase(t, store, first.ID, phase)
+			before, err := store.Get(first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ahead, err := (Worker{Store: store, Deps: ProcessDeps{}}).ahead(second.Sequence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ahead) != 0 {
+				t.Fatalf("ordinary speculation exposed %s predecessor bytes: %#v", phase, ahead)
+			}
+			after, err := store.Get(first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("%s predecessor changed:\nbefore=%#v\nafter=%#v", phase, before, after)
+			}
+		})
+	}
+}
+
 type fakeIntegration struct {
 	speculate func(context.Context, Candidate, []Candidate) (Speculation, error)
 	landed    int

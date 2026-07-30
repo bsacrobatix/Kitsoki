@@ -487,6 +487,9 @@ func queueWorkerCmd() *cobra.Command {
 			if repairReview == "" || repairerID == "" || reviewerID == "" || reviewPolicyDigest == "" {
 				return fmt.Errorf("queue worker: --repair requires --repair-review, --repairer-id, --reviewer-id, and --review-policy-digest")
 			}
+			if strings.TrimSpace(repairerID) == strings.TrimSpace(reviewerID) {
+				return fmt.Errorf("queue worker: repairer and reviewer identities must differ")
+			}
 			deps.RepairerID = repairerID
 			deps.RepairReviewer = queue.ShellRepairReviewer{Command: repairReview, ReviewerID: reviewerID}
 			deps.ReviewPolicyDigest = reviewPolicyDigest
@@ -714,6 +717,9 @@ func queueProcessCmd() *cobra.Command {
 		if strings.TrimSpace(repair) != "" {
 			if repairReview == "" || repairerID == "" || reviewerID == "" || reviewPolicyDigest == "" {
 				return fmt.Errorf("queue process: --repair requires --repair-review, --repairer-id, --reviewer-id, and --review-policy-digest")
+			}
+			if strings.TrimSpace(repairerID) == strings.TrimSpace(reviewerID) {
+				return fmt.Errorf("queue process: repairer and reviewer identities must differ")
 			}
 			deps.RepairerID = repairerID
 			deps.RepairReviewer = queue.ShellRepairReviewer{Command: repairReview, ReviewerID: reviewerID}

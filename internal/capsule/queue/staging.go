@@ -80,6 +80,9 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	if err := p.Headroom.Ensure(root); err != nil {
 		return Speculation{}, Environmental(err)
 	}
+	// Queue predecessors are not dependencies. Always integrate this candidate
+	// against the live protected target until durable dependency edges exist.
+	ahead = nil
 	def, err := p.definition(ctx, root)
 	if err != nil {
 		return Speculation{}, err
@@ -981,6 +984,9 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 	if err := s.Headroom.Ensure(root); err != nil {
 		return Speculation{}, Environmental(err)
 	}
+	// Queue predecessors are not dependencies. Always integrate this candidate
+	// against the live staging target until durable dependency edges exist.
+	ahead = nil
 	id := "queue-" + c.ID
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	workspace := filepath.Join(workspaceRoot, id)

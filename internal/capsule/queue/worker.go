@@ -482,32 +482,12 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 }
 
 func (w Worker) ahead(sequence uint64) ([]Candidate, error) {
-	state, err := w.Store.List()
-	if err != nil {
-		return nil, err
-	}
-	var out []Candidate
-	var target, project string
-	for _, c := range state.Candidates {
-		if c.Sequence == sequence {
-			target, project = c.TargetRef, c.ProjectID
-			break
-		}
-	}
-	// Candidate-scoped workers are admission/finalization helpers for one
-	// already-durable queue entry. They integrate only against the live target:
-	// earlier broken or retrying entries remain durable but are never silently
-	// stacked into work the caller did not select. Protected CAS still
-	// serializes this candidate with every ordinary worker.
-	if strings.TrimSpace(w.Deps.CandidateID) != "" {
-		return nil, nil
-	}
-	for _, c := range state.Candidates {
-		if c.Sequence < sequence && c.TargetRef == target && c.ProjectID == project && !terminal(c.phase()) {
-			out = append(out, c)
-		}
-	}
-	return out, nil
+	// Predecessor stacking is deliberately disabled until dependencies are
+	// durable and revalidated. A queue record that merely precedes this one
+	// may be red, parked, rejected, or lose protected CAS; none of its bytes
+	// may enter this candidate's gate before that predecessor actually lands.
+	_ = sequence
+	return nil, nil
 }
 
 func (w Worker) targetRef() string { return strings.TrimSpace(w.Deps.TargetRef) }

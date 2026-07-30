@@ -117,6 +117,38 @@ func TestQueueWorkerRejectsExecutorPipelineTierMismatchAtStartup(t *testing.T) {
 	require.ErrorContains(t, err, `--executor-pipeline "change" must equal effective --gate-tier "full"`)
 }
 
+func TestQueueRepairRejectsSameIdentityBeforeAnyStage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "process",
+			args: []string{"--project", t.TempDir(), "--gate", "true"},
+		},
+		{
+			name: "worker",
+			args: []string{"--project", t.TempDir(), "--gate", "true", "--once"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := queueProcessCmd()
+			if tc.name == "worker" {
+				cmd = queueWorkerCmd()
+			}
+			cmd.SetArgs(append(tc.args,
+				"--repair", "repair",
+				"--repair-review", "review",
+				"--repairer-id", "same-agent",
+				"--reviewer-id", "same-agent",
+				"--review-policy-digest", "sha256:policy",
+			))
+			err := cmd.Execute()
+			require.ErrorContains(t, err, "repairer and reviewer identities must differ")
+		})
+	}
+}
+
 func TestQueueGateRunIsReentrantAcrossNestedCLIProcesses(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "kitsoki")
 	build := exec.Command("go", "build", "-o", bin, ".")

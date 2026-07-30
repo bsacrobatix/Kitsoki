@@ -60,6 +60,17 @@ if KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOK
 fi
 grep -F "queue repair configuration requires" "$tmp/partial-repair.out" >/dev/null
 
+if KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
+  KITSOKI_QUEUE_REPAIR="repair candidate" KITSOKI_QUEUE_REPAIR_REVIEW="review repair" \
+  KITSOKI_QUEUE_REPAIRER_ID="same-agent" KITSOKI_QUEUE_REVIEWER_ID="same-agent" \
+  KITSOKI_QUEUE_REVIEW_POLICY_DIGEST="sha256:review-policy" \
+  "$root/scripts/kitsoki-promotion-route.sh" workspace-to-staging \
+  --repo "$repo" --workspace agent-1 >"$tmp/same-reviewer.out" 2>&1; then
+  echo "workspace route accepted repair self-review" >&2
+  exit 1
+fi
+grep -F "repairer and reviewer identities must differ" "$tmp/same-reviewer.out" >/dev/null
+
 : >"$log"
 KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
   KITSOKI_QUEUE_REPAIR="repair candidate" KITSOKI_QUEUE_REPAIR_REVIEW="review repair" \

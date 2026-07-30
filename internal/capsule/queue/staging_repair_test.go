@@ -277,7 +277,7 @@ func TestProtectedIntegrationSpeculateFlagsResolverLeftoverUntrackedCruft(t *tes
 // mirrors.
 // ---------------------------------------------------------------------------
 
-func TestStagingIntegrationTrainStackingChainsSecondSpeculationOntoFirst(t *testing.T) {
+func TestStagingIntegrationKeepsQueuedCandidatesIndependent(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")
 
@@ -322,18 +322,18 @@ func TestStagingIntegrationTrainStackingChainsSecondSpeculationOntoFirst(t *test
 	if second.phase() != ReadyToFinalize {
 		t.Fatalf("second candidate not ready: %#v", second)
 	}
-	if !hasEvidence(second, "queue:stacked-on="+first.ID) {
-		t.Fatalf("second candidate did not record stacking onto the first: evidence=%v", second.Evidence)
+	if hasEvidence(second, "queue:stacked-on=") {
+		t.Fatalf("second candidate incorporated an unlanded predecessor: evidence=%v", second.Evidence)
 	}
-	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":first.txt"); err != nil {
-		t.Fatalf("second candidate's tree is missing first.txt (did not stack): %v", err)
+	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":first.txt"); err == nil {
+		t.Fatal("second candidate's tree contains unlanded first.txt")
 	}
 	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":second.txt"); err != nil {
 		t.Fatalf("second candidate's tree is missing second.txt: %v", err)
 	}
 }
 
-func TestStagingIntegrationTrainStackingFallsBackToUnstackedOnConflict(t *testing.T) {
+func TestStagingIntegrationIgnoresQueuedConflictingPredecessor(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")
 
@@ -378,8 +378,8 @@ func TestStagingIntegrationTrainStackingFallsBackToUnstackedOnConflict(t *testin
 	if second.phase() != ReadyToFinalize {
 		t.Fatalf("second candidate should still prepare after falling back: %#v", second)
 	}
-	if !hasEvidence(second, "queue:stack-conflict-with="+first.ID+" fell-back-to-unstacked") {
-		t.Fatalf("second candidate did not record the stack-conflict fallback: evidence=%v", second.Evidence)
+	if hasEvidence(second, "queue:stack-conflict-with=") || hasEvidence(second, "queue:stacked-on=") {
+		t.Fatalf("second candidate considered an unlanded conflicting predecessor: evidence=%v", second.Evidence)
 	}
 	if got := git(t, second.WorkspacePath, "show", second.TreeSHA+":shared.txt"); strings.TrimSpace(got) != "from-second" {
 		t.Fatalf("fallback tree has wrong shared.txt content: %q", got)

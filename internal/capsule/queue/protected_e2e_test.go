@@ -352,8 +352,10 @@ func TestOverrideLandsThroughProtectedCASOnRealRepo(t *testing.T) {
 // the first's already-speculated tree, and landing the first must NOT stale
 // the second: it lands on its first attempt, with the first's landed
 // content already baked into what its gate validated.
-func TestTrainStackingChainsSpeculationAndCascadesOnLanding(t *testing.T) {
+func TestIndependentSpeculationRepreparesAfterConcurrentCAS(t *testing.T) {
 	root := protectedQueueRepo(t)
+	git(t, root, "add", "scripts")
+	git(t, root, "commit", "-m", "track queue lifecycle fixtures")
 	base := git(t, root, "rev-parse", "HEAD")
 
 	commit(t, root, "first.txt", "first\n", "first")
@@ -391,7 +393,7 @@ func TestTrainStackingChainsSpeculationAndCascadesOnLanding(t *testing.T) {
 		t.Fatalf("first candidate not ready: %#v", first)
 	}
 
-	// Prepare the second candidate: it must chain onto the first's tree.
+	// Prepare the second candidate independently against the same live target.
 	if _, err := worker.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -399,20 +401,11 @@ func TestTrainStackingChainsSpeculationAndCascadesOnLanding(t *testing.T) {
 	if second.phase() != ReadyToFinalize {
 		t.Fatalf("second candidate not ready: %#v", second)
 	}
-	stacked := false
-	for _, e := range second.Evidence {
-		if e == "queue:stacked-on="+first.ID {
-			stacked = true
-		}
+	if hasEvidence(second, "queue:stacked-on=") {
+		t.Fatalf("second candidate incorporated an unlanded predecessor: evidence=%v", second.Evidence)
 	}
-	if !stacked {
-		t.Fatalf("second candidate did not record stacking onto the first: evidence=%v", second.Evidence)
-	}
-	// The second candidate's prepared tree must contain BOTH files: proof
-	// it actually chained onto the first's speculative tree, not just its
-	// own commit.
-	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":first.txt"); err != nil {
-		t.Fatalf("second candidate's tree is missing first.txt (did not stack): %v", err)
+	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":first.txt"); err == nil {
+		t.Fatal("second candidate's tree contains unlanded first.txt")
 	}
 	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":second.txt"); err != nil {
 		t.Fatalf("second candidate's tree is missing second.txt: %v", err)
@@ -427,18 +420,23 @@ func TestTrainStackingChainsSpeculationAndCascadesOnLanding(t *testing.T) {
 		t.Fatalf("first candidate did not land: %#v", first)
 	}
 
-	// Finalize the second candidate: since it was already stacked on the
-	// first's landed tree, this must land on the very next pass — no
-	// reprepare cycle, no second gate run.
+	// The second candidate loses the live-target CAS race and must reprepare.
 	if _, err := worker.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	second = mustGet(t, store, secondC.ID)
-	if second.phase() != Landed {
-		t.Fatalf("second candidate did not cascade-land after the first: %#v", second)
+	if second.phase() != Reprepare {
+		t.Fatalf("CAS loser did not reprepare against the live target: %#v", second)
 	}
-	if second.Attempt != 1 {
-		t.Fatalf("second candidate needed %d attempts, want exactly 1 (stacking should have avoided a reprepare)", second.Attempt)
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second = mustGet(t, store, secondC.ID)
+	if second.phase() != Landed || second.Attempt != 2 {
+		t.Fatalf("reprepared candidate did not land exactly once: %#v", second)
 	}
 	if got := git(t, root, "show", "main:first.txt"); strings.TrimSpace(got) != "first" {
 		t.Fatalf("main missing first.txt content: %q", got)
@@ -456,7 +454,7 @@ func TestTrainStackingChainsSpeculationAndCascadesOnLanding(t *testing.T) {
 // prepares successfully (landing order/conflict resolution against the
 // live target is unchanged, orthogonal machinery this test does not need
 // to exercise).
-func TestTrainStackingFallsBackToUnstackedOnConflict(t *testing.T) {
+func TestIndependentSpeculationDoesNotMergeQueuedConflict(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")
 
@@ -501,14 +499,8 @@ func TestTrainStackingFallsBackToUnstackedOnConflict(t *testing.T) {
 	if second.phase() != ReadyToFinalize {
 		t.Fatalf("second candidate should still prepare after falling back: %#v", second)
 	}
-	fellBack := false
-	for _, e := range second.Evidence {
-		if e == "queue:stack-conflict-with="+first.ID+" fell-back-to-unstacked" {
-			fellBack = true
-		}
-	}
-	if !fellBack {
-		t.Fatalf("second candidate did not record the stack-conflict fallback: evidence=%v", second.Evidence)
+	if hasEvidence(second, "queue:stack-conflict-with=") || hasEvidence(second, "queue:stacked-on=") {
+		t.Fatalf("second candidate considered an unlanded conflicting predecessor: evidence=%v", second.Evidence)
 	}
 	// The fallback tree must be the second candidate's own unstacked
 	// content, not a half-merged state.

@@ -44,6 +44,10 @@ if [ -n "$repair$repair_review$repairer_id$reviewer_id$review_policy_digest" ]; 
       echo "error: queue repair configuration requires KITSOKI_QUEUE_REPAIR, KITSOKI_QUEUE_REPAIR_REVIEW, KITSOKI_QUEUE_REPAIRER_ID, KITSOKI_QUEUE_REVIEWER_ID, and KITSOKI_QUEUE_REVIEW_POLICY_DIGEST together" >&2
       exit 2
     }
+  [ "$repairer_id" != "$reviewer_id" ] || {
+    echo "error: queue repairer and reviewer identities must differ" >&2
+    exit 2
+  }
   repair_args=(--repair "$repair" --repair-review "$repair_review" \
     --repairer-id "$repairer_id" --reviewer-id "$reviewer_id" \
     --review-policy-digest "$review_policy_digest")
