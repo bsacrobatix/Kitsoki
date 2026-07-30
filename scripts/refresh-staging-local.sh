@@ -365,7 +365,7 @@ preserve_dirty_staging_capsule() {
 move_dirty_staging_capsule() {
   local dir="$1"
   local stamp recovery_id recovery_branch recovery_dir patch_dir status_file
-  local untracked_file untracked_tar current_untracked_file current_untracked_tar
+  local untracked_file untracked_tar current_untracked_file current_untracked_tar unmerged_file current_unmerged_file tracked_file
   local snapshot_oid snapshot_tree snapshot_index_tree current_oid current_tree current_index_tree
   local recovery_parent recovery_snapshot_ref expected_tree recovery_tree recovery_commit
   local primary_snapshot_ref primary_recovery_ref quarantine_root quarantine_dir staging_root staging_id replacement_bootstrap
@@ -379,12 +379,31 @@ move_dirty_staging_capsule() {
   status_file="$patch_dir/$recovery_id.status.txt"
   untracked_file="$patch_dir/$recovery_id.untracked"
   untracked_tar="$patch_dir/$recovery_id.untracked.tar"
+  unmerged_file="$patch_dir/$recovery_id.unmerged-index.tsv"
+  tracked_file="$patch_dir/$recovery_id.tracked-worktree"
   current_untracked_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-staging-current-untracked.XXXXXX")"
   current_untracked_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-staging-current-untracked-tar.XXXXXX")"
+  current_unmerged_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-staging-current-unmerged.XXXXXX")"
 
   git -C "$dir" status --short --untracked-files=all >"$status_file"
-  snapshot_oid="$(git -C "$dir" stash create "kitsoki staging dirty snapshot $stamp")"
-  [ -n "$snapshot_oid" ] || snapshot_oid="$(git -C "$dir" rev-parse HEAD)"
+  # `git stash create` cannot write an object while the index has unresolved
+  # stages.  Never let its diagnostics become a ref name: retain those exact
+  # stage entries and patches as recovery evidence, then anchor the valid HEAD
+  # identity while the untouched source checkout is quarantined below.
+  git -C "$dir" ls-files -u -s >"$unmerged_file"
+  if [ -s "$unmerged_file" ]; then
+    # This list is a working-tree projection, not an index projection.  Copy
+    # it into the recovery clone so its committed tree matches the quarantined
+    # checkout even though the three unmerged index stages remain evidence
+    # rather than an impossible-to-commit index state.
+    git -C "$dir" diff --name-only -z HEAD >"$tracked_file"
+    git -C "$dir" diff --binary --full-index >"$patch_dir/$recovery_id.unmerged-worktree.patch" || true
+    git -C "$dir" diff --binary --full-index --cached >"$patch_dir/$recovery_id.unmerged-index.patch" || true
+    snapshot_oid="$(git -C "$dir" rev-parse HEAD)"
+  else
+    snapshot_oid="$(git -C "$dir" stash create "kitsoki staging dirty snapshot $stamp" 2>/dev/null || true)"
+    [ -n "$snapshot_oid" ] || snapshot_oid="$(git -C "$dir" rev-parse HEAD)"
+  fi
   snapshot_tree="$(git -C "$dir" rev-parse "$snapshot_oid^{tree}")"
   snapshot_index_tree="$(git -C "$dir" rev-parse "$snapshot_oid^2^{tree}" 2>/dev/null || git -C "$dir" rev-parse HEAD^{tree})"
   git -C "$dir" ls-files --others --exclude-standard -z >"$untracked_file"
@@ -406,6 +425,17 @@ move_dirty_staging_capsule() {
   recovery_snapshot_ref="refs/kitsoki/dirty-snapshot/$snapshot_oid"
   git -C "$recovery_dir" fetch --no-tags "$dir" "$snapshot_oid:$recovery_snapshot_ref"
   git -C "$recovery_dir" reset --hard "$recovery_snapshot_ref" >/dev/null
+  if [ -s "$unmerged_file" ]; then
+    while IFS= read -r -d '' path; do
+      [ -n "$path" ] || continue
+      if [ -e "$dir/$path" ] || [ -L "$dir/$path" ]; then
+        mkdir -p "$(dirname "$recovery_dir/$path")"
+        cp -p "$dir/$path" "$recovery_dir/$path"
+      else
+        rm -f "$recovery_dir/$path"
+      fi
+    done <"$tracked_file"
+  fi
   if [ -s "$untracked_file" ]; then
     tar -C "$recovery_dir" -xf "$untracked_tar"
   fi
@@ -435,8 +465,13 @@ move_dirty_staging_capsule() {
 
   # Recheck both tracked/index state and untracked bytes immediately before
   # cleaning. A concurrent writer must leave the original capsule untouched.
-  current_oid="$(git -C "$dir" stash create "kitsoki staging dirty snapshot recheck $stamp")"
-  [ -n "$current_oid" ] || current_oid="$(git -C "$dir" rev-parse HEAD)"
+  git -C "$dir" ls-files -u -s >"$current_unmerged_file"
+  if [ -s "$unmerged_file" ]; then
+    current_oid="$(git -C "$dir" rev-parse HEAD)"
+  else
+    current_oid="$(git -C "$dir" stash create "kitsoki staging dirty snapshot recheck $stamp" 2>/dev/null || true)"
+    [ -n "$current_oid" ] || current_oid="$(git -C "$dir" rev-parse HEAD)"
+  fi
   current_tree="$(git -C "$dir" rev-parse "$current_oid^{tree}")"
   current_index_tree="$(git -C "$dir" rev-parse "$current_oid^2^{tree}" 2>/dev/null || git -C "$dir" rev-parse HEAD^{tree})"
   git -C "$dir" ls-files --others --exclude-standard -z >"$current_untracked_file"
@@ -445,8 +480,9 @@ move_dirty_staging_capsule() {
   fi
   if [ "$current_tree" != "$snapshot_tree" ] ||
     [ "$current_index_tree" != "$snapshot_index_tree" ] ||
+    ! cmp -s "$unmerged_file" "$current_unmerged_file" ||
     ! cmp -s "$untracked_file" "$current_untracked_file" ||
-    ! cmp -s "$untracked_tar" "$current_untracked_tar"; then
+    { [ -s "$untracked_file" ] && ! cmp -s "$untracked_tar" "$current_untracked_tar"; }; then
     echo "error: staging capsule changed while its recovery snapshot was being committed; original left unchanged" >&2
     return 1
   fi
@@ -487,7 +523,7 @@ move_dirty_staging_capsule() {
     echo "error: clean staging capsule was recreated and recovery refs are anchored, but the source quarantine could not be sealed" >&2
     return 1
   fi
-  rm -f "$current_untracked_file" "$current_untracked_tar"
+  rm -f "$current_untracked_file" "$current_untracked_tar" "$current_unmerged_file"
   echo "refresh-staging-local: moved dirty staging-capsule changes to a committed recovery capsule:" >&2
   echo "  workspace: $recovery_dir" >&2
   echo "  branch: $recovery_branch" >&2

@@ -718,6 +718,44 @@ remaining_dirty="$(git -C "$local_repo/.capsules/staging/local" status --porcela
 [ -z "$remaining_dirty" ] ||
   fail "preserve left staging capsule dirty: $remaining_dirty"
 
+# An interrupted merge has no storable stash object: `git stash create` emits
+# path diagnostics instead. Move must still retain the exact unmerged stage
+# evidence, anchor only valid refs, and replace the active staging capsule.
+unmerged_capsule="$local_repo/.capsules/staging/local"
+git -C "$unmerged_capsule" checkout -qb agent/unmerged-recovery
+printf 'other side\n' >"$unmerged_capsule/unmerged-recovery.txt"
+git -C "$unmerged_capsule" add unmerged-recovery.txt
+git -C "$unmerged_capsule" commit -qm "unmerged recovery other side"
+git -C "$unmerged_capsule" checkout -q staging/local
+printf 'staging side\n' >"$unmerged_capsule/unmerged-recovery.txt"
+git -C "$unmerged_capsule" add unmerged-recovery.txt
+git -C "$unmerged_capsule" commit -qm "unmerged recovery staging side"
+if git -C "$unmerged_capsule" merge --no-commit agent/unmerged-recovery >/dev/null 2>&1; then
+  fail "expected deterministic unmerged recovery fixture to conflict"
+fi
+git -C "$unmerged_capsule" ls-files -u | grep -q 'unmerged-recovery.txt' ||
+  fail "unmerged recovery fixture did not retain index stages"
+unmerged_out="$tmp/dirty-capsule-unmerged-move.out"
+if ! (
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote --dirty-action move --gate 'git diff --check'
+) >"$unmerged_out" 2>&1; then
+  cat "$unmerged_out" >&2
+  fail "move did not recover an unmerged staging index"
+fi
+assert_contains "$unmerged_out" "moved dirty staging-capsule changes to a committed recovery capsule"
+unmerged_snapshot_ref="$(sed -n 's/^  snapshot ref: //p' "$unmerged_out" | tail -1)"
+unmerged_quarantine="$(sed -n 's/^  original quarantine: //p' "$unmerged_out" | tail -1)"
+[ -n "$unmerged_snapshot_ref" ] || fail "unmerged move did not report a snapshot ref"
+git -C "$local_repo" rev-parse --verify --quiet "$unmerged_snapshot_ref" >/dev/null ||
+  fail "unmerged move reported an invalid primary snapshot ref"
+unmerged_evidence="$(find "$local_repo/.artifacts/staging-local" -name '*.unmerged-index.tsv' -type f | sort | tail -1)"
+[ -s "$unmerged_evidence" ] || fail "unmerged move did not retain staged-index evidence"
+grep -q 'unmerged-recovery.txt' "$unmerged_evidence" ||
+  fail "unmerged move evidence omitted the conflicted path"
+[ -z "$(git -C "$local_repo/.capsules/staging/local" ls-files -u)" ] ||
+  fail "unmerged move left the replacement staging capsule conflicted"
+
 # Import the immutable proven SHA, then recheck the capsule branch. A concurrent
 # clean commit during that fetch must stop before primary staging moves.
 capsule_race_git_dir="$tmp/capsule-race-git"
