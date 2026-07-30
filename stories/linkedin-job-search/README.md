@@ -5,28 +5,28 @@ the keywords/location and explicitly chooses `confirm_search`. It records the
 submitted parameters and final results URL in world state. It does not open job
 details, apply, message, save, follow, paginate, or bulk-scrape.
 
-## Required Sassfully bridge binding
+## Sassfully bridge binding
 
-The bridge is deliberately not guessed. Before a live run, replace the
-fail-closed value in `app.yaml`:
+The story starts the local bridge with this stdio MCP configuration:
 
 ```yaml
 agents.linkedin_searcher.mcp.servers.sassfully_browser:
-  command: <exact local Sassfully bridge executable>
-  args: [<exact bridge arguments that start its stdio MCP server>]
-  env: { <only bridge-required environment variables> }
+  command: node
+  args:
+    - /Users/brad/code/studio-sassfully/.capsules/workspaces/extension-local-test-20260730/packages/feedback-extension/story-bridge/stdio-server.mjs
+    - --pairing-code
+    - ${SASSFULLY_LINKEDIN_PAIRING_CODE}
 ```
 
 The bridge must expose exactly these tool names under the `sassfully_browser`
 MCP server namespace: `navigate`, `snapshot`, `fill`, `press`, and `confirm`.
 The story agent receives no native filesystem, shell, web, or editor tools.
 
-The command and arguments are intentionally not filled in here because their
-Sassfully bridge contract was not supplied. A placeholder that fails to launch
-is safer than silently selecting a browser implementation or an unaudited
-bridge command.
+Set `SASSFULLY_LINKEDIN_PAIRING_CODE` in the environment that launches Kitsoki.
+The `${...}` token is intentionally passed as MCP configuration interpolation;
+the pairing code itself is never committed, rendered into the story, or put in
+world state.
 
-Validate the installed bridge before a live session by checking its MCP tool
-listing in the client that will run Kitsoki. Then run the story with a live
-agent profile; automated tests use the supplied flow stubs and never contact
+Validate the bridge tool listing in the client that runs Kitsoki before a live
+session. Automated tests use the supplied flow stubs and never contact
 LinkedIn.

@@ -9,9 +9,8 @@ hosts:
   - host.agent.task
 
 # This agent intentionally has no native tools. The only browser surface is the
-# local Sassfully bridge declared below. The placeholder command is fail-closed:
-# an operator must replace it with the exact bridge launch command described in
-# README.md before a live search can run.
+# local Sassfully bridge declared below. The pairing code is an environment
+# interpolation token, never a checked-in credential.
 agents:
   linkedin_searcher:
     system_prompt: |
@@ -28,8 +27,11 @@ agents:
     mcp:
       servers:
         sassfully_browser:
-          command: "__CONFIGURE_SASSFULLY_BRIDGE_COMMAND__"
-          args: []
+          command: "node"
+          args:
+            - "/Users/brad/code/studio-sassfully/.capsules/workspaces/extension-local-test-20260730/packages/feedback-extension/story-bridge/stdio-server.mjs"
+            - "--pairing-code"
+            - "${SASSFULLY_LINKEDIN_PAIRING_CODE}"
       tools:
         - mcp__sassfully_browser__navigate
         - mcp__sassfully_browser__snapshot
