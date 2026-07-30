@@ -98,6 +98,18 @@ primary checkout. It rebases the staging capsule onto local `main`, runs
 gate requires explicit `--force`; use it only when an equivalent gate has
 already run.
 
+`staging/local` is a **shared batch**: every task's workspace lands into it, and
+promotion is batched precisely because the `main` gate is slow. Promoting
+therefore lands every commit accumulated there, not just yours — run
+`git log --oneline main..staging/local` and read the batch before promoting.
+Do not commit into the staging capsule while a promotion is gating; the
+promotion will correctly refuse, and there is no lock preventing it. If the gate
+dies without naming a failing test, suspect the environment before the code —
+the default 300s `KITSOKI_TEST_GO_TIMEOUT_SECONDS` budget for the whole Go suite
+is the usual cause, and raising it is not a waiver. See
+`docs/dev-workspaces.md` for the batch model, the exact refusal messages, and
+the environmental failure signatures.
+
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
 runs target `main`; GitHub branch filters on `pull_request` match the PR base

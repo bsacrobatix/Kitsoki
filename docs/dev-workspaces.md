@@ -232,6 +232,31 @@ working tree.
 scripts/merge-to-main.sh
 ```
 
+**`staging/local` is a shared batch, not your branch.** Every workspace from
+every task lands into it, and promotion is deliberately batched because the
+`main` gate is slow — one `make test` cycle per individual change is the cost the
+stabilization branch exists to avoid.
+
+So `merge-to-main.sh` promotes **every** commit accumulated on `staging/local`,
+not only yours. Read the batch before pressing the button:
+
+```sh
+git -C <primary checkout> log --oneline main..staging/local
+```
+
+Gating the batch as a unit is the point, but it does mean you are landing other
+tasks' staged work. If something in the batch is not ready, resolve that first;
+there is no way to promote a subset.
+
+Three failure modes cost a full gate cycle each and none of them mean your code
+is broken:
+
+| Symptom | Cause | Response |
+| --- | --- | --- |
+| `source-dir gate moved HEAD (<pre> -> <post>); validation gates must not mutate committed state` | something committed to the staging capsule while the gate ran | Correct refusal — a green gate cannot be attributed to a tree that moved. There is **no lock** on the staging capsule, so concurrent landings during a promotion are an operator scheduling problem. Retry; the pre-gate commit is kept at `refs/kitsoki/promotion-source-recovery/<pre>` |
+| `go test exited 124 with no package-level failure (build error?)` | `KITSOKI_TEST_GO_TIMEOUT_SECONDS` (default **300s for the whole `go test ./...`**) killed a run that would have passed — the queue package alone takes 150-320s | Raise the budget; this waives nothing and is not `--force`: `--gate "env KITSOKI_TEST_GO_TIMEOUT_SECONDS=2400 KITSOKI_TEST_PYTHON_TIMEOUT_SECONDS=900 make test"` |
+| `capsule local_disk_headroom: free bytes N below required 21474836480`, or a package that fails under the gate's `-p 4` but passes alone | concurrent workspaces consuming disk; parallelism flake | Retry when quieter. Note `kitsoki capsule cleanup plan` may reclaim almost nothing — its `min_workspace_age` and active-status guards exclude the recent workspaces actually holding the space |
+
 Final local promotion is staging-capsule first. The default source is the
 managed capsule checkout at `.capsules/staging/local` on branch `staging/local`.
 The helper refuses unmanaged source directories, prompts for dirty staging-state
