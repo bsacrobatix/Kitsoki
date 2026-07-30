@@ -65,6 +65,27 @@ handoff boundary, such as a non-technical user report, an autonomous GitHub
 agent job, or a remote collaboration flow where the agent is expected to fix the
 issue and open a PR.
 
+## Agent Mail coordination (local pilot)
+
+For concurrent work in the `/Users/brad/code` orchestration workspace, use
+Agent Mail only through the Kitsoki `claude`/`codex` launcher proxies. Start the
+session with the applicable `superagent` or `unlimited` proxy arm; do not add a
+second direct MCP client, a repository MCP configuration, or a credential file
+to make it available.
+
+Use the shared project key exactly as `/Users/brad/code`. At session start,
+register your agent, inspect its inbox, and check active reservations. Before
+editing, reserve only the narrow paths you intend to change. Post a threaded
+`START`, material `UPDATE`, `BLOCKED`, or `DONE` message, including scope and
+evidence where useful; on `DONE`, release the reservation. Treat reservations
+as advisory coordination, not an authority to overwrite another agent's work.
+
+This pilot is localhost-only. Do not assume a remote Capsule, hosted runner, or
+other machine can reach the local Agent Mail endpoint; use the normal durable
+handoff/receipt flow there instead. Keep its URL, bearer token, and local
+configuration outside Git and out of repository `.mcp.json` files, prompts,
+artifacts, commits, and messages.
+
 Keep the primary checkout's `main` clean, green, and reserved for remote sync or
 explicit final promotion. It is acceptable for tests to fail temporarily inside
 a managed workspace while implementation is in progress. When the task is
