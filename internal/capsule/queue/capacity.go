@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,13 +28,6 @@ type GateAdmissionRequest struct {
 // defaultGateCapacityRootOverride is test-only injection for hermetic package
 // processes. Production never assigns it.
 var defaultGateCapacityRootOverride string
-
-// inheritedGateLeaseFiles intentionally retains borrowed marker descriptors for
-// the process lifetime. os.NewFile installs an internal finalizer; without this
-// stable reference a GC cycle can close the only inherited marker even though
-// the parent gate still owns the underlying lock.
-var inheritedGateLeaseFiles sync.Map
-var inheritedGateLeaseFilesMu sync.Mutex
 
 // DefaultGateCapacityRoot is the per-user host authority shared by every
 // repository on this workstation/controller. UserCacheDir is owner-scoped on
@@ -91,22 +83,21 @@ func (c FileGateCapacity) Acquire(ctx context.Context, in GateAdmissionRequest) 
 	return lease.Release, nil
 }
 
-// FileGateLease is one kernel-owned capacity slot. ConfigureCommand passes the
-// already-held lock into a child, allowing a nested gate-run wrapper to borrow
-// the same slot instead of deadlocking on itself. The marker is intentionally
-// cheap: an open descriptor plus exact root/pool/path metadata, not a signature.
+// FileGateLease is one kernel-owned capacity slot. The lock descriptor is never
+// inherited by a gate command: only the owner may keep capacity occupied.
+// Nested gate-run wrappers borrow a cheap liveness marker and create their own
+// supervised process group, avoiding both self-deadlock and orphan-held locks.
 type FileGateLease struct {
 	file      *os.File
 	root      string
 	pool      string
-	path      string
+	borrow    gateBorrowMarker
 	inherited bool
 	once      sync.Once
 }
 
-// Release relinquishes an owned slot. Borrowed inherited descriptors stay open
-// for the process lifetime so concurrent nested calls cannot close each
-// other's marker; the kernel closes them when that process exits.
+// Release relinquishes an owned slot. A borrowed lease never owns a kernel
+// capacity lock.
 func (l *FileGateLease) Release() {
 	if l == nil || l.file == nil || l.inherited {
 		return
@@ -117,24 +108,58 @@ func (l *FileGateLease) Release() {
 	})
 }
 
-// ConfigureCommand inherits this lease into cmd and records the child-side FD.
-func (l *FileGateLease) ConfigureCommand(cmd *exec.Cmd) error {
-	if l == nil || l.file == nil {
+// RunCommand starts cmd under crash-safe supervision. Darwin and Linux use a
+// liveness pipe plus a dedicated process group: if this process is killed, the
+// pipe reaches EOF and an external watchdog terminates the entire group. The
+// capacity flock itself is never exposed to cmd or its descendants.
+func (l *FileGateLease) RunCommand(ctx context.Context, cmd *exec.Cmd) error {
+	if l == nil || (l.file == nil && !l.inherited) {
 		return fmt.Errorf("queue: gate capacity lease is required")
 	}
-	if _, err := l.file.Stat(); err != nil {
-		return fmt.Errorf("queue: gate capacity lease is closed: %w", err)
+	if l.file != nil {
+		if _, err := l.file.Stat(); err != nil {
+			return fmt.Errorf("queue: gate capacity lease is closed: %w", err)
+		}
+	} else if !gateBorrowAlive(l.borrow) {
+		return fmt.Errorf("queue: inherited gate capacity owner is no longer alive")
 	}
-	fd := 3 + len(cmd.ExtraFiles)
-	cmd.ExtraFiles = append(cmd.ExtraFiles, l.file)
-	if cmd.Env == nil {
-		cmd.Env = os.Environ()
+	if cmd == nil {
+		return fmt.Errorf("queue: gate command is required")
 	}
-	cmd.Env = setEnv(cmd.Env, "KITSOKI_GATE_CAPACITY_FD", strconv.Itoa(fd))
-	cmd.Env = setEnv(cmd.Env, "KITSOKI_GATE_CAPACITY_ROOT", l.root)
-	cmd.Env = setEnv(cmd.Env, "KITSOKI_GATE_CAPACITY_POOL", l.pool)
-	cmd.Env = setEnv(cmd.Env, "KITSOKI_GATE_CAPACITY_PATH", l.path)
+	if err := runSupervisedGateCommand(ctx, cmd, l); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (l *FileGateLease) validate() error {
+	if l == nil || (l.file == nil && !l.inherited) {
+		return fmt.Errorf("queue: gate capacity lease is required")
+	}
+	if l.file != nil {
+		if _, err := l.file.Stat(); err != nil {
+			return fmt.Errorf("queue: gate capacity lease is closed: %w", err)
+		}
+	} else if !gateBorrowAlive(l.borrow) {
+		return fmt.Errorf("queue: inherited gate capacity owner is no longer alive")
+	}
+	return nil
+}
+
+func (l *FileGateLease) commandEnv(env []string, markerFD int) ([]string, error) {
+	if err := l.validate(); err != nil {
+		return nil, err
+	}
+	if markerFD < 3 {
+		return nil, fmt.Errorf("queue: invalid gate liveness descriptor")
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	env = setEnv(env, "KITSOKI_GATE_CAPACITY_FD", fmt.Sprintf("%d", markerFD))
+	env = setEnv(env, "KITSOKI_GATE_CAPACITY_ROOT", l.root)
+	env = setEnv(env, "KITSOKI_GATE_CAPACITY_POOL", l.pool)
+	return env, nil
 }
 
 func setEnv(env []string, name, value string) []string {
@@ -171,15 +196,15 @@ func (c FileGateCapacity) AcquireLease(ctx context.Context, in GateAdmissionRequ
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("queue: create gate capacity authority: %w", err)
 	}
-	if lease, ok := inheritedFileGateLease(root, pool, dir); ok {
-		return lease, nil
+	if marker, ok := inheritedGateBorrow(root, pool); ok {
+		return &FileGateLease{root: root, pool: pool, borrow: marker, inherited: true}, nil
 	}
 	for {
 		for slot := 0; slot < max; slot++ {
 			path := filepath.Join(dir, fmt.Sprintf("slot-%03d.lock", slot))
 			file, err := lockFile(path, 0)
 			if err == nil {
-				return &FileGateLease{file: file, root: root, pool: pool, path: path}, nil
+				return &FileGateLease{file: file, root: root, pool: pool}, nil
 			}
 			if !errors.Is(err, ErrBusy) {
 				return nil, err
@@ -193,44 +218,6 @@ func (c FileGateCapacity) AcquireLease(ctx context.Context, in GateAdmissionRequ
 		case <-timer.C:
 		}
 	}
-}
-
-func inheritedFileGateLease(root, pool, dir string) (*FileGateLease, bool) {
-	if os.Getenv("KITSOKI_GATE_CAPACITY_ROOT") != root ||
-		os.Getenv("KITSOKI_GATE_CAPACITY_POOL") != pool {
-		return nil, false
-	}
-	fd, err := strconv.Atoi(os.Getenv("KITSOKI_GATE_CAPACITY_FD"))
-	if err != nil || fd < 3 {
-		return nil, false
-	}
-	path := filepath.Clean(os.Getenv("KITSOKI_GATE_CAPACITY_PATH"))
-	rel, err := filepath.Rel(dir, path)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.Dir(rel) != "." {
-		return nil, false
-	}
-	key := strconv.Itoa(fd) + "\x00" + path
-	inheritedGateLeaseFilesMu.Lock()
-	defer inheritedGateLeaseFilesMu.Unlock()
-	value, ok := inheritedGateLeaseFiles.Load(key)
-	if !ok {
-		file := os.NewFile(uintptr(fd), "inherited-gate-capacity")
-		if file == nil {
-			return nil, false
-		}
-		inheritedGateLeaseFiles.Store(key, file)
-		value = file
-	}
-	file, ok := value.(*os.File)
-	if !ok || file == nil {
-		return nil, false
-	}
-	got, gotErr := file.Stat()
-	want, wantErr := os.Stat(path)
-	if gotErr != nil || wantErr != nil || !os.SameFile(got, want) {
-		return nil, false
-	}
-	return &FileGateLease{file: file, root: root, pool: pool, path: path, inherited: true}, true
 }
 
 type gateCapacityLeaseContextKey struct{}

@@ -40,7 +40,7 @@ func queueCmd() *cobra.Command {
 
 // queueGateRunCmd is the cheap workstation-wide admission wrapper for direct
 // implementation checks. It shares the exact FileGateCapacity authority used
-// by queue workers and passes its open slot to nested invocations.
+// by queue workers; nested invocations borrow liveness, never the actual lock.
 func queueGateRunCmd() *cobra.Command {
 	var capacityRoot, capacityPool, gateTier, project string
 	var capacity int
@@ -70,10 +70,7 @@ func queueGateRunCmd() *cobra.Command {
 			child.Dir = absProject
 			child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
 			child.Env = commandEnv("KITSOKI_GATE_TIER", tier)
-			if err := lease.ConfigureCommand(child); err != nil {
-				return err
-			}
-			if err := child.Run(); err != nil {
+			if err := lease.RunCommand(cmd.Context(), child); err != nil {
 				return fmt.Errorf("queue gate-run: %s: %w", args[0], err)
 			}
 			return nil

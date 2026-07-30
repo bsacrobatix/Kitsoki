@@ -140,26 +140,25 @@ func TestShellGateInheritsTierAndCapacityWithoutNestedDeadlock(t *testing.T) {
 	lease.Release()
 }
 
-func TestInheritedFileGateLeaseSurvivesRepeatedGC(t *testing.T) {
-	capacity := FileGateCapacity{Root: t.TempDir(), Pool: "gc", Max: 1}
-	outer, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{})
+func TestInheritedGateBorrowSurvivesRepeatedGCAndDetectsOwnerExit(t *testing.T) {
+	root, pool := t.TempDir(), "gc"
+	read, write, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KITSOKI_GATE_CAPACITY_FD", strconv.FormatUint(uint64(outer.file.Fd()), 10))
-	t.Setenv("KITSOKI_GATE_CAPACITY_ROOT", outer.root)
-	t.Setenv("KITSOKI_GATE_CAPACITY_POOL", outer.pool)
-	t.Setenv("KITSOKI_GATE_CAPACITY_PATH", outer.path)
-	dir := filepath.Dir(outer.path)
+	defer read.Close()
+	defer write.Close()
+	t.Setenv("KITSOKI_GATE_CAPACITY_FD", strconv.FormatUint(uint64(read.Fd()), 10))
+	t.Setenv("KITSOKI_GATE_CAPACITY_ROOT", root)
+	t.Setenv("KITSOKI_GATE_CAPACITY_POOL", pool)
 	for i := 0; i < 32; i++ {
-		inherited, ok := inheritedFileGateLease(outer.root, outer.pool, dir)
+		marker, ok := inheritedGateBorrow(root, pool)
 		if !ok {
 			t.Fatalf("inherit iteration %d failed", i)
 		}
-		inherited.Release()
 		runtime.GC()
-		if _, err := outer.file.Stat(); err != nil {
-			t.Fatalf("GC closed inherited ownership marker: %v", err)
+		if !gateBorrowAlive(marker) {
+			t.Fatal("GC closed inherited liveness marker")
 		}
 	}
 	var wg sync.WaitGroup
@@ -167,20 +166,25 @@ func TestInheritedFileGateLeaseSurvivesRepeatedGC(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			inherited, ok := inheritedFileGateLease(outer.root, outer.pool, dir)
+			marker, ok := inheritedGateBorrow(root, pool)
 			if !ok {
 				t.Errorf("concurrent inherit failed")
 				return
 			}
-			inherited.Release()
 			runtime.GC()
+			if !gateBorrowAlive(marker) {
+				t.Errorf("concurrent marker was closed")
+			}
 		}()
 	}
 	wg.Wait()
-	if _, err := outer.file.Stat(); err != nil {
-		t.Fatalf("concurrent borrowed wrapper closed ownership marker: %v", err)
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
 	}
-	outer.Release()
+	marker, _ := inheritedGateBorrow(root, pool)
+	if gateBorrowAlive(marker) {
+		t.Fatal("borrow marker remained live after owner writer closed")
+	}
 }
 
 func TestDeliveryDefaultsDeriveTierAndHostCapacity(t *testing.T) {

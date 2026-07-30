@@ -40,7 +40,9 @@ func TestKitsokiExactSourceCertificationUsesPreparedBoundedGate(t *testing.T) {
 	}
 	var profile struct {
 		Commands struct {
-			Test string `yaml:"test"`
+			Test    string `yaml:"test"`
+			Full    string `yaml:"full"`
+			Release string `yaml:"release"`
 		} `yaml:"commands"`
 		DevStoryProfile struct {
 			Bugfix struct {
@@ -53,6 +55,12 @@ func TestKitsokiExactSourceCertificationUsesPreparedBoundedGate(t *testing.T) {
 	}
 	if profile.Commands.Test != "make test" || profile.DevStoryProfile.Bugfix.Test != "make test" {
 		t.Fatalf("exact-source test contracts = commands:%q bugfix:%q, want make test", profile.Commands.Test, profile.DevStoryProfile.Bugfix.Test)
+	}
+	if profile.Commands.Full != "make test-full" {
+		t.Fatalf("full Capsule-CI contract=%q, want make test-full", profile.Commands.Full)
+	}
+	if profile.Commands.Release != "make test-full && go build ./..." {
+		t.Fatalf("release Capsule-CI contract=%q, want exhaustive tests plus repository build", profile.Commands.Release)
 	}
 	makefile, err := os.ReadFile(filepath.Join(repoRoot, "Makefile"))
 	if err != nil {

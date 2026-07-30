@@ -906,9 +906,10 @@ func (scrubbedShellRunner) Run(ctx context.Context, dir, program string, args ..
 		cmd.Env = setEnv(cmd.Env, "KITSOKI_GATE_TIER", strings.TrimSpace(tier))
 	}
 	if lease := gateCapacityLeaseFromContext(ctx); lease != nil {
-		if err := lease.ConfigureCommand(cmd); err != nil {
-			return nil, err
-		}
+		var output bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &output, &output
+		err := lease.RunCommand(ctx, cmd)
+		return output.Bytes(), err
 	}
 	return cmd.CombinedOutput()
 }
