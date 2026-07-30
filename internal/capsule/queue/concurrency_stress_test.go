@@ -277,7 +277,23 @@ func TestCstLeaseTakeoverAfterAbandonedWorker(t *testing.T) {
 	gate := newCstCrashOnceGate("cst-tree-" + shaCrash)
 	finalizer := newCstRecordingFinalizer()
 	const lease = 200 * time.Millisecond
-	deps := ProcessDeps{Integration: cstStubIntegration{}, Gate: gate, Finalizer: finalizer, GateVersion: "cst/v1", Lease: lease}
+	const rescuers = 3
+	// This scenario runs four workers concurrently (one abandoned victim plus
+	// three rescuers), and the victim holds its gate slot forever by design.
+	// Gate admission is a declared resource, so the fixture must declare a
+	// pool that fits the topology it asserts, exactly as an operator sizes
+	// --capacity to the workers a host runs. Leaving it unset would inherit
+	// the host-wide single-slot default, where the abandoned worker's slot
+	// starves every rescuer and no takeover could ever be observed. The root
+	// is per-test so this never contends with a real worker on the same host.
+	deps := ProcessDeps{
+		Integration:   cstStubIntegration{},
+		Gate:          gate,
+		Finalizer:     finalizer,
+		GateVersion:   "cst/v1",
+		Lease:         lease,
+		GateAdmission: FileGateCapacity{Root: t.TempDir(), Pool: "cst-lease-takeover", Max: rescuers + 1},
+	}
 
 	victimDeps := deps
 	victimDeps.WorkerID = "cst-victim"
@@ -301,7 +317,6 @@ func TestCstLeaseTakeoverAfterAbandonedWorker(t *testing.T) {
 		t.Fatal("victim worker never claimed and entered gating on the crash candidate")
 	}
 
-	const rescuers = 3
 	var wg sync.WaitGroup
 	var stop int32
 	errs := make(chan error, rescuers)
