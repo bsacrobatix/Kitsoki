@@ -37,10 +37,11 @@ test "$*" = "embed-stories embed-skills"
 touch "$KITSOKI_QUICK_TEST_ROOT/.agent-assets-ready"
 `)
 	writeExecutable("go", `
-printf 'go %s\n' "$*" >>"$KITSOKI_QUICK_TEST_LOG"
+printf 'go cache=%s %s\n' "$GOCACHE" "$*" >>"$KITSOKI_QUICK_TEST_LOG"
 case "$*" in
   *" ./cmd/kitsoki")
     test -f "$KITSOKI_QUICK_TEST_ROOT/.agent-assets-ready"
+    test "$GOCACHE" = "$KITSOKI_QUICK_TEST_ROOT/.temp/capsule-ci-quick-go-build"
     ;;
 esac
 `)
@@ -55,6 +56,7 @@ esac
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"KITSOKI_QUICK_TEST_ROOT="+repo,
 		"KITSOKI_QUICK_TEST_LOG="+logPath,
+		"KITSOKI_TEMP_ROOT="+filepath.Join(repo, ".temp"),
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("clean-clone quick gate: %v\n%s", err, output)
@@ -65,7 +67,7 @@ esac
 	}
 	calls := string(raw)
 	makeAt := strings.Index(calls, "make embed-stories embed-skills")
-	cmdTestsAt := strings.Index(calls, "go test -short -count=1")
+	cmdTestsAt := strings.Index(calls, "test -short -count=1")
 	if makeAt < 0 || cmdTestsAt < 0 || makeAt > cmdTestsAt {
 		t.Fatalf("agent assets were not prepared before cmd tests:\n%s", calls)
 	}

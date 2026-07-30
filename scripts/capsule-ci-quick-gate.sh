@@ -7,6 +7,12 @@ cd "$repo_root"
 
 echo "capsule-ci-quick: preparing embedded story and agent assets"
 make embed-stories embed-skills >/dev/null
+# The embed inputs are intentionally gitignored generated copies.  Do not let a
+# fresh queue workspace reuse a Go test binary from another checkout that was
+# compiled while those directories contained only their .gitkeep placeholders.
+# A workspace-local cache is also safe for concurrent speculative gates.
+export GOCACHE="${KITSOKI_QUICK_GATE_GOCACHE:-${KITSOKI_TEMP_ROOT:-$repo_root/.temp}/capsule-ci-quick-go-build}"
+mkdir -p "$GOCACHE"
 echo "capsule-ci-quick: checking diff hygiene"
 git diff --check
 echo "capsule-ci-quick: validating Capsule CI story"
