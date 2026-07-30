@@ -159,7 +159,7 @@ the typed `queue.ErrBusy` result within the configured lock wait.
   [--actor --reason --project]`, plus `submit`, `submit-external`,
   `serve-admission`, `status`, `worker`
   (`--retry-delay`, `--max-retry-delay`, `--max-attempts`,
-  `--env-retry-delay`, `--max-env-duration`).
+  `--env-retry-delay`, `--max-env-duration`, `--max-env-repeat`).
 - **JSON-RPC** (runstatus server): `queue.status`, `queue.kick`, `queue.park`,
   `queue.resume`, `queue.emergency`, `queue.override`, `queue.reject` with
   params `{id, actor, reason, project?}` — the portal-UI surface.
@@ -176,7 +176,7 @@ the worker never string-matches an error to guess.
 | Class | Produced by | Policy |
 | --- | --- | --- |
 | **Product** (plain error) | a gate that ran and reported red | exponential backoff, consumes `--max-attempts`, parks as `needs_input` when exhausted |
-| **Environmental** (`Environmental`) | transient infrastructure: a target not yet fetched, lock contention, a workspace-create race, a lost remote transport | fixed `--env-retry-delay`, keeps queue position, does **not** consume the attempt budget, parks once degraded past `--max-env-duration` |
+| **Environmental** (`Environmental`) | transient infrastructure: a target not yet fetched, lock contention, a workspace-create race, a lost remote transport | fixed `--env-retry-delay`, keeps queue position, does **not** consume the attempt budget, parks once degraded past `--max-env-duration` **or** once `--max-env-repeat` consecutive attempts report the byte-identical failure message |
 | **Environmental / immediate** (`EnvironmentalImmediate`) | the gate produced **no verdict** and waiting cannot change that: a missing toolchain, a gate killed or starved mid-run | parks at once as `needs_input`, rolls the attempt back, `retry_reason` carries the named cause |
 | **Harness** (`Harness`) | the gate is misconfigured (unknown executor/pipeline) | parks at once |
 
@@ -203,6 +203,52 @@ red test. `queue status` then shows the class and cause directly
 `env_retries` / `first_env_failure_at` are populated instead of left at the zero
 value.
 
+### Environmental repetition: a second identical failure parks, it does not wait out the clock
+
+`--max-env-duration`'s wall-clock bound (default 2h) exists so a candidate
+stuck in a persistently degraded environment eventually parks. It does not by
+itself bound *how many times* the worker rediscovers the same answer before
+that clock runs out. POG candidate `queue-58a9285a62d8` retried 172 times over
+2 hours: its `ExecutorGate` dispatch to the `vm-pool` executor could not even
+lease a worker — `service.Run` returned `capsule ci: pool executor "vm-pool":
+lease worker: vmpool: lease: acquire: vmpool: resolve worker image: vmpool:
+stat worker image pointer parent /private/etc/kitsoki: no such file or
+directory` — and `ExecutorGate.Run` wraps exactly that unmodified message as
+`Environmental(runErr)` (`gate_evidence` shows the resulting no-verdict
+dispatch as `outcome=unknown`, `ExecutorGate`'s display default for an empty
+verdict, not a value the pipeline itself reported). The underlying cause is a
+static local misconfiguration — a missing filesystem path — so the message
+was identical on every attempt; the queue's durable state only retains the
+*most recent* failure text, not a full per-attempt history, but the message's
+total absence of per-attempt variables (no job/execution ID, no timestamp) is
+consistent with byte-for-byte repetition across all 172. None of those
+attempts could have produced a different answer; the wall-clock bound alone
+let it burn the full window rediscovering that.
+
+Retrying is only useful when the situation might have changed. An
+environmental failure whose message is **byte-identical** to the one
+immediately before it is not evidence of transience, it is evidence of a
+stuck state. So `retryOrParkEnv` tracks a second, independent bound on the
+candidate — `env_failure_signature` (the most recent environmental failure's
+exact message) and `env_repeat_streak` (how many consecutive attempts,
+including the current one, matched it) — and parks as `needs_input` with
+`retry_reason` suffixed `_repeated_outcome` once `--max-env-repeat`
+(default **2**: the first failure plus one retry that reproduces it exactly)
+consecutive attempts match. This bound is checked before the wall-clock bound,
+so it typically trips first and turns what would have been a multi-hour
+rediscovery into two fast attempts.
+
+A **different** message each attempt — a different lock holder, a different
+transient network symptom — resets `env_repeat_streak` to 1 and keeps the full
+`--max-env-duration`-bounded leniency; only exact sameness is the signal, not
+the mere presence of an environmental classification like `outcome=unknown`.
+Comparison is intentionally exact (no fuzzy/prefix matching): a summary that
+varies for a real reason must not be conflated with one that is genuinely
+unchanged. `env_failure_signature` / `env_repeat_streak` reset alongside
+`env_retries` / `first_env_failure_at` on a clean preparation, a landed
+finalization, `resume`, and `override`, so a resolved streak never biases a
+later, unrelated environmental failure's bound.
+
 ## Testing
 
 `internal/capsule/queue` covers the semantics with unit fakes and real-git
@@ -210,8 +256,13 @@ end-to-end tests: backoff and max-attempts parking, kick/park/resume/override,
 emergency ordering, harness classification, environmental classification
 (`shell_gate_class_test.go` drives the real `ShellGate` against real
 subprocesses, so the exit statuses under test are the real ones — a fake that
-always resolved its tools would prove nothing), parked-head non-blocking,
-attempt inheritance across resubmission, WIP byte-completeness (including
-control-state survival), disjoint auto-merge, conflict resolution via an
-injected resolver runner (no LLM in automated tests), conflict retention
-without a resolver, and concurrent workers + operator traffic under `-race`.
+always resolved its tools would prove nothing), environmental repeat-streak
+parking versus genuine transience
+(`TestWltFailGateEnvErrorParksAfterRepeatedIdenticalOutcome`,
+`TestWltGateEnvErrorParksAfterRepeatedIdenticalOutcomeThroughFullRunOnceFlow`,
+and the differing-message negative case, in `worker_lifecycle_test.go`),
+parked-head non-blocking, attempt inheritance across resubmission, WIP
+byte-completeness (including control-state survival), disjoint auto-merge,
+conflict resolution via an injected resolver runner (no LLM in automated
+tests), conflict retention without a resolver, and concurrent workers +
+operator traffic under `-race`.

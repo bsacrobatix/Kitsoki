@@ -166,6 +166,7 @@ func (s Store) Resume(op Op) (Candidate, error) {
 		c.RetryAt, c.ParkedAt = time.Time{}, time.Time{}
 		c.ParkedBy, c.RetryReason, c.Failure, c.ConflictContinuation = "", "", "", ""
 		c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
+		c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
 		return nil
 	})
 }
@@ -207,6 +208,14 @@ func (s Store) Override(op Op) (Candidate, error) {
 			c.Attempt = 0
 			c.RetryAt, c.ParkedAt = time.Time{}, time.Time{}
 			c.ParkedBy, c.RetryReason, c.Failure, c.ConflictContinuation = "", "", "", ""
+			// Resume resets this same environmental bookkeeping (see above);
+			// Override must match it. Left stale, a candidate overridden out
+			// of a parked environmental streak would carry a nonzero
+			// EnvRepeatStreak/FirstEnvFailureAt into whatever it does next,
+			// biasing retryOrParkEnv's wall-clock and repeat-streak bounds
+			// against an unrelated later failure.
+			c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
+			c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
 		}
 		// Override remains the explicit human emergency/waiver path. It is
 		// distinct from a normal steward approval and can release its hold.

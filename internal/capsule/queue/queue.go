@@ -145,6 +145,16 @@ type Candidate struct {
 	Approval                 *Approval          `json:"approval,omitempty"`
 	EnvRetries               int                `json:"env_retries,omitempty"`
 	FirstEnvFailureAt        time.Time          `json:"first_env_failure_at,omitempty"`
+	// EnvFailureSignature is the exact message of the most recent
+	// environmental failure, and EnvRepeatStreak counts how many consecutive
+	// environmental failures (including the current one) matched it exactly.
+	// See ProcessDeps.MaxEnvRepeat: an unbroken streak of identical messages
+	// parks the candidate well before MaxEnvDuration's wall-clock bound would,
+	// because an unchanged message is proof the condition is not transient. A
+	// changed message resets the streak to 1 and keeps the lenient
+	// wall-clock-bounded retry policy.
+	EnvFailureSignature string `json:"env_failure_signature,omitempty"`
+	EnvRepeatStreak     int    `json:"env_repeat_streak,omitempty"`
 }
 
 // Approval is the steward decision bound to the exact prepared state.
@@ -234,13 +244,29 @@ type ProcessDeps struct {
 	MaxAttempts   int           // default 5
 
 	// Environmental retry policy (queue.EnvError, see Environmental). A
-	// short fixed backoff, bounded by wall-clock time elapsed since the
-	// candidate's current environmental-failure streak began rather than by
-	// an attempt count, so a transient fetch/lock/workspace-create failure
-	// never burns the product-failure attempt budget above. Zero values
-	// take the defaults below.
+	// short fixed backoff, bounded two ways: wall-clock time elapsed since
+	// the candidate's current environmental-failure streak began rather than
+	// by an attempt count, so a transient fetch/lock/workspace-create
+	// failure never burns the product-failure attempt budget above; and a
+	// short run of consecutive identical failure messages (MaxEnvRepeat), so
+	// a remote gate that keeps returning the same non-answer parks fast
+	// instead of rediscovering the same stuck state for the full
+	// MaxEnvDuration window. Zero values take the defaults below.
 	EnvRetryDelay  time.Duration // default 30s
 	MaxEnvDuration time.Duration // default 2h
+	// MaxEnvRepeat bounds a different axis than MaxEnvDuration: how many
+	// consecutive environmental failures may report the byte-identical
+	// message before the candidate parks, regardless of how much of
+	// MaxEnvDuration remains. Retrying is only useful when the situation
+	// might have changed; an executor returning the exact same non-answer
+	// (e.g. a stuck outcome=unknown, or a static misconfiguration like a
+	// missing worker-image path) is not transient, it is stuck, and letting
+	// it spin to the wall-clock bound only turns a fast diagnosis into a
+	// slow one — POG candidate queue-58a9285a62d8 retried 172 times over 2
+	// hours against one unchanging cause. A *different* message each attempt
+	// resets the streak and keeps the full MaxEnvDuration leniency, since
+	// that pattern is what genuine transient infrastructure looks like.
+	MaxEnvRepeat int // default 2
 }
 
 const (
@@ -249,6 +275,7 @@ const (
 	DefaultMaxAttempts    = 5
 	DefaultEnvRetryDelay  = 30 * time.Second
 	DefaultMaxEnvDuration = 2 * time.Hour
+	DefaultMaxEnvRepeat   = 2
 )
 
 func (d ProcessDeps) retryDelay() time.Duration {
@@ -268,6 +295,12 @@ func (d ProcessDeps) envRetryDelay() time.Duration {
 }
 func (d ProcessDeps) maxEnvDuration() time.Duration {
 	return firstDuration(d.MaxEnvDuration, DefaultMaxEnvDuration)
+}
+func (d ProcessDeps) maxEnvRepeat() int {
+	if d.MaxEnvRepeat > 0 {
+		return d.MaxEnvRepeat
+	}
+	return DefaultMaxEnvRepeat
 }
 
 // HarnessError marks a failure of the queue's own machinery (a resolver or

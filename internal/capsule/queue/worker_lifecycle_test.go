@@ -574,6 +574,140 @@ func TestWltFinalizeEnvErrorRetriesShortWithoutBurningAttemptBudget(t *testing.T
 	}
 }
 
+// --- environmental repeat-streak parking (retryOrParkEnv) ------------------
+//
+// POG candidate queue-58a9285a62d8 retried 172 times over 2 hours: its
+// ExecutorGate dispatch to the vm-pool executor could not even lease a
+// worker (service.Run returned `capsule ci: pool executor "vm-pool": lease
+// worker: vmpool: lease: acquire: vmpool: resolve worker image: vmpool: stat
+// worker image pointer parent /private/etc/kitsoki: no such file or
+// directory`), so ExecutorGate.Run wrapped that unmodified message as
+// Environmental(runErr) and it reached failGate's env branch — on every
+// single attempt, since the underlying cause was a static local
+// misconfiguration (gate_evidence's outcome=unknown is ExecutorGate's
+// display default for a verdict that was never produced, not a value the
+// pipeline itself reported). retryOrParkEnv previously bounded environmental
+// retries only by wall-clock time (2h default), never by repetition. These
+// tests drive the real failGate/retryOrParkEnv path (no reimplemented
+// policy) to pin: (a) an identical message parks on its second occurrence,
+// well inside a MaxEnvDuration the wall-clock bound alone would never trip
+// across two attempts; (b) a genuinely different message each time is not
+// penalized and keeps the full lenient wall-clock-bounded retry budget.
+
+func TestWltFailGateEnvErrorParksAfterRepeatedIdenticalOutcome(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	wltSubmit(t, store, "gate-env-repeat")
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	w := Worker{Store: store, Deps: ProcessDeps{EnvRetryDelay: 30 * time.Second, MaxEnvDuration: 2 * time.Hour, Now: func() time.Time { return clock }}}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cand := &state.Candidates[0]
+	sameOutcome := func() error {
+		return Environmental(fmt.Errorf(`capsule ci: pool executor "vm-pool": lease worker: vmpool: lease: acquire: vmpool: resolve worker image: vmpool: stat worker image pointer parent /private/etc/kitsoki: no such file or directory`))
+	}
+
+	// First occurrence: leniently retried on the fixed environmental
+	// schedule; the streak is 1 and nowhere near either park bound.
+	w.failGate(&state, cand, sameOutcome())
+	if cand.Phase != RetryWait || cand.RetryReason != "gate_failed" {
+		t.Fatalf("attempt 1: cand=%#v", cand)
+	}
+	if cand.EnvRepeatStreak != 1 || cand.EnvFailureSignature == "" {
+		t.Fatalf("attempt 1: streak=%d signature=%q, want streak=1 and a recorded signature", cand.EnvRepeatStreak, cand.EnvFailureSignature)
+	}
+
+	// Second occurrence of the exact same message: the repeat-streak bound
+	// trips and parks immediately — this is the fix. Before it, this
+	// candidate would have retried on the fixed 30s schedule for up to the
+	// full 2h MaxEnvDuration (the historical 172-attempt failure mode).
+	w.failGate(&state, cand, sameOutcome())
+	if cand.Phase != NeedsInput || cand.RetryReason != "gate_failed_repeated_outcome" {
+		t.Fatalf("attempt 2: cand=%#v", cand)
+	}
+	if cand.EnvRepeatStreak != 2 {
+		t.Fatalf("attempt 2: streak=%d, want 2", cand.EnvRepeatStreak)
+	}
+	if strings.Contains(cand.RetryReason, "environment_degraded") {
+		t.Fatalf("parked for the wrong reason (wall-clock, not repetition): %s", cand.RetryReason)
+	}
+	if !strings.Contains(strings.Join(cand.Evidence, " "), "repeated identically 2 time") {
+		t.Fatalf("evidence does not name the repeat: %v", cand.Evidence)
+	}
+}
+
+// TestWltFailGateEnvErrorWithDifferingMessagesKeepsRetrying is the negative
+// case: a gate that fails environmentally with a genuinely different message
+// each time — a different lock holder, a different transient symptom — is
+// real transience, not a stuck state, and must keep the full lenient
+// wall-clock-bounded retry budget rather than being penalized by the
+// repeat-streak bound above.
+func TestWltFailGateEnvErrorWithDifferingMessagesKeepsRetrying(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	wltSubmit(t, store, "gate-env-vary")
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	w := Worker{Store: store, Deps: ProcessDeps{EnvRetryDelay: 30 * time.Second, MaxEnvDuration: 2 * time.Hour, Now: func() time.Time { return clock }}}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cand := &state.Candidates[0]
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		w.failGate(&state, cand, Environmental(fmt.Errorf("transport lost: connection reset by peer (attempt %d)", attempt)))
+		if cand.Phase != RetryWait || cand.RetryReason != "gate_failed" {
+			t.Fatalf("attempt %d: cand=%#v", attempt, cand)
+		}
+		if cand.EnvRepeatStreak != 1 {
+			t.Fatalf("attempt %d: streak=%d, want 1 (each message differs)", attempt, cand.EnvRepeatStreak)
+		}
+	}
+}
+
+// TestWltGateEnvErrorParksAfterRepeatedIdenticalOutcomeThroughFullRunOnceFlow
+// closes the same gap end to end through RunOnce, matching how a real
+// ExecutorGate dispatch reaches failGate via prepare's gate branch — not a
+// direct unit call.
+func TestWltGateEnvErrorParksAfterRepeatedIdenticalOutcomeThroughFullRunOnceFlow(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := wltSHA(t)
+	if _, err := store.Submit(Submit{Branch: "agent/gate-env-repeat-flow", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
+		return GateResult{Passed: false, Evidence: []string{"queue:executor-gate pipeline=change executor=vm-pool outcome=unknown"}},
+			Environmental(fmt.Errorf(`capsule ci: pool executor "vm-pool": lease worker: vmpool: lease: acquire: vmpool: resolve worker image: vmpool: stat worker image pointer parent /private/etc/kitsoki: no such file or directory`))
+	})
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: specIntegration(), Gate: gate, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: 2 * time.Hour, Now: func() time.Time { return clock }}}
+
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Candidates) != 1 {
+		t.Fatalf("want exactly one candidate, got %d", len(state.Candidates))
+	}
+	id := state.Candidates[0].ID
+	first := wltGet(t, store, id)
+	if first.Phase != RetryWait {
+		t.Fatalf("first RunOnce: phase=%s, want retry_wait", first.Phase)
+	}
+	clock = first.RetryAt.Add(time.Second)
+
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := wltGet(t, store, id)
+	if second.Phase != NeedsInput || second.RetryReason != "gate_failed_repeated_outcome" {
+		t.Fatalf("second RunOnce: phase=%s reason=%s, want needs_input/gate_failed_repeated_outcome after only 2 attempts (not the 2h wall-clock bound)", second.Phase, second.RetryReason)
+	}
+}
+
 // TestWltFinalizeOnlyAdvancesFIFOHeadLeavingLaterCandidateUntouched covers
 // (d): with two candidates ready to finalize, only the FIFO head must be
 // finalized on a single RunOnce pass; the later candidate stays completely

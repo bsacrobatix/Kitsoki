@@ -72,6 +72,12 @@ func TestFailedCandidateBacksOffExponentiallyAndParksAtMaxAttempts(t *testing.T)
 // workspace-create race — never a red gate) gets a short fixed backoff and
 // never burns the bounded product-failure attempt budget, unlike
 // TestFailedCandidateBacksOffExponentiallyAndParksAtMaxAttempts above.
+//
+// Each attempt's fetch failure names a different missing object — real
+// transient fetch races don't reproduce the identical message twice in a
+// row — so retryOrParkEnv's repeat-streak bound (see
+// TestEnvironmentalFailureParksAfterRepeatedIdenticalOutcome) never trips
+// here; this test is only about the wall-clock/attempt-count split.
 func TestEnvironmentalSpeculationFailureRetriesWithoutBurningAttempts(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	store := Store{ProjectRoot: t.TempDir()}
@@ -80,8 +86,10 @@ func TestEnvironmentalSpeculationFailureRetriesWithoutBurningAttempts(t *testing
 		t.Fatal(err)
 	}
 	clock := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	fetchCall := 0
 	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
-		return Speculation{}, Environmental(fmt.Errorf("fetch failed: not a valid object"))
+		fetchCall++
+		return Speculation{}, Environmental(fmt.Errorf("fetch failed: object %d not a valid object", fetchCall))
 	}}
 	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: time.Hour, Now: func() time.Time { return clock }}
 	worker := Worker{Store: store, Deps: deps}
@@ -101,6 +109,9 @@ func TestEnvironmentalSpeculationFailureRetriesWithoutBurningAttempts(t *testing
 		if c.EnvRetries != attempt {
 			t.Fatalf("attempt %d: env_retries=%d, want %d", attempt, c.EnvRetries, attempt)
 		}
+		if c.EnvRepeatStreak != 1 {
+			t.Fatalf("attempt %d: env_repeat_streak=%d, want 1 (each attempt's message differs, so the repeat-streak bound must never advance)", attempt, c.EnvRepeatStreak)
+		}
 		if got := c.RetryAt.Sub(clock); got != 30*time.Second {
 			t.Fatalf("attempt %d: env backoff=%s, want fixed 30s (not exponential)", attempt, got)
 		}
@@ -113,6 +124,13 @@ func TestEnvironmentalSpeculationFailureRetriesWithoutBurningAttempts(t *testing
 // degraded environment still eventually parks, bounded by wall-clock time
 // since the failure streak began rather than by an attempt count that
 // environmental failures deliberately do not consume.
+//
+// This test's fixture happens to repeat the identical failure message on
+// every attempt, which is exactly what retryOrParkEnv's separate
+// repeat-streak bound is designed to catch (see
+// TestEnvironmentalFailureParksAfterRepeatedIdenticalOutcome) — so MaxEnvRepeat
+// is set generously high here to isolate the wall-clock axis under test from
+// that other, faster-tripping axis.
 func TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	store := Store{ProjectRoot: t.TempDir()}
@@ -124,7 +142,7 @@ func TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount(t *testing.
 	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
 		return Speculation{}, Environmental(fmt.Errorf("workspace create: lock held"))
 	}}
-	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: 90 * time.Second, Now: func() time.Time { return clock }}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: 90 * time.Second, MaxEnvRepeat: 1000, Now: func() time.Time { return clock }}
 	worker := Worker{Store: store, Deps: deps}
 
 	var c Candidate
@@ -158,8 +176,9 @@ func TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount(t *testing.
 
 // TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation guards against
 // stale streak state: once a candidate clears an environmental blip and
-// prepares cleanly, EnvRetries/FirstEnvFailureAt must not linger to bias a
-// later, unrelated environmental failure's wall-clock bound.
+// prepares cleanly, EnvRetries/FirstEnvFailureAt — and, since this fix,
+// EnvFailureSignature/EnvRepeatStreak — must not linger to bias a later,
+// unrelated environmental failure's wall-clock or repeat-streak bound.
 func TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	store := Store{ProjectRoot: t.TempDir()}
@@ -186,6 +205,9 @@ func TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation(t *testing.T) {
 	if c.EnvRetries != 1 || c.FirstEnvFailureAt.IsZero() {
 		t.Fatalf("expected the first environmental failure to be recorded: %#v", c)
 	}
+	if c.EnvFailureSignature != "fetch failed" || c.EnvRepeatStreak != 1 {
+		t.Fatalf("expected the failure signature/streak to be recorded: signature=%q streak=%d", c.EnvFailureSignature, c.EnvRepeatStreak)
+	}
 	clock = c.RetryAt.Add(time.Second)
 
 	if _, err := worker.RunOnce(context.Background()); err != nil {
@@ -197,6 +219,9 @@ func TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation(t *testing.T) {
 	}
 	if c.EnvRetries != 0 || !c.FirstEnvFailureAt.IsZero() {
 		t.Fatalf("expected the environmental streak to reset on success: env_retries=%d first_env_failure_at=%v", c.EnvRetries, c.FirstEnvFailureAt)
+	}
+	if c.EnvFailureSignature != "" || c.EnvRepeatStreak != 0 {
+		t.Fatalf("expected the failure signature/streak to reset on success: signature=%q streak=%d", c.EnvFailureSignature, c.EnvRepeatStreak)
 	}
 }
 
@@ -325,6 +350,65 @@ func TestOverrideLandsParkedCandidateWithoutGateAndIsAudited(t *testing.T) {
 	}
 	if !hasEvidence(c, "queue:gate-overridden-by=brad") {
 		t.Fatalf("waiver missing from evidence: %v", c.Evidence)
+	}
+}
+
+// TestOverrideResetsEnvironmentalBookkeepingLikeResume closes an asymmetry
+// found alongside the retryOrParkEnv repeat-streak fix: Resume already resets
+// env_retries/first_env_failure_at (see
+// TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation) when it
+// returns a parked candidate to queued, but Override — the other operator
+// verb with the identical parked/retry_wait-to-queued transition — did not.
+// Left stale, an overridden candidate would carry a nonzero
+// env_repeat_streak/first_env_failure_at into whatever it does next, biasing
+// retryOrParkEnv's wall-clock and repeat-streak bounds against an unrelated
+// later failure.
+func TestOverrideResetsEnvironmentalBookkeepingLikeResume(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	store := Store{ProjectRoot: t.TempDir()}
+	candidate, err := store.Submit(Submit{Branch: "agent/a", SHA: sha, Receipt: testReceipt(t, sha)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
+		return Speculation{}, Environmental(fmt.Errorf("workspace create: lock held"))
+	}}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: time.Second, MaxEnvDuration: time.Hour, Now: func() time.Time { return clock }}
+	worker := Worker{Store: store, Deps: deps}
+
+	// The identical message on two consecutive attempts trips the
+	// repeat-streak bound (default MaxEnvRepeat=2) and parks — this is the
+	// precondition under test, not the thing being asserted here.
+	var parkedPhase Status
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := worker.RunOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		c := mustGet(t, store, candidate.ID)
+		parkedPhase = c.phase()
+		if parkedPhase == NeedsInput {
+			break
+		}
+		clock = c.RetryAt.Add(time.Second)
+	}
+	parked := mustGet(t, store, candidate.ID)
+	if parkedPhase != NeedsInput || parked.EnvRepeatStreak < 2 || parked.EnvFailureSignature == "" || parked.FirstEnvFailureAt.IsZero() {
+		t.Fatalf("precondition: expected candidate parked with environmental bookkeeping recorded: %#v", parked)
+	}
+
+	overridden, err := store.Override(Op{ID: candidate.ID, Actor: "brad", Reason: "hotfix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overridden.phase() != Queued {
+		t.Fatalf("override: phase=%s, want queued", overridden.phase())
+	}
+	if overridden.EnvRetries != 0 || !overridden.FirstEnvFailureAt.IsZero() {
+		t.Fatalf("override left stale env_retries/first_env_failure_at: %#v", overridden)
+	}
+	if overridden.EnvFailureSignature != "" || overridden.EnvRepeatStreak != 0 {
+		t.Fatalf("override left stale env_failure_signature/env_repeat_streak: %#v", overridden)
 	}
 }
 

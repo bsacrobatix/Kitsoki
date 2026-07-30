@@ -195,6 +195,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// candidate was on; stale streak state must not linger into a later,
 		// unrelated environmental blip.
 		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
+		cur.EnvFailureSignature, cur.EnvRepeatStreak = "", 0
 	})
 }
 
@@ -310,7 +311,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 			}
 			var envErr EnvError
 			if errors.As(err, &envErr) {
-				w.retryOrParkEnv(cur, "finalization_failed")
+				w.retryOrParkEnv(cur, "finalization_failed", envErr.Err)
 				return
 			}
 			w.retryOrPark(state, cur, "finalization_failed")
@@ -326,6 +327,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		cur.ResultMainSHA = first(result.NewMainSHA, cur.TreeSHA)
 		cur.FinalizationLog = first(result.Log, cur.FinalizationLog)
 		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
+		cur.EnvFailureSignature, cur.EnvRepeatStreak = "", 0
 	}); updateErr != nil {
 		return true, updateErr
 	}
@@ -460,7 +462,7 @@ func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	}
 	var envErr EnvError
 	if errors.As(err, &envErr) {
-		w.retryOrParkEnv(c, "speculation_failed")
+		w.retryOrParkEnv(c, "speculation_failed", envErr.Err)
 		return
 	}
 	w.retryOrPark(state, c, "speculation_failed")
@@ -481,7 +483,7 @@ func (w Worker) failGate(state *State, c *Candidate, err error) {
 			w.parkNoVerdict(c, "gate_no_verdict", envErr.Cause)
 			return
 		}
-		w.retryOrParkEnv(c, "gate_failed")
+		w.retryOrParkEnv(c, "gate_failed", envErr.Err)
 		return
 	}
 	w.retryOrPark(state, c, "gate_failed")
@@ -538,15 +540,32 @@ func (w Worker) retryOrPark(state *State, c *Candidate, reason string) {
 // retryOrParkEnv applies the environmental retry policy: a short fixed
 // backoff that does not consume the bounded product-failure attempt budget
 // — the claim-time increment in claimPreparation is rolled back here — and
-// is bounded by wall-clock time elapsed since this candidate's current
-// environmental-failure streak began, not by an attempt count. The
-// candidate keeps its queue position: an environmental failure said nothing
-// about this candidate's own tree, so unlike retryOrPark it does not need
-// to lose its place in line, only to be skipped by claim/finalize while its
-// timer is running (the same skip every retry_wait candidate already gets).
-// A candidate stuck in a persistently degraded environment still eventually
-// parks instead of retrying forever.
-func (w Worker) retryOrParkEnv(c *Candidate, reason string) {
+// is bounded two ways, not by an attempt count. The candidate keeps its
+// queue position: an environmental failure said nothing about this
+// candidate's own tree, so unlike retryOrPark it does not need to lose its
+// place in line, only to be skipped by claim/finalize while its timer is
+// running (the same skip every retry_wait candidate already gets).
+//
+// The first bound is wall-clock time elapsed since this candidate's current
+// environmental-failure streak began: a candidate stuck in a persistently
+// degraded environment still eventually parks instead of retrying forever.
+//
+// The second bound is repetition: cause's exact message is compared against
+// the immediately preceding environmental failure's. Retrying is only useful
+// when the situation might have changed, and a remote gate returning the
+// byte-identical non-answer is proof it has not — POG candidate
+// queue-58a9285a62d8 retried 172 times over 2 hours against a static
+// "resolve worker image: ... no such file or directory" failure that could
+// never have cleared by waiting. An unbroken streak of maxEnvRepeat()
+// identical messages (default 2: the first failure plus one retry that
+// reproduces it exactly) parks at once, well before the wall-clock bound
+// would. A *different* message each attempt — a different lock holder, a
+// different transient network symptom — resets the streak to 1 and keeps
+// the full wall-clock-bounded leniency, since varying messages are what
+// genuine transient infrastructure actually looks like; only sameness is
+// the signal, not the mere presence of an environmental classification like
+// outcome=unknown.
+func (w Worker) retryOrParkEnv(c *Candidate, reason string, cause error) {
 	n := now(w.Deps)
 	if c.Attempt > 0 {
 		c.Attempt--
@@ -555,6 +574,19 @@ func (w Worker) retryOrParkEnv(c *Candidate, reason string) {
 		c.FirstEnvFailureAt = n
 	}
 	c.EnvRetries++
+
+	sig := envFailureSignature(cause)
+	if sig != "" && sig == c.EnvFailureSignature {
+		c.EnvRepeatStreak++
+	} else {
+		c.EnvFailureSignature, c.EnvRepeatStreak = sig, 1
+	}
+	if sig != "" && c.EnvRepeatStreak >= w.Deps.maxEnvRepeat() {
+		w.park(c, reason+"_repeated_outcome")
+		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environmental failure repeated identically %d time(s) (%q); parked as needs_input instead of retrying an unchanged condition", c.EnvRepeatStreak, sig))
+		return
+	}
+
 	if n.Sub(c.FirstEnvFailureAt) >= w.Deps.maxEnvDuration() {
 		w.park(c, reason+"_environment_degraded")
 		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environment degraded for %s since %s; parked as needs_input", n.Sub(c.FirstEnvFailureAt).Round(time.Second), c.FirstEnvFailureAt.Format(time.RFC3339)))
@@ -563,6 +595,20 @@ func (w Worker) retryOrParkEnv(c *Candidate, reason string) {
 	c.Phase, c.Status, c.RetryReason = RetryWait, RetryWait, reason
 	c.RetryAt = n.Add(w.Deps.envRetryDelay())
 	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environmental failure (%s), retry %d, retry_at=%s", reason, c.EnvRetries, c.RetryAt.Format(time.RFC3339)))
+}
+
+// envFailureSignature normalizes an environmental failure's cause into a
+// comparable string for repeat detection in retryOrParkEnv. Comparison is
+// intentionally exact, not fuzzy: any difference in the message — a
+// different verdict summary, a different infrastructure symptom — is a real
+// change worth another attempt, not noise to be smoothed over. A nil cause
+// (defensive only; Environmental/EnvironmentalImmediate never wrap a nil
+// error) signs out of repeat detection entirely rather than matching itself.
+func envFailureSignature(cause error) string {
+	if cause == nil {
+		return ""
+	}
+	return strings.TrimSpace(cause.Error())
 }
 
 func (w Worker) park(c *Candidate, reason string) {

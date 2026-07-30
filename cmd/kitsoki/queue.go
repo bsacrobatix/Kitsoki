@@ -309,7 +309,7 @@ func queueWorkerCmd() *cobra.Command {
 	var once bool
 	var concurrency int
 	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration time.Duration
-	var maxAttempts int
+	var maxAttempts, maxEnvRepeat int
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
 		if strings.TrimSpace(gate) != "" && strings.TrimSpace(executorName) != "" {
 			return fmt.Errorf("queue worker: --gate and --executor are mutually exclusive")
@@ -328,6 +328,7 @@ func queueWorkerCmd() *cobra.Command {
 		}
 		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts
 		deps.EnvRetryDelay, deps.MaxEnvDuration = envRetryDelay, maxEnvDuration
+		deps.MaxEnvRepeat = maxEnvRepeat
 		n := concurrency
 		if n < 1 {
 			n = 1
@@ -398,6 +399,7 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
 	cmd.Flags().DurationVar(&envRetryDelay, "env-retry-delay", queue.DefaultEnvRetryDelay, "fixed backoff before retrying an environmental failure (fetch/lock/workspace-create); does not consume the attempt budget")
 	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_input")
+	cmd.Flags().IntVar(&maxEnvRepeat, "max-env-repeat", queue.DefaultMaxEnvRepeat, "consecutive byte-identical environmental failure messages before parking as needs_input, regardless of --max-env-duration; a changed message resets the count")
 	return cmd
 }
 
