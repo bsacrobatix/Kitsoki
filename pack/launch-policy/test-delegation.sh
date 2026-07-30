@@ -167,7 +167,14 @@ echo "PASS: activated shim is transparent outside its installation tree"
 if out="$(run_launch claude "$repo" --model x 2>&1)"; then
   fail "denied launch (protected primary checkout) was allowed"
 fi
-grep -q "agent launch policy denied" <<<"$out" || fail "denial did not surface a policy-denied error: $out"
+# The load-bearing invariant is that a bare launch in the protected primary
+# checkout never reaches a backend. Since the protected-root Capsule exception
+# landed, a raw-interactive launch from a protected root is refused while
+# materializing that Capsule rather than at the policy gate — this fixture repo
+# declares no capsule definitions on purpose. Accept either refusal; the
+# never-invoked assertion below stays strict.
+grep -qE "agent launch policy denied|prepare protected-root interactive Capsule" <<<"$out" \
+  || fail "denial did not surface a policy or protected-root refusal: $out"
 [ ! -s "$log" ] || fail "denied launch still invoked a backend: $(cat "$log")"
 echo "PASS: policy denial blocks the backend before it is ever invoked"
 
@@ -226,7 +233,49 @@ pog_workspace="$(head -n 1 "$tmp/capsule-workspaces.log")"
 [ -d "$pog_workspace" ] || fail "pog-drive did not create a Capsule workspace"
 echo "PASS: pog-drive creates a Capsule before launching the bounded driver"
 
-# --- 7: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
+# --- 7: unlimited launches in a plain, REUSED git worktree, no Capsule ------
+# `unlimited` is the direct-git counterpart of `superagent`: same
+# full-permissions raw/interactive session, but the working dir is a plain
+# `.worktrees/<name>` git worktree carved out by the installed policy's
+# allowed_roots. It must never create a Capsule, and it must reuse its worktree
+# instead of accumulating one per launch.
+: > "$tmp/capsule-workspaces.log"
+for attempt in first second; do
+  : > "$log"
+  run_launch claude "$repo" unlimited --model fast \
+    || fail "unlimited claude launch ($attempt) failed"
+  [ "$(grep -c '^=== claude invocation ===$' "$log")" -eq 1 ] \
+    || fail "expected exactly one unlimited claude invocation ($attempt), got: $(cat "$log")"
+  grep -qx 'ARG:--model' "$log" || fail "unlimited claude stripped native argv"
+  grep -qx 'ARG:fast' "$log" || fail "unlimited claude stripped native argv value"
+done
+[ -d "$repo/.worktrees/unlimited-claude" ] \
+  || fail "unlimited did not create the default .worktrees/unlimited-claude worktree"
+[ ! -e "$repo/.worktrees/unlimited-claude/.kitsoki-capsule" ] \
+  || fail "unlimited worktree carries a Capsule sentinel"
+[ ! -s "$tmp/capsule-workspaces.log" ] \
+  || fail "unlimited created a Capsule workspace: $(cat "$tmp/capsule-workspaces.log")"
+[ "$(git -C "$repo" worktree list --porcelain | grep -c '^worktree ')" -eq 2 ] \
+  || fail "unlimited did not reuse its worktree: $(git -C "$repo" worktree list)"
+
+# An explicit name selects its own reused worktree; codex shares the mechanism.
+: > "$log"
+run_launch codex "$repo" unlimited spike-x -m fast \
+  || fail "named unlimited codex launch failed"
+[ -d "$repo/.worktrees/spike-x" ] \
+  || fail "unlimited <name> did not honor the explicit worktree name"
+[ "$(grep -c '^=== codex invocation ===$' "$log")" -eq 1 ] \
+  || fail "expected exactly one named unlimited codex invocation, got: $(cat "$log")"
+grep -qx 'ARG:-m' "$log" || fail "named unlimited codex stripped native argv"
+
+# A path-shaped name must be refused rather than escaping .worktrees/.
+if out="$(run_launch codex "$repo" unlimited ../escape 2>&1)"; then
+  fail "unlimited accepted a path-shaped worktree name"
+fi
+grep -q "single path segment" <<<"$out" || fail "unlimited name rejection did not explain itself: $out"
+echo "PASS: unlimited launches in a reused plain git worktree with no Capsule involvement"
+
+# --- 8: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
 # Exercised implicitly by every run_launch call above (KITSOKI_AGENT_*_BIN is
 # always set to the shim path itself, matching the activation script). Prove
 # it explicitly and prove the hard depth-cap backstop fails fast instead of
