@@ -120,7 +120,12 @@ func TestWorkerShellRepairerFixesRedGateThenCandidateLands(t *testing.T) {
 		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
 		Gate:        ShellGate{Command: gate},
 		Repairer:    ShellRepairer{Command: repair},
-		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+		RepairReviewer: reviewFunc(func(context.Context, RepairReview) (RepairReviewResult, error) {
+			return RepairReviewResult{Passed: true, ReviewerID: "reviewer"}, nil
+		}),
+		RepairerID:         "repairer",
+		ReviewPolicyDigest: "sha256:review-v1",
+		Finalizer:          ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
 	})
 	if err != nil {
 		t.Fatal(err)

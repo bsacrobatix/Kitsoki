@@ -121,12 +121,14 @@ func TestExportWIPNewCommitExports(t *testing.T) {
 }
 
 // TestExportWIPDirtyWorktreeFlagged covers the case where the worker never
-// committed its changes at all: the bundle still contains only the sealed
-// commit, but Dirty is set so recovery tooling knows uncommitted bytes were
-// lost with the VM.
+// committed its changes at all: Kitsoki creates a deterministic synthetic
+// commit so the bytes survive VM release.
 func TestExportWIPDirtyWorktreeFlagged(t *testing.T) {
 	dir, sealedHead := initWIPRepo(t)
-	write(t, filepath.Join(dir, "a.txt"), "a\nmutated\n")
+	write(t, filepath.Join(dir, "a.txt"), "a\nstaged\n")
+	wipGit(t, dir, "add", "a.txt")
+	write(t, filepath.Join(dir, "a.txt"), "a\nstaged\nunstaged\n")
+	write(t, filepath.Join(dir, "space name.txt"), "untracked\n")
 
 	store := objectstore.NewFake()
 	export, err := bucketsource.ExportWIP(context.Background(), store, "", "exec-dirty", dir, sealedHead)
@@ -139,10 +141,30 @@ func TestExportWIPDirtyWorktreeFlagged(t *testing.T) {
 	if !export.Dirty {
 		t.Fatalf("export.Dirty = false, want true")
 	}
-	if export.Head != sealedHead {
-		t.Fatalf("Head = %s, want unchanged sealed head %s", export.Head, sealedHead)
+	if export.Head == sealedHead {
+		t.Fatalf("Head = sealed source %s; dirty bytes were not captured", sealedHead)
 	}
-	if _, err := store.Head(context.Background(), "runs/exec-dirty/wip/refs.bundle"); err != nil {
+	rc, _, err := store.Get(context.Background(), "runs/exec-dirty/wip/refs.bundle")
+	if err != nil {
 		t.Fatalf("bundle not published: %v", err)
+	}
+	defer rc.Close()
+	bundle := filepath.Join(t.TempDir(), "dirty.bundle")
+	out, err := os.Create(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := out.ReadFrom(rc); err != nil {
+		t.Fatal(err)
+	}
+	_ = out.Close()
+	recovered := t.TempDir()
+	wipGit(t, recovered, "init", "-q")
+	wipGit(t, recovered, "fetch", bundle, export.Head)
+	if got := wipGit(t, recovered, "show", export.Head+":a.txt"); got != "a\nstaged\nunstaged\n" {
+		t.Fatalf("dirty content=%q", got)
+	}
+	if got := wipGit(t, recovered, "show", export.Head+":space name.txt"); got != "untracked\n" {
+		t.Fatalf("untracked spaced path=%q", got)
 	}
 }

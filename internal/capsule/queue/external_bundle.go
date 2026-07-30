@@ -215,12 +215,18 @@ func validateExternalSubmission(in ExternalBundleSubmission, maxBytes int64) err
 		return fmt.Errorf("queue: downloaded external bundle path is required")
 	}
 	if r.Branch != in.Submit.Branch || r.CandidateSHA != in.Submit.SHA ||
-		r.TargetRef != in.Submit.targetRef() || r.ReceiptID != in.Submit.Receipt.ReceiptID ||
-		r.JobID != in.Submit.Receipt.JobID ||
+		r.TargetRef != in.Submit.targetRef() || r.ReceiptID != in.Submit.identity() ||
 		r.ManifestDigest != strings.TrimSpace(in.Submit.ManifestDigest) {
 		return fmt.Errorf("queue: external worker result does not match receipt-bound queue submission")
 	}
-	return validate(in.Submit)
+	if in.Submit.admission() == ReceiptAdmission && r.JobID != in.Submit.Receipt.JobID {
+		return fmt.Errorf("queue: external worker result does not match receipt-bound queue submission")
+	}
+	validated := in.Submit
+	if validated.admission() == DurableBundleAdmission && strings.TrimSpace(validated.SourceAnchorID) == "" {
+		validated.SourceAnchorID = "external-import-pending"
+	}
+	return validate(validated)
 }
 
 func validateExternalWorkerResult(r ExternalWorkerResult, maxBytes int64) error {

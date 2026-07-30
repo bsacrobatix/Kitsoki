@@ -32,16 +32,42 @@ const (
 
 func (s Status) Terminal() bool { return s == StatusDestroyed || s == StatusFailed }
 
+type DispatchPhase string
+
+const (
+	DispatchReserved DispatchPhase = "reserved"
+	DispatchStarting DispatchPhase = "starting"
+	DispatchStarted  DispatchPhase = "started"
+)
+
+type DispatchReservation struct {
+	ExecutionID, EnvelopeDigest string
+	Token, CertPEM, ServerName  string
+	ListenPort                  int
+}
+
 // Worker is the durable pool record for one ephemeral VM.
 type Worker struct {
-	ID           string `json:"id"`
-	JobID        string `json:"job_id"`
-	InstanceID   string `json:"instance_id,omitempty"`
-	InstanceName string `json:"instance_name"`
-	Status       Status `json:"status"`
-	PublicIP     string `json:"public_ip,omitempty"`
-	PrivateIP    string `json:"private_ip,omitempty"`
-	Image        string `json:"image"`
+	ID    string `json:"id"`
+	JobID string `json:"job_id"`
+	// ExecutionID and EnvelopeDigest bind an asynchronous CI dispatch to the
+	// exact durable pool reservation before the provider creates a VM.
+	// Legacy/manual pool leases may leave them empty.
+	ExecutionID    string        `json:"execution_id,omitempty"`
+	EnvelopeDigest string        `json:"envelope_digest,omitempty"`
+	DispatchPhase  DispatchPhase `json:"dispatch_phase,omitempty"`
+	// Resume material is controller-only and persisted in the mode-0600 pool
+	// state so a replacement process can authenticate to the exact leased VM.
+	DispatchToken      string `json:"dispatch_token,omitempty"`
+	DispatchCertPEM    string `json:"dispatch_cert_pem,omitempty"`
+	DispatchServerName string `json:"dispatch_server_name,omitempty"`
+	DispatchListenPort int    `json:"dispatch_listen_port,omitempty"`
+	InstanceID         string `json:"instance_id,omitempty"`
+	InstanceName       string `json:"instance_name"`
+	Status             Status `json:"status"`
+	PublicIP           string `json:"public_ip,omitempty"`
+	PrivateIP          string `json:"private_ip,omitempty"`
+	Image              string `json:"image"`
 	// ImageGeneration and the accompanying identity fields bind this worker
 	// to the exact external image-pointer snapshot resolved before its
 	// durable record was created. They remain zero for legacy static-image

@@ -43,6 +43,34 @@ func TestCapsulePromoteRemoteAdmissionFlagsAreExplicit(t *testing.T) {
 	}
 }
 
+func TestCapsulePromoteRepairRequiresIndependentReviewAndBoundedStages(t *testing.T) {
+	cmd := capsulePromoteCmd()
+	for _, name := range []string{"repair-review", "repairer-id", "reviewer-id", "review-policy-digest", "gate-timeout"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("capsule promote is missing --%s", name)
+		}
+	}
+	base := capsulePromoteOptions{Pipeline: "change", TargetRef: "main", Wait: true, RepairCommand: "repair"}
+	for _, mutate := range []func(*capsulePromoteOptions){
+		func(*capsulePromoteOptions) {},
+		func(o *capsulePromoteOptions) {
+			o.RepairReviewCommand, o.RepairerID, o.ReviewerID, o.ReviewPolicyDigest = "review", "same", "same", "sha256:policy"
+		},
+	} {
+		opts := base
+		mutate(&opts)
+		if _, err := runCapsulePromote(context.Background(), opts); err == nil {
+			t.Fatalf("unsafe repair options accepted: %+v", opts)
+		}
+	}
+	opts := base
+	opts.Wait = false
+	opts.RepairReviewCommand, opts.RepairerID, opts.ReviewerID, opts.ReviewPolicyDigest = "review", "repairer", "reviewer", "sha256:policy"
+	if _, err := runCapsulePromote(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "--wait") {
+		t.Fatalf("repair without wait err=%v", err)
+	}
+}
+
 func TestHostedCapsulePromotionExecutorRequiresExplicitIntegrationTargetBeforeCredentials(t *testing.T) {
 	opts := capsulePromoteOptions{
 		WorkspaceID: "hosted-capsule-1", TargetRef: "main",

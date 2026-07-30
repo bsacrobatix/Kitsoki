@@ -49,6 +49,7 @@ type Admission string
 
 const (
 	ReceiptAdmission            Admission = "receipt"
+	DurableBundleAdmission      Admission = "durable_bundle"
 	EmergencySkipTestsAdmission Admission = "emergency_skip_tests"
 )
 
@@ -90,6 +91,7 @@ type Candidate struct {
 	TargetRef                string             `json:"target_ref"`
 	TargetBaseSHAAtAdmission string             `json:"target_base_sha_at_admission,omitempty"`
 	TargetPolicy             TargetPolicy       `json:"target_policy"`
+	RequiredGateTier         string             `json:"required_gate_tier,omitempty"`
 	Sequence                 uint64             `json:"sequence"`
 	Branch                   string             `json:"branch"`
 	SHA                      string             `json:"sha"`
@@ -114,6 +116,7 @@ type Candidate struct {
 	BaseSHA                  string             `json:"base_sha,omitempty"`
 	TreeSHA                  string             `json:"tree_sha,omitempty"`
 	GateVersion              string             `json:"gate_version,omitempty"`
+	GatePolicyDigest         string             `json:"gate_policy_digest,omitempty"`
 	DependencyFingerprint    string             `json:"dependency_fingerprint,omitempty"`
 	RuntimeConfigDigest      string             `json:"runtime_config_digest,omitempty"`
 	IntegrationRef           string             `json:"integration_ref,omitempty"`
@@ -189,6 +192,8 @@ type Submit struct {
 	RuntimeReceipt                    string
 	RequiredReceiptIDs                []string
 	SourceAnchorID                    string
+	AdmissionID                       string
+	RequiredGateTier                  string
 	Now                               time.Time
 }
 
@@ -218,9 +223,20 @@ type GateResult struct {
 	DependencyFingerprint string   `json:"dependency_fingerprint,omitempty"`
 }
 type ProcessDeps struct {
-	Integration           Integration
-	Gate                  Gate
-	Repairer              Repairer
+	Integration    Integration
+	Gate           Gate
+	GateAdmission  GateAdmission
+	GateTier       string
+	GateTimeout    time.Duration
+	Repairer       Repairer
+	RepairReviewer RepairReviewer
+	// A red->repair->green transition is always non-countable until a
+	// separately identified reviewer approves it. RepairerID and the returned
+	// ReviewerID must both be non-empty and differ. ReviewPolicyDigest is
+	// folded into gate memo identity so cached green cannot bypass a changed
+	// anti-weakening policy.
+	RepairerID            string
+	ReviewPolicyDigest    string
 	Finalizer             Finalizer
 	Now                   func() time.Time
 	WorkerID              string
@@ -276,7 +292,15 @@ const (
 	DefaultEnvRetryDelay  = 30 * time.Second
 	DefaultMaxEnvDuration = 2 * time.Hour
 	DefaultMaxEnvRepeat   = 2
+	DefaultStageTimeout   = 30 * time.Minute
 )
+
+func (d ProcessDeps) stageTimeout() time.Duration {
+	if d.GateTimeout > 0 {
+		return d.GateTimeout
+	}
+	return DefaultStageTimeout
+}
 
 func (d ProcessDeps) retryDelay() time.Duration {
 	return firstDuration(d.RetryDelay, DefaultRetryDelay)
@@ -374,6 +398,26 @@ type Repairer interface {
 	Repair(context.Context, Speculation, error) ([]string, error)
 }
 
+// RepairReview is the typed anti-weakening boundary. It gives an independent
+// reviewer both immutable tree identities and the deterministic rerun result;
+// a reviewer must reject repairs that weaken tests, policy, or gate wiring.
+type RepairReview struct {
+	Before Speculation `json:"before"`
+	After  Speculation `json:"after"`
+	Gate   GateResult  `json:"gate"`
+}
+
+type RepairReviewResult struct {
+	Passed     bool     `json:"passed"`
+	ReviewerID string   `json:"reviewer_id"`
+	Evidence   []string `json:"evidence,omitempty"`
+	Log        string   `json:"log,omitempty"`
+}
+
+type RepairReviewer interface {
+	Review(context.Context, RepairReview) (RepairReviewResult, error)
+}
+
 // Finalizer owns the final protected compare-and-swap. It is called only with
 // a short durable finalization lease held by the worker.
 // Finalizer lands a gated candidate onto the protected target. Invocation is
@@ -418,9 +462,11 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 	}
 	return s.mutate(func(state *State) (Candidate, error) {
 		for _, c := range state.Candidates {
-			if c.SHA == in.SHA && c.TargetRef == in.targetRef() && c.admission() == in.admission() && c.ReceiptID == in.Receipt.ReceiptID {
+			if c.SHA == in.SHA && c.TargetRef == in.targetRef() && c.admission() == in.admission() && c.ReceiptID == in.identity() {
 				if strings.TrimSpace(in.SourceAnchorID) != "" && c.SourceAnchorID != strings.TrimSpace(in.SourceAnchorID) {
-					return Candidate{}, fmt.Errorf("queue: existing candidate source anchor does not match external submission")
+					if in.admission() != DurableBundleAdmission || !s.equivalentExternalAnchors(c.SourceAnchorID, strings.TrimSpace(in.SourceAnchorID)) {
+						return Candidate{}, fmt.Errorf("queue: existing candidate source anchor does not match external submission")
+					}
 				}
 				return c, nil
 			}
@@ -435,9 +481,12 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 		if admission == EmergencySkipTestsAdmission {
 			receiptID, receiptRef, receiptDigest = "", "", string(admission)
 			projectID = filepath.Base(mustAbs(s.ProjectRoot))
+		} else if admission == DurableBundleAdmission {
+			receiptID, receiptRef, receiptDigest = strings.TrimSpace(in.AdmissionID), "", strings.TrimSpace(in.ManifestDigest)
+			projectID = filepath.Base(mustAbs(s.ProjectRoot))
 		}
 		identity := in.identity()
-		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, RunRecordRef: strings.TrimSpace(in.RunRecordRef), ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs), SourceAnchorID: strings.TrimSpace(in.SourceAnchorID)}
+		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), RequiredGateTier: in.requiredGateTier(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, RunRecordRef: strings.TrimSpace(in.RunRecordRef), ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs), SourceAnchorID: strings.TrimSpace(in.SourceAnchorID)}
 		// A resubmission of the same SHA (fresh receipt) supersedes any active
 		// prior candidate rather than racing it in the FIFO, and inherits its
 		// durable attempt count so bounded retries cannot be reset by
@@ -462,6 +511,18 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 		state.Candidates = append(state.Candidates, c)
 		return c, nil
 	})
+}
+
+func (s Store) equivalentExternalAnchors(leftID, rightID string) bool {
+	left, leftErr := s.externalAnchor(context.Background(), leftID)
+	right, rightErr := s.externalAnchor(context.Background(), rightID)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return left.Result.CandidateSHA == right.Result.CandidateSHA &&
+		left.Result.BundleDigest == right.Result.BundleDigest &&
+		left.Result.ManifestDigest == right.Result.ManifestDigest &&
+		left.Result.TargetRef == right.Result.TargetRef
 }
 
 func (s Store) List() (State, error) { return s.readState() }
@@ -619,6 +680,9 @@ func validate(in Submit) error {
 	if strings.ContainsAny(in.targetRef(), "\n\r") {
 		return fmt.Errorf("queue: target_ref is invalid")
 	}
+	if tier := in.requiredGateTier(); tier == "" || strings.ContainsAny(tier, "\x00\n\r/\\") {
+		return fmt.Errorf("queue: required_gate_tier is invalid")
+	}
 	if policy := in.targetPolicy(); policy != WaveAutoPolicy && policy != StewardApprovedPolicy {
 		return fmt.Errorf("queue: unsupported target_policy %q", policy)
 	}
@@ -633,6 +697,11 @@ func validate(in Submit) error {
 	case EmergencySkipTestsAdmission:
 		if in.Receipt.ReceiptID != "" {
 			return fmt.Errorf("queue: emergency skip-tests admission cannot carry a Capsule CI receipt")
+		}
+	case DurableBundleAdmission:
+		if strings.TrimSpace(in.AdmissionID) == "" || strings.TrimSpace(in.SourceAnchorID) == "" ||
+			strings.TrimSpace(in.ManifestDigest) == "" || in.Receipt.ReceiptID != "" {
+			return fmt.Errorf("queue: durable-bundle admission requires anchor, policy digest, and admission id without a Capsule CI receipt")
 		}
 	default:
 		return fmt.Errorf("queue: unsupported candidate admission %q", in.Admission)
@@ -718,6 +787,9 @@ func normalize(state State) State {
 		if c.FinalizationPolicy == "" {
 			c.FinalizationPolicy = AutonomousFinalization
 		}
+		if c.RequiredGateTier == "" {
+			c.RequiredGateTier = RequiredGateTierForTarget(c.TargetRef)
+		}
 		c.RequiredReceiptIDs = cleanStrings(c.RequiredReceiptIDs)
 	}
 	state.Schema = Schema
@@ -753,6 +825,29 @@ func (in Submit) targetPolicy() TargetPolicy {
 	return in.TargetPolicy
 }
 
+func (in Submit) requiredGateTier() string {
+	if strings.TrimSpace(in.RequiredGateTier) == "" {
+		return RequiredGateTierForTarget(in.targetRef())
+	}
+	return strings.TrimSpace(in.RequiredGateTier)
+}
+
+// RequiredGateTierForTarget derives the minimum landing assurance from the
+// protected destination. An omitted tier is never a weak/wildcard identity:
+// main requires the full gate, deploy/release refs require the release gate,
+// and staging or feature refs use the change gate.
+func RequiredGateTierForTarget(target string) string {
+	target = strings.ToLower(strings.TrimSpace(target))
+	switch {
+	case target == "main" || strings.HasSuffix(target, "/main"):
+		return "full"
+	case strings.Contains(target, "deploy") || strings.Contains(target, "release") || strings.Contains(target, "prod"):
+		return "release"
+	default:
+		return "change"
+	}
+}
+
 func (s Store) legacyTargetPolicy() TargetPolicy {
 	if s.LegacyTargetPolicy == "" {
 		return WaveAutoPolicy
@@ -775,6 +870,8 @@ func (in Submit) identity() string {
 	receiptID := in.Receipt.ReceiptID
 	if in.admission() == EmergencySkipTestsAdmission {
 		receiptID = ""
+	} else if in.admission() == DurableBundleAdmission {
+		receiptID = strings.TrimSpace(in.AdmissionID)
 	}
 	if receiptID == "" {
 		return string(in.admission())
@@ -819,7 +916,7 @@ func (s Store) publishCandidateRef(in Submit) error {
 		if anchor.Result.CandidateSHA != in.SHA ||
 			anchor.Result.Branch != in.Branch ||
 			anchor.Result.TargetRef != in.targetRef() ||
-			anchor.Result.ReceiptID != in.Receipt.ReceiptID ||
+			anchor.Result.ReceiptID != in.identity() ||
 			anchor.Result.ManifestDigest != strings.TrimSpace(in.ManifestDigest) {
 			return fmt.Errorf("queue: external bundle anchor does not match queue submission")
 		}

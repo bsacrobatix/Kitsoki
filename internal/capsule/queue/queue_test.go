@@ -497,6 +497,11 @@ func TestProcessRunsOneBoundedRepairBeforeParkingRedGate(t *testing.T) {
 			repairs++
 			return []string{"repair:attempted"}, nil
 		}),
+		RepairReviewer: reviewFunc(func(context.Context, RepairReview) (RepairReviewResult, error) {
+			return RepairReviewResult{Passed: true, ReviewerID: "reviewer"}, nil
+		}),
+		RepairerID:         "repairer",
+		ReviewPolicyDigest: "sha256:review-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -604,6 +609,12 @@ type repairFunc func(context.Context, Speculation, error) ([]string, error)
 
 func (f repairFunc) Repair(ctx context.Context, s Speculation, err error) ([]string, error) {
 	return f(ctx, s, err)
+}
+
+type reviewFunc func(context.Context, RepairReview) (RepairReviewResult, error)
+
+func (f reviewFunc) Review(ctx context.Context, in RepairReview) (RepairReviewResult, error) {
+	return f(ctx, in)
 }
 
 type finalizerFunc func(context.Context, Candidate) (FinalizeResult, error)
@@ -867,7 +878,7 @@ func TestHeartbeatKeepsLeaseAliveDuringLongRunningSpeculation(t *testing.T) {
 }
 
 func TestPreparedTupleRejectsIdentityMismatch(t *testing.T) {
-	c := Candidate{SHA: strings.Repeat("1", 40), ReceiptDigest: "receipt", BaseSHA: "base", TreeSHA: "tree", GateVersion: "gate"}
+	c := Candidate{SHA: strings.Repeat("1", 40), ReceiptDigest: "receipt", BaseSHA: "base", TreeSHA: "tree", GateVersion: "gate", GatePolicyDigest: "policy"}
 	c.DependencyFingerprint = preparedFingerprint(c)
 	if err := validatePreparedTuple(c); err != nil {
 		t.Fatal(err)

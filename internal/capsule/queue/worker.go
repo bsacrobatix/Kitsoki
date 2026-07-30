@@ -50,8 +50,19 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 				continue
 			}
 			if (c.phase() == Preparing || c.phase() == Gating || c.phase() == Finalizing) && !c.LeaseExpiresAt.IsZero() && !n.Before(c.LeaseExpiresAt) {
-				c.Phase, c.Status, c.WorkerID, c.LeaseExpiresAt = Reprepare, Reprepare, "", time.Time{}
-				c.Failure = "worker lease expired; preserved attempt evidence requires reprepare"
+				if c.phase() == Finalizing {
+					// Finalizing already persists the exact expected-old/new
+					// tuple (BaseSHA/TreeSHA). Replay finalization first: if the
+					// CAS won before the daemon crashed, ProtectedFinalizer
+					// observes the target at TreeSHA and records the landing
+					// without paying for another gate.
+					c.Phase, c.Status = ReadyToFinalize, ReadyToFinalize
+					c.Failure = "finalization lease expired; replaying protected CAS intent"
+				} else {
+					c.Phase, c.Status = Reprepare, Reprepare
+					c.Failure = "worker lease expired; preserved attempt evidence requires reprepare"
+				}
+				c.WorkerID, c.LeaseExpiresAt = "", time.Time{}
 				dirty = true
 			}
 		}
@@ -125,7 +136,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// protected CAS still applies; only the deterministic gate is waived,
 		// and the waiver is recorded durably.
 		result = GateResult{Passed: true, GateVersion: "operator-override/v1", Evidence: []string{fmt.Sprintf("queue:gate-overridden-by=%s reason=%s", first(c.OverrideBy, "operator"), first(c.OverrideReason, "unspecified"))}}
-	} else if memo, ok := w.gateMemoLookup(spec.SHA, spec.RuntimeConfigDigest); ok {
+	} else if memo, ok := w.gateMemoLookup(c.TargetRef, spec.SHA, spec.RuntimeConfigDigest); ok {
 		// This exact tree already passed this exact gate identity — a
 		// reprepare onto an unchanged tree (a stale-base Reprepare whose
 		// fresh classification still lands here, or a retry after an
@@ -133,11 +144,24 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// gate again.
 		result = memo
 	} else {
-		w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
+		w.heartbeat(ctx, c.ID, func() { result, gateErr = w.runGate(ctx, c, spec) })
+		beforeRepair := spec
+		repaired := false
 		if (gateErr != nil || !result.Passed) && w.Deps.Repairer != nil {
-			repairEvidence, repairErr := w.Deps.Repairer.Repair(ctx, spec, firstGateError(gateErr))
+			stageTimeout := w.Deps.stageTimeout()
+			repairCtx, cancelRepair := context.WithTimeout(ctx, stageTimeout)
+			var repairEvidence []string
+			var repairErr error
+			w.heartbeat(ctx, c.ID, func() {
+				repairEvidence, repairErr = w.Deps.Repairer.Repair(repairCtx, spec, firstGateError(gateErr))
+			})
+			if repairCtx.Err() != nil {
+				repairErr = fmt.Errorf("queue: repair timed out after %s: %w", stageTimeout, repairCtx.Err())
+			}
+			cancelRepair()
 			result.Evidence = append(result.Evidence, repairEvidence...)
 			if repairErr == nil {
+				repaired = true
 				// A successful repair commits into the speculative workspace, so
 				// the tree identity the rerun gate validates — and the finalizer
 				// later CAS-checks — must follow the repaired HEAD. Leaving the
@@ -149,15 +173,54 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 					if head != "" {
 						spec.SHA = head
 					}
-					w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
+					w.heartbeat(ctx, c.ID, func() { result, gateErr = w.runGate(ctx, c, spec) })
 					result.Evidence = append(result.Evidence, repairEvidence...)
 				}
 			} else if gateErr == nil {
 				gateErr = repairErr
 			}
 		}
+		if repaired && gateErr == nil && result.Passed {
+			switch {
+			case w.Deps.RepairReviewer == nil:
+				gateErr = fmt.Errorf("queue: repaired gate requires an independent anti-weakening reviewer")
+			case strings.TrimSpace(w.Deps.ReviewPolicyDigest) == "":
+				gateErr = fmt.Errorf("queue: repaired gate requires a deterministic review policy digest")
+			default:
+				var review RepairReviewResult
+				var reviewErr error
+				stageTimeout := w.Deps.stageTimeout()
+				reviewCtx, cancelReview := context.WithTimeout(ctx, stageTimeout)
+				w.heartbeat(ctx, c.ID, func() {
+					review, reviewErr = w.Deps.RepairReviewer.Review(reviewCtx, RepairReview{Before: beforeRepair, After: spec, Gate: result})
+				})
+				if reviewCtx.Err() != nil {
+					reviewErr = fmt.Errorf("queue: repair review timed out after %s: %w", stageTimeout, reviewCtx.Err())
+				}
+				cancelReview()
+				result.Evidence = append(result.Evidence, review.Evidence...)
+				if review.Log != "" {
+					result.Evidence = append(result.Evidence, "queue:repair-review-log="+review.Log)
+				}
+				if reviewErr != nil {
+					gateErr = fmt.Errorf("queue: repair review failed: %w", reviewErr)
+				} else if !review.Passed {
+					gateErr = fmt.Errorf("queue: repair rejected by anti-weakening review")
+				} else {
+					repairerID := strings.TrimSpace(w.Deps.RepairerID)
+					reviewerID := strings.TrimSpace(review.ReviewerID)
+					if repairerID == "" || reviewerID == "" {
+						gateErr = fmt.Errorf("queue: independent repair review requires repairer and reviewer identities")
+					} else if repairerID == reviewerID {
+						gateErr = fmt.Errorf("queue: repairer %q cannot review its own repair", repairerID)
+					} else {
+						result.Evidence = append(result.Evidence, fmt.Sprintf("queue:repair-reviewed-by=%s repairer=%s", reviewerID, repairerID))
+					}
+				}
+			}
+		}
 		if gateErr == nil && result.Passed {
-			w.gateMemoStore(spec.SHA, spec.RuntimeConfigDigest, result)
+			w.gateMemoStore(c.TargetRef, spec.SHA, spec.RuntimeConfigDigest, result)
 		}
 	}
 	return w.update(c.ID, func(state *State, cur *Candidate) {
@@ -182,6 +245,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			return
 		}
 		cur.GateVersion = first(result.GateVersion, w.Deps.GateVersion, "deterministic-gate/v1")
+		cur.GatePolicyDigest = w.gatePolicyDigest(cur.TargetRef, spec.RuntimeConfigDigest)
 		// The CI receipt seals the candidate environment; this binds that receipt
 		// and the effective gate version to this exact prospective tree.
 		cur.DependencyFingerprint = preparedFingerprint(*cur)
@@ -197,6 +261,26 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
 		cur.EnvFailureSignature, cur.EnvRepeatStreak = "", 0
 	})
+}
+
+func (w Worker) runGate(ctx context.Context, c Candidate, spec Speculation) (GateResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, w.Deps.stageTimeout())
+	defer cancel()
+	admission := w.Deps.GateAdmission
+	if admission == nil {
+		admission = DefaultFileGateCapacity()
+	}
+	release, err := admission.Acquire(ctx, GateAdmissionRequest{
+		ProjectID: c.ProjectID,
+		TargetRef: c.TargetRef,
+		Tier:      w.gateTier(c.TargetRef),
+		WorkerID:  first(w.Deps.WorkerID, "queue-worker"),
+	})
+	if err != nil {
+		return GateResult{}, Environmental(fmt.Errorf("queue: acquire gate capacity: %w", err))
+	}
+	defer release()
+	return w.Deps.Gate.Run(ctx, spec)
 }
 
 // operatorIntervened reports whether the candidate was parked or rejected by an
@@ -255,6 +339,15 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 			if head == nil || before(*c, *head) {
 				head = c
 			}
+		}
+		if head != nil && head.phase() == ReadyToFinalize &&
+			head.GatePolicyDigest != w.gatePolicyDigest(head.TargetRef, head.RuntimeConfigDigest) {
+			clearApproval(head)
+			clearPreparedIdentity(head)
+			head.Phase, head.Status = Reprepare, Reprepare
+			head.Failure = "gate or repair-review policy changed after preparation"
+			head.Evidence = append(head.Evidence, "queue:prepared-policy-invalidated")
+			return state, write(path, state)
 		}
 		if head != nil && head.phase() == ReadyToFinalize && finalizationAuthorized(*head) {
 			w.lease(head, Finalizing, n)
@@ -359,7 +452,20 @@ func (w Worker) targetRef() string { return strings.TrimSpace(w.Deps.TargetRef) 
 
 func (w Worker) matchesTarget(c Candidate) bool {
 	target := w.targetRef()
-	return target == "" || c.TargetRef == target
+	if target != "" && c.TargetRef != target {
+		return false
+	}
+	return c.RequiredGateTier == w.gateTier(c.TargetRef)
+}
+
+func (w Worker) gateTier(target string) string {
+	if tier := strings.TrimSpace(w.Deps.GateTier); tier != "" {
+		return tier
+	}
+	if configured := w.targetRef(); configured != "" {
+		target = configured
+	}
+	return RequiredGateTierForTarget(target)
 }
 func (w Worker) update(id string, mutate func(*State, *Candidate)) error {
 	_, err := w.Store.withLock(func(path string) (State, error) {
@@ -436,17 +542,26 @@ func (w Worker) renewLease(id string) error {
 		}
 	})
 }
-func (w Worker) gateMemoLookup(treeSHA, runtimeConfigDigest string) (GateResult, bool) {
+func (w Worker) gateMemoLookup(targetRef, treeSHA, runtimeConfigDigest string) (GateResult, bool) {
 	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
 		return GateResult{}, false
 	}
-	return w.Deps.GateMemo.Lookup(treeSHA, w.Deps.GateVersion, runtimeConfigDigest)
+	return w.Deps.GateMemo.Lookup(treeSHA, w.Deps.GateVersion, w.gatePolicyDigest(targetRef, runtimeConfigDigest))
 }
-func (w Worker) gateMemoStore(treeSHA, runtimeConfigDigest string, result GateResult) {
+func (w Worker) gateMemoStore(targetRef, treeSHA, runtimeConfigDigest string, result GateResult) {
 	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
 		return
 	}
-	_ = w.Deps.GateMemo.Store(treeSHA, w.Deps.GateVersion, runtimeConfigDigest, result)
+	_ = w.Deps.GateMemo.Store(treeSHA, w.Deps.GateVersion, w.gatePolicyDigest(targetRef, runtimeConfigDigest), result)
+}
+func (w Worker) gatePolicyDigest(targetRef, runtimeConfigDigest string) string {
+	return fingerprint(
+		strings.TrimSpace(runtimeConfigDigest),
+		strings.TrimSpace(w.Deps.TargetRef),
+		strings.TrimSpace(w.Deps.GateVersion),
+		w.gateTier(targetRef),
+		strings.TrimSpace(w.Deps.ReviewPolicyDigest),
+	)
 }
 func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
@@ -654,7 +769,7 @@ func fingerprint(values ...string) string {
 }
 
 func preparedFingerprint(c Candidate) string {
-	return fingerprint(c.ReceiptDigest, c.TargetRef, c.TargetBaseSHAAtAdmission, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion, c.RuntimeConfigDigest)
+	return fingerprint(c.ReceiptDigest, c.TargetRef, c.TargetBaseSHAAtAdmission, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion, c.RuntimeConfigDigest, c.GatePolicyDigest)
 }
 
 func approvalFingerprint(c Candidate) string {
@@ -698,6 +813,7 @@ func clearPreparedIdentity(c *Candidate) {
 	c.SpeculativeSHA = ""
 	c.ValidatedSHA = ""
 	c.GateVersion = ""
+	c.GatePolicyDigest = ""
 	c.DependencyFingerprint = ""
 	c.RuntimeConfigDigest = ""
 	c.IntegrationRef = ""
@@ -706,7 +822,7 @@ func clearPreparedIdentity(c *Candidate) {
 }
 
 func validatePreparedTuple(c Candidate) error {
-	if c.BaseSHA == "" || c.TreeSHA == "" || c.GateVersion == "" || c.DependencyFingerprint == "" {
+	if c.BaseSHA == "" || c.TreeSHA == "" || c.GateVersion == "" || c.GatePolicyDigest == "" || c.DependencyFingerprint == "" {
 		return fmt.Errorf("queue: finalization requires a complete prepared receipt tuple")
 	}
 	if c.DependencyFingerprint != preparedFingerprint(c) {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,8 +65,9 @@ type capsulePromoteResult struct {
 }
 
 func capsulePromoteCmd() *cobra.Command {
-	var project, workspace, pipeline, target, gate, message, resolver, repair string
+	var project, workspace, pipeline, target, gate, message, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
 	var remoteURL, remoteTokenEnv, remoteBucketURL, remoteKeyEnv, remoteSecretEnv, remoteTargetBaseSHA, remoteTrain, remoteStatusCommand string
+	var gateTimeout time.Duration
 	var current, wait, jsonOut, skipTests bool
 	cmd := &cobra.Command{
 		Use:   "promote",
@@ -81,17 +83,22 @@ func capsulePromoteCmd() *cobra.Command {
 				target = "main"
 			}
 			result, err := runCapsulePromote(cmd.Context(), capsulePromoteOptions{
-				ProjectRoot:     project,
-				WorkspaceID:     workspace,
-				Pipeline:        pipeline,
-				TargetRef:       target,
-				GateCommand:     gate,
-				Message:         message,
-				ResolverCommand: resolver,
-				RepairCommand:   repair,
-				SkipTests:       skipTests,
-				Wait:            wait,
-				RemoteAdmission: remoteAdmissionOptions{URL: remoteURL, TokenEnv: remoteTokenEnv, BucketURL: remoteBucketURL, KeyEnv: remoteKeyEnv, SecretEnv: remoteSecretEnv, TargetBaseSHA: remoteTargetBaseSHA, TrainID: remoteTrain, StatusCommand: remoteStatusCommand},
+				ProjectRoot:         project,
+				WorkspaceID:         workspace,
+				Pipeline:            pipeline,
+				TargetRef:           target,
+				GateCommand:         gate,
+				Message:             message,
+				ResolverCommand:     resolver,
+				RepairCommand:       repair,
+				RepairReviewCommand: repairReview,
+				RepairerID:          repairerID,
+				ReviewerID:          reviewerID,
+				ReviewPolicyDigest:  reviewPolicyDigest,
+				GateTimeout:         gateTimeout,
+				SkipTests:           skipTests,
+				Wait:                wait,
+				RemoteAdmission:     remoteAdmissionOptions{URL: remoteURL, TokenEnv: remoteTokenEnv, BucketURL: remoteBucketURL, KeyEnv: remoteKeyEnv, SecretEnv: remoteSecretEnv, TargetBaseSHA: remoteTargetBaseSHA, TrainID: remoteTrain, StatusCommand: remoteStatusCommand},
 			})
 			if err != nil {
 				return err
@@ -108,6 +115,11 @@ func capsulePromoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&message, "message", "capsule promote candidate", "snapshot commit message when the workspace is dirty")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded project-owned resolver command for retained conflict continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded project-owned repair command for a red deterministic gate")
+	cmd.Flags().StringVar(&repairReview, "repair-review", "", "independent anti-weakening review command required with --repair")
+	cmd.Flags().StringVar(&repairerID, "repairer-id", "", "stable repair agent identity required with --repair")
+	cmd.Flags().StringVar(&reviewerID, "reviewer-id", "", "stable independent reviewer identity required with --repair")
+	cmd.Flags().StringVar(&reviewPolicyDigest, "review-policy-digest", "", "deterministic anti-weakening policy digest required with --repair")
+	cmd.Flags().DurationVar(&gateTimeout, "gate-timeout", queue.DefaultStageTimeout, "hard timeout applied independently to gate, repair, and anti-weakening review stages")
 	cmd.Flags().BoolVar(&skipTests, "skip-tests", false, "emergency override: bypass Capsule CI receipt admission; recorded in the durable queue candidate")
 	cmd.Flags().BoolVar(&wait, "wait", false, "process the local queue and apply protected-main CAS before returning")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
@@ -123,17 +135,22 @@ func capsulePromoteCmd() *cobra.Command {
 }
 
 type capsulePromoteOptions struct {
-	ProjectRoot     string
-	WorkspaceID     string
-	Pipeline        string
-	TargetRef       string
-	GateCommand     string
-	Message         string
-	ResolverCommand string
-	RepairCommand   string
-	SkipTests       bool
-	Wait            bool
-	RemoteAdmission remoteAdmissionOptions
+	ProjectRoot         string
+	WorkspaceID         string
+	Pipeline            string
+	TargetRef           string
+	GateCommand         string
+	Message             string
+	ResolverCommand     string
+	RepairCommand       string
+	RepairReviewCommand string
+	RepairerID          string
+	ReviewerID          string
+	ReviewPolicyDigest  string
+	GateTimeout         time.Duration
+	SkipTests           bool
+	Wait                bool
+	RemoteAdmission     remoteAdmissionOptions
 }
 
 // promoteReceiptReuse is the durable hand-off between Capsule CI and queue
@@ -207,6 +224,18 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	}
 	if strings.TrimSpace(opts.RemoteAdmission.URL) != "" && opts.Wait {
 		return capsulePromoteResult{}, fmt.Errorf("capsule promote: --wait only processes the local queue; inspect the remote queue status using the returned admission identity")
+	}
+	if strings.TrimSpace(opts.RepairCommand) != "" {
+		if !opts.Wait {
+			return capsulePromoteResult{}, fmt.Errorf("capsule promote: --repair requires --wait")
+		}
+		if strings.TrimSpace(opts.RepairReviewCommand) == "" || strings.TrimSpace(opts.RepairerID) == "" ||
+			strings.TrimSpace(opts.ReviewerID) == "" || strings.TrimSpace(opts.ReviewPolicyDigest) == "" {
+			return capsulePromoteResult{}, fmt.Errorf("capsule promote: --repair requires --repair-review, --repairer-id, --reviewer-id, and --review-policy-digest")
+		}
+		if strings.TrimSpace(opts.RepairerID) == strings.TrimSpace(opts.ReviewerID) {
+			return capsulePromoteResult{}, fmt.Errorf("capsule promote: repairer and reviewer identities must differ")
+		}
 	}
 	if strings.TrimSpace(opts.RemoteAdmission.URL) != "" {
 		if err := validateRemoteAdmissionOptions(opts); err != nil {
@@ -328,17 +357,24 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		return out, nil
 	}
 	var repairer queue.Repairer
+	var reviewer queue.RepairReviewer
 	if strings.TrimSpace(opts.RepairCommand) != "" {
 		repairer = queue.ShellRepairer{Command: opts.RepairCommand}
+		reviewer = queue.ShellRepairReviewer{Command: opts.RepairReviewCommand, ReviewerID: opts.ReviewerID}
 	}
 	state, err := qstore.Process(ctx, queue.ProcessDeps{
-		Integration: queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
-		Gate:        queue.ShellGate{Command: opts.GateCommand},
-		Repairer:    repairer,
-		Finalizer:   queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},
-		GateVersion: opts.Pipeline + ":" + opts.GateCommand,
-		TargetRef:   opts.TargetRef,
-		GateMemo:    queue.FileGateMemo{ProjectRoot: root},
+		Integration:        queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
+		Gate:               queue.ShellGate{Command: opts.GateCommand},
+		Repairer:           repairer,
+		RepairReviewer:     reviewer,
+		RepairerID:         opts.RepairerID,
+		ReviewPolicyDigest: opts.ReviewPolicyDigest,
+		Finalizer:          queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},
+		GateVersion:        opts.Pipeline + ":" + opts.GateCommand,
+		GateTier:           queue.RequiredGateTierForTarget(opts.TargetRef),
+		GateTimeout:        opts.GateTimeout,
+		TargetRef:          opts.TargetRef,
+		GateMemo:           queue.FileGateMemo{ProjectRoot: root},
 	})
 	if err != nil {
 		if errors.Is(err, queue.ErrBusy) {

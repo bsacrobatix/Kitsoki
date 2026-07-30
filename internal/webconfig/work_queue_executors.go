@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	capsulequeue "kitsoki/internal/capsule/queue"
 	"kitsoki/internal/workerregistry"
 	"kitsoki/internal/workqueue"
 )
@@ -27,9 +28,16 @@ type WorkQueueExecutorBinding struct {
 	BundleRefOutput    string `yaml:"bundle_ref_output"`
 	BundleDigestOutput string `yaml:"bundle_digest_output"`
 	BundleKindOutput   string `yaml:"bundle_kind_output,omitempty"`
-	MaxConcurrent      int    `yaml:"max_concurrent"`
-	LeaseSeconds       int    `yaml:"lease_seconds"`
-	PollSeconds        int    `yaml:"poll_seconds"`
+	// Promotion* is server-owned delivery policy. A queue payload cannot
+	// select or weaken the destination, tier, or finalization policy.
+	PromotionTarget             string `yaml:"promotion_target,omitempty"`
+	PromotionQueueRoot          string `yaml:"promotion_queue_root,omitempty"`
+	PromotionTargetPolicy       string `yaml:"promotion_target_policy,omitempty"`
+	PromotionFinalizationPolicy string `yaml:"promotion_finalization_policy,omitempty"`
+	PromotionTier               string `yaml:"promotion_tier,omitempty"`
+	MaxConcurrent               int    `yaml:"max_concurrent"`
+	LeaseSeconds                int    `yaml:"lease_seconds"`
+	PollSeconds                 int    `yaml:"poll_seconds"`
 }
 
 func (cfg *WebConfig) resolveWorkQueueExecutors() error {
@@ -69,6 +77,31 @@ func (cfg *WebConfig) resolveWorkQueueExecutors() error {
 		}
 		if queue.ProducesCode && (b.BundleRefOutput == "" || b.BundleDigestOutput == "") {
 			return fmt.Errorf("work_queue_executors.%s code queue requires terminal bundle outputs", id)
+		}
+		if queue.ProducesCode {
+			b.PromotionTarget = strings.TrimSpace(b.PromotionTarget)
+			b.PromotionQueueRoot = filepath.Clean(strings.TrimSpace(b.PromotionQueueRoot))
+			if b.PromotionQueueRoot == "." {
+				b.PromotionQueueRoot = ""
+			}
+			b.PromotionTargetPolicy = strings.TrimSpace(b.PromotionTargetPolicy)
+			b.PromotionFinalizationPolicy = strings.TrimSpace(b.PromotionFinalizationPolicy)
+			b.PromotionTier = strings.TrimSpace(b.PromotionTier)
+			if b.PromotionTarget == "" || strings.ContainsAny(b.PromotionTarget, "\x00\n\r") {
+				return fmt.Errorf("work_queue_executors.%s code queue requires a server-owned promotion_target", id)
+			}
+			if b.PromotionQueueRoot != "" && !filepath.IsAbs(b.PromotionQueueRoot) {
+				return fmt.Errorf("work_queue_executors.%s.promotion_queue_root must be absolute when set", id)
+			}
+			if b.PromotionTargetPolicy == "" {
+				b.PromotionTargetPolicy = "wave-auto"
+			}
+			if b.PromotionFinalizationPolicy == "" {
+				b.PromotionFinalizationPolicy = "autonomous"
+			}
+			if b.PromotionTier == "" {
+				b.PromotionTier = capsulequeue.RequiredGateTierForTarget(b.PromotionTarget)
+			}
 		}
 		if b.MaxConcurrent < 1 || b.MaxConcurrent > maxWorkQueueWorkerCapacity || b.LeaseSeconds < 1 || b.LeaseSeconds > maxWorkQueueWorkerLeaseSeconds || b.PollSeconds < 1 || b.PollSeconds > 3600 {
 			return fmt.Errorf("work_queue_executors.%s has invalid concurrency, lease, or poll bounds", id)

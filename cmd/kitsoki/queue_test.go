@@ -69,6 +69,7 @@ func TestQueueProcessDepsDefaultsToExactProtectedStagingCAS(t *testing.T) {
 	require.Nil(t, deps.Repairer)
 	require.Equal(t, "worker-1", deps.WorkerID)
 	require.Equal(t, "staging/local", deps.TargetRef)
+	require.Equal(t, "change", deps.GateTier)
 }
 
 func TestQueueProcessDepsUsesRequestedProtectedTarget(t *testing.T) {
@@ -85,6 +86,19 @@ func TestQueueProcessDepsUsesRequestedProtectedTarget(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "repair-gate", repairer.Command)
 	require.Equal(t, "release/2026.07", deps.TargetRef)
+	require.Equal(t, "release", deps.GateTier)
+}
+
+func TestQueueWorkerFlagsDefaultToDerivedTierAndSharedCapacity(t *testing.T) {
+	cmd := queueWorkerCmd()
+	require.Empty(t, cmd.Flag("gate-tier").DefValue)
+	require.Empty(t, cmd.Flag("executor-pipeline").DefValue)
+	require.Equal(t, "default", cmd.Flag("capacity-pool").DefValue)
+	require.Equal(t, "1", cmd.Flag("capacity").DefValue)
+	require.True(t, filepath.IsAbs(cmd.Flag("capacity-root").DefValue))
+	require.Equal(t, "full", queueGateTier("main"))
+	require.Equal(t, "release", queueGateTier("deploy/prod"))
+	require.Equal(t, "change", queueGateTier("staging/local"))
 }
 
 func TestQueueSummaryLineFormatsPhasesAndRetryReasons(t *testing.T) {

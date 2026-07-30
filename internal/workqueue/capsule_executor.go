@@ -23,8 +23,27 @@ type CapsuleResult struct {
 // executor config owns project, workspace, pipeline, and worker policy; the
 // queue supplies only a validated payload.
 type CapsuleClient interface {
-	Dispatch(context.Context, json.RawMessage) (CapsuleResult, error)
+	Dispatch(context.Context, string, json.RawMessage) (CapsuleResult, error)
 	Status(context.Context, string) (CapsuleResult, error)
+}
+
+// CapsulePromotionSink is the durable bridge from a passed code-producing
+// work item into the protected merge queue. Promote is deliberately invoked
+// before Store.Complete and is required to be idempotent for the exact
+// (job, result, receipt) tuple. Therefore a daemon crash after admission but
+// before fenced completion simply replays the same immutable admission.
+//
+// Implementations must not run a protected ref mutation here. They retain and
+// verify the bundle, persist queue admission, and return its durable identity;
+// the target-partitioned merge worker remains the sole finalizer.
+type CapsulePromotionSink interface {
+	Promote(context.Context, CapsulePromotionRequest) (string, error)
+}
+
+type CapsulePromotionRequest struct {
+	Job     Job
+	Result  CapsuleResult
+	Receipt Receipt
 }
 
 // InputField is a bounded structural input contract. It intentionally covers
@@ -61,9 +80,10 @@ func (c CapsuleExecutorConfig) valid() bool {
 // durable Capsule dispatch mapping and polls its provider-owned run instead of
 // asserting that the old process resumed.
 type CapsuleExecutor struct {
-	Store  Store
-	Client CapsuleClient
-	Config CapsuleExecutorConfig
+	Store    Store
+	Client   CapsuleClient
+	Promoter CapsulePromotionSink
+	Config   CapsuleExecutorConfig
 }
 
 func (e CapsuleExecutor) Run(ctx context.Context) error {
@@ -108,7 +128,7 @@ func (e CapsuleExecutor) runLease(ctx context.Context, job Job) {
 	}
 	var result CapsuleResult
 	if err == ErrNotFound {
-		result, err = e.Client.Dispatch(ctx, json.RawMessage(job.Payload))
+		result, err = e.Client.Dispatch(ctx, job.ID, json.RawMessage(job.Payload))
 		if err != nil || strings.TrimSpace(result.RunRef) == "" {
 			e.fail(ctx, job, true, "capsule_ci_dispatch_failed", result)
 			return
@@ -133,7 +153,24 @@ func (e CapsuleExecutor) runLease(ctx context.Context, job Job) {
 	for {
 		switch result.Status {
 		case "passed":
-			if _, err := e.Store.Complete(ctx, job.ID, e.Config.WorkerID, job.Fence, e.receipt(job, result)); err == nil {
+			completion := e.receipt(job, result)
+			if job.ProducesCode {
+				if e.Promoter == nil {
+					e.fail(ctx, job, false, "capsule_ci_promotion_unconfigured", result)
+					return
+				}
+				identity, promoteErr := e.Promoter.Promote(ctx, CapsulePromotionRequest{Job: job, Result: result, Receipt: completion})
+				if promoteErr != nil {
+					e.fail(ctx, job, true, "capsule_ci_promotion_failed", CapsuleResult{
+						RunRef: result.RunRef, ExecutionRef: result.ExecutionRef,
+						BundleRef: result.BundleRef, BundleDigest: result.BundleDigest, BundleKind: result.BundleKind,
+						Reason: promoteErr.Error(),
+					})
+					return
+				}
+				completion.ArtifactHandles = append(completion.ArtifactHandles, "capsule-queue:"+identity)
+			}
+			if _, err := e.Store.Complete(ctx, job.ID, e.Config.WorkerID, job.Fence, completion); err == nil {
 				_ = dispatches.DeleteCapsuleDispatch(ctx, job.ID)
 			}
 			return

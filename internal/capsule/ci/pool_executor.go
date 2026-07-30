@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -216,11 +217,11 @@ func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 	}, nil
 }
 
-// leaseWorker acquires one fresh ephemeral worker for jobID with this
-// executor's full boot configuration
+// leaseWorker acquires one fresh ephemeral worker for prepared's exact job,
+// execution, and envelope identity with this executor's full boot configuration
 // (pass_env/agent_backend/agent_model/user surface and optional bucket
 // transport).
-func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.WorkerLease, error) {
+func (p *poolProvider) dispatcher() (*vmpool.Dispatcher, error) {
 	pool, err := p.buildPool()
 	if err != nil {
 		return nil, err
@@ -229,7 +230,10 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	if ciVMPoolDispatcherHook != nil {
 		ciVMPoolDispatcherHook(dispatcher)
 	}
+	return dispatcher, nil
+}
 
+func (p *poolProvider) leaseSpec(prepared executor.Prepared) (vmpool.LeaseSpec, error) {
 	// ReadyTimeout is deliberately left zero here: vmpool.LeaseSpec.withDefaults
 	// derives it from the Dispatcher's Pool.Config.ProvisionTimeout
 	// (ciPoolProvisionTimeout, set in buildPool) when unset. This used to be
@@ -239,7 +243,10 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	// defaulted off, silently preserved (billed) on top of that. Deriving
 	// instead of duplicating keeps the two timeouts structurally impossible
 	// to drift apart again.
-	leaseSpec := vmpool.LeaseSpec{JobID: jobID, User: p.cfg.User, Env: map[string]string{}}
+	leaseSpec := vmpool.LeaseSpec{
+		JobID: prepared.Envelope.JobID, ExecutionID: prepared.ID,
+		EnvelopeDigest: prepared.Envelope.Digest, User: p.cfg.User, Env: map[string]string{},
+	}
 	if len(p.cfg.PassEnv) > 0 {
 		// Names only: the worker resolves each value from its own process
 		// environment (see cmd/kitsoki capsuleWorkerChildEnv); no credential
@@ -277,17 +284,44 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	if p.cfg.SourceBucket != nil {
 		store, err := newPoolObjectStore(p.name, *p.cfg.SourceBucket)
 		if err != nil {
-			return nil, err
+			return vmpool.LeaseSpec{}, err
 		}
 		leaseSpec.Objects = store
 		leaseSpec.BucketURL = p.cfg.SourceBucket.URL
 		leaseSpec.OutputsKeyEnv = p.cfg.SourceBucket.KeyEnv
 		leaseSpec.OutputsSecretEnv = p.cfg.SourceBucket.SecretEnv
 	}
+	return leaseSpec, nil
+}
 
+func (p *poolProvider) leaseWorker(ctx context.Context, prepared executor.Prepared) (*vmpool.WorkerLease, error) {
+	dispatcher, err := p.dispatcher()
+	if err != nil {
+		return nil, err
+	}
+	leaseSpec, err := p.leaseSpec(prepared)
+	if err != nil {
+		return nil, err
+	}
 	lease, err := dispatcher.Lease(ctx, leaseSpec)
 	if err != nil {
 		return nil, fmt.Errorf("capsule ci: pool executor %q: lease worker: %w", p.name, err)
+	}
+	return lease, nil
+}
+
+func (p *poolProvider) resumeWorker(ctx context.Context, prepared executor.Prepared) (*vmpool.WorkerLease, error) {
+	dispatcher, err := p.dispatcher()
+	if err != nil {
+		return nil, err
+	}
+	leaseSpec, err := p.leaseSpec(prepared)
+	if err != nil {
+		return nil, err
+	}
+	lease, err := dispatcher.Resume(ctx, leaseSpec)
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: pool executor %q: resume worker: %w", p.name, err)
 	}
 	return lease, nil
 }
@@ -299,7 +333,7 @@ func (p *poolProvider) Run(ctx context.Context, prepared executor.Prepared, task
 	}
 	prepared = validated
 
-	lease, err := p.leaseWorker(ctx, prepared.Envelope.JobID)
+	lease, err := p.leaseWorker(ctx, prepared)
 	if err != nil {
 		return executor.Result{}, err
 	}
@@ -351,22 +385,123 @@ func (p *poolProvider) StartDetached(ctx context.Context, prepared executor.Prep
 		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: detached dispatch requires source_bucket (terminal state is reconciled from the worker's bucket run records)", p.name)
 	}
 
-	lease, err := p.leaseWorker(ctx, prepared.Envelope.JobID)
+	active, err := p.activeDetachedWorker(prepared)
 	if err != nil {
 		return executor.ExecutionStatus{}, err
+	}
+	if active != nil && active.DispatchPhase == vmpool.DispatchStarted {
+		return p.recoverStartedDetached(ctx, prepared)
+	}
+
+	var lease *vmpool.WorkerLease
+	if active != nil {
+		lease, err = p.resumeWorker(ctx, prepared)
+	} else {
+		lease, err = p.leaseWorker(ctx, prepared)
+		if errors.Is(err, vmpool.ErrJobActive) {
+			// Another controller won the reservation race. Re-read its
+			// durable phase and either attach to a completed registration or
+			// replay that exact reservation.
+			active, err = p.activeDetachedWorker(prepared)
+			if err == nil && active != nil && active.DispatchPhase == vmpool.DispatchStarted {
+				return p.recoverStartedDetached(ctx, prepared)
+			}
+			if err == nil && active != nil {
+				lease, err = p.resumeWorker(ctx, prepared)
+			}
+		}
+	}
+	if err != nil {
+		return executor.ExecutionStatus{}, err
+	}
+
+	pool, err := p.buildPool()
+	if err != nil {
+		return executor.ExecutionStatus{}, err
+	}
+	if err := pool.MarkDispatchStarting(lease.Worker.ID, prepared.ID, prepared.Envelope.Digest); err != nil {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: mark detached dispatch starting: %w", p.name, err)
+	}
+	if poolDetachedDispatchHook != nil {
+		if err := poolDetachedDispatchHook("after_acquire_before_http"); err != nil {
+			return executor.ExecutionStatus{}, err
+		}
 	}
 	remote := lease.Remote
 	remote.Source = p.source
 
 	status, err := poolRemoteStartDetached(ctx, remote, prepared, sink)
 	if err != nil {
-		// The dispatch never started; release the droplet rather than leak it.
-		if relErr := lease.Release(context.WithoutCancel(ctx)); relErr != nil {
-			err = fmt.Errorf("%w (also failed to release worker: %v)", err, relErr)
-		}
+		// An HTTP error is ambiguous: the worker may have durably registered
+		// the run before the response was lost. Keep phase=starting and the VM
+		// alive so queue retry replays the same idempotent registration.
 		return executor.ExecutionStatus{}, err
 	}
+	if poolDetachedDispatchHook != nil {
+		if err := poolDetachedDispatchHook("after_http_before_marker"); err != nil {
+			return executor.ExecutionStatus{}, err
+		}
+	}
+	if err := pool.MarkDispatchStarted(lease.Worker.ID, prepared.ID, prepared.Envelope.Digest); err != nil {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: mark detached dispatch started: %w", p.name, err)
+	}
 	return status, nil
+}
+
+// activeDetachedWorker finds the exact durable reservation for prepared. It
+// deliberately does not equate an active VM with a completed remote
+// registration: DispatchReserved/DispatchStarting must be replayed.
+func (p *poolProvider) activeDetachedWorker(prepared executor.Prepared) (*vmpool.Worker, error) {
+	pool, err := p.buildPool()
+	if err != nil {
+		return nil, err
+	}
+	workers, err := pool.List()
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: pool executor %q: recover detached worker: %w", p.name, err)
+	}
+	var active *vmpool.Worker
+	for _, worker := range workers {
+		if worker.JobID == prepared.Envelope.JobID && !worker.Status.Terminal() {
+			copy := worker
+			active = &copy
+			break
+		}
+	}
+	if active == nil {
+		return nil, nil
+	}
+	if active.ExecutionID != "" && active.ExecutionID != prepared.ID {
+		return nil, fmt.Errorf("capsule ci: pool executor %q: active job %s is reserved for execution %s, not %s", p.name, prepared.Envelope.JobID, active.ExecutionID, prepared.ID)
+	}
+	if active.EnvelopeDigest != "" && active.EnvelopeDigest != prepared.Envelope.Digest {
+		return nil, fmt.Errorf("capsule ci: pool executor %q: active job %s envelope digest %s does not match %s", p.name, prepared.Envelope.JobID, active.EnvelopeDigest, prepared.Envelope.Digest)
+	}
+	return active, nil
+}
+
+// recoverStartedDetached is only valid after the durable "started" marker.
+// A registered bucket checkpoint is returned verbatim. If its best-effort S3
+// mirror has not appeared yet, the marker proves the remote accepted the
+// deterministic execution identity and polling can attach later.
+func (p *poolProvider) recoverStartedDetached(ctx context.Context, prepared executor.Prepared) (executor.ExecutionStatus, error) {
+	status, err := p.Status(ctx, prepared.ID)
+	if err == nil {
+		if status.EnvelopeDigest != "" && status.EnvelopeDigest != prepared.Envelope.Digest {
+			return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: recovered execution %s envelope digest %s does not match %s", p.name, prepared.ID, status.EnvelopeDigest, prepared.Envelope.Digest)
+		}
+		return status, nil
+	}
+	if !errors.Is(err, objectstore.ErrNotFound) {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: recover detached execution %s: %w", p.name, prepared.ID, err)
+	}
+	return executor.ExecutionStatus{
+		Schema:         executor.ExecutionStatusSchema,
+		ExecutionID:    prepared.ID,
+		EnvelopeDigest: prepared.Envelope.Digest,
+		Status:         "running",
+		Stage:          "recovering",
+	}, nil
 }
 
 // poolRemoteStartDetached mirrors poolRemoteRun's test seam for the detached
@@ -375,6 +510,10 @@ func (p *poolProvider) StartDetached(ctx context.Context, prepared executor.Prep
 var poolRemoteStartDetached = func(ctx context.Context, remote executor.HTTPRemoteWorker, prepared executor.Prepared, sink executor.EventSink) (executor.ExecutionStatus, error) {
 	return remote.StartDetached(ctx, prepared, sink)
 }
+
+// poolDetachedDispatchHook is a deterministic crash-window seam used only by
+// tests. Returning an error simulates controller death without cleanup.
+var poolDetachedDispatchHook func(stage string) error
 
 // Status implements executor.ExecutionController for detached pool
 // executions by reading the worker's durable bucket run record

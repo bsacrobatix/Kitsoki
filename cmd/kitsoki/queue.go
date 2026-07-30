@@ -43,7 +43,7 @@ func queueApproveCmd() *cobra.Command {
 		if strings.TrimSpace(actor) == "" {
 			actor = os.Getenv("USER")
 		}
-		c, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).Approve(queue.ApprovalOp{ID: args[0], Actor: actor, Reason: reason, ManifestDigest: manifest, TreeSHA: tree, ReceiptDigest: receiptDigest})
+		c, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}).Approve(queue.ApprovalOp{ID: args[0], Actor: actor, Reason: reason, ManifestDigest: manifest, TreeSHA: tree, ReceiptDigest: receiptDigest})
 		if err != nil {
 			return err
 		}
@@ -72,7 +72,7 @@ func queueSweepCmd() *cobra.Command {
 	var staleAfter time.Duration
 	var apply bool
 	cmd := &cobra.Command{Use: "sweep", Short: "Bulk-triage parked candidates: classify superseded/stale/environment-degraded, --apply to reject the superseded ones", RunE: func(cmd *cobra.Command, _ []string) error {
-		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}
 		plan, err := store.Sweep(time.Time{}, staleAfter)
 		if err != nil {
 			return err
@@ -110,7 +110,7 @@ func queueOpCmd(verb, short string, run func(queue.Store, queue.Op) (queue.Candi
 		if strings.TrimSpace(actor) == "" {
 			actor = os.Getenv("USER")
 		}
-		c, err := run(queue.Store{ProjectRoot: project, QueueRoot: queueRoot}, queue.Op{ID: args[0], Actor: actor, Reason: reason})
+		c, err := run(queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}, queue.Op{ID: args[0], Actor: actor, Reason: reason})
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func queueSubmitCmd() *cobra.Command {
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return fmt.Errorf("queue: parse receipt: %w", err)
 		}
-		c, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, TargetRef: target, TargetBaseSHAAtAdmission: targetBase, TargetPolicy: queue.TargetPolicy(targetPolicy), FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
+		c, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, TargetRef: target, TargetBaseSHAAtAdmission: targetBase, TargetPolicy: queue.TargetPolicy(targetPolicy), FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ func queueSubmitExternalCmd() *cobra.Command {
 			if err := json.Unmarshal(raw, &r); err != nil {
 				return fmt.Errorf("queue: parse receipt: %w", err)
 			}
-			candidate, anchor, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).AdmitExternalBundle(cmd.Context(), queue.ExternalBundleSubmission{
+			candidate, anchor, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}).AdmitExternalBundle(cmd.Context(), queue.ExternalBundleSubmission{
 				Result:     result,
 				BundlePath: bundlePath,
 				Submit: queue.Submit{
@@ -250,7 +250,7 @@ func queueStatusCmd() *cobra.Command {
 	var project, queueRoot string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "status", Aliases: []string{"list"}, Short: "Show durable merge-queue candidates", RunE: func(cmd *cobra.Command, _ []string) error {
-		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot}).List()
+		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}).List()
 		if err != nil {
 			return err
 		}
@@ -305,10 +305,11 @@ func queueSummaryLine(s queue.StatusSummary) string {
 // worker is the durable owner of preparation leases and protected finalization.
 // `process` remains available for scripts that want one compatibility drain.
 func queueWorkerCmd() *cobra.Command {
-	var project, queueRoot, gate, target, resolver, repair, workerID, executorName, executorPipeline string
+	var project, queueRoot, gate, target, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest, workerID, executorName, executorPipeline string
+	var capacityRoot, capacityPool, gateTier string
 	var once bool
-	var concurrency int
-	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration time.Duration
+	var concurrency, capacity int
+	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration, gateTimeout time.Duration
 	var maxAttempts, maxEnvRepeat int
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
 		if strings.TrimSpace(gate) != "" && strings.TrimSpace(executorName) != "" {
@@ -318,10 +319,26 @@ func queueWorkerCmd() *cobra.Command {
 			return fmt.Errorf("queue worker: exactly one of --gate or --executor is required")
 		}
 		deps := queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, workerID)
+		if strings.TrimSpace(repair) != "" {
+			if repairReview == "" || repairerID == "" || reviewerID == "" || reviewPolicyDigest == "" {
+				return fmt.Errorf("queue worker: --repair requires --repair-review, --repairer-id, --reviewer-id, and --review-policy-digest")
+			}
+			deps.RepairerID = repairerID
+			deps.RepairReviewer = queue.ShellRepairReviewer{Command: repairReview, ReviewerID: reviewerID}
+			deps.ReviewPolicyDigest = reviewPolicyDigest
+		}
+		if capacityRoot == "" || capacityPool == "" {
+			return fmt.Errorf("queue worker: --capacity-root and --capacity-pool must be set")
+		}
+		deps.GateAdmission = queue.FileGateCapacity{Root: capacityRoot, Pool: capacityPool, Max: capacity}
+		if strings.TrimSpace(gateTier) != "" {
+			deps.GateTier = strings.TrimSpace(gateTier)
+		}
+		deps.GateTimeout = gateTimeout
 		if strings.TrimSpace(executorName) != "" {
 			pipeline := executorPipeline
 			if strings.TrimSpace(pipeline) == "" {
-				pipeline = "change"
+				pipeline = deps.GateTier
 			}
 			deps.Gate = queue.ExecutorGate{ProjectRoot: project, Executor: executorName, Pipeline: pipeline}
 			deps.GateVersion = fmt.Sprintf("executor:%s:%s", executorName, pipeline)
@@ -333,7 +350,7 @@ func queueWorkerCmd() *cobra.Command {
 		if n < 1 {
 			n = 1
 		}
-		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}
 		if n > 1 {
 			// n goroutines in this one process share the same durable
 			// state.json and its file lock. That contention is brief (the
@@ -389,11 +406,20 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
+	cmd.Flags().StringVar(&repairReview, "repair-review", "", "independent anti-weakening review command run after a repaired tree turns green")
+	cmd.Flags().StringVar(&repairerID, "repairer-id", "", "stable repair agent identity")
+	cmd.Flags().StringVar(&reviewerID, "reviewer-id", "", "stable independent reviewer identity")
+	cmd.Flags().StringVar(&reviewPolicyDigest, "review-policy-digest", "", "deterministic anti-weakening policy digest")
 	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token (suffixed -1.. -N under --concurrency)")
 	cmd.Flags().StringVar(&executorName, "executor", "", "named capsule CI executor (from the project's .kitsoki/ci.yaml catalog) to run the deterministic gate remotely through internal/capsule/ci, instead of --gate's local shell command; mutually exclusive with --gate")
-	cmd.Flags().StringVar(&executorPipeline, "executor-pipeline", "change", "capsule CI pipeline name dispatched via --executor")
+	cmd.Flags().StringVar(&executorPipeline, "executor-pipeline", "", "capsule CI pipeline name dispatched via --executor (defaults to the target-derived gate tier)")
 	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step per concurrent worker")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 1, "number of preparation workers to run concurrently in this process; each claims and prepares independently, only the FIFO/emergency head ever finalizes")
+	cmd.Flags().StringVar(&capacityRoot, "capacity-root", queue.DefaultGateCapacityRoot(), "absolute shared gate-capacity authority root")
+	cmd.Flags().StringVar(&capacityPool, "capacity-pool", "default", "operator-owned physical resource pool shared across repositories")
+	cmd.Flags().IntVar(&capacity, "capacity", 1, "maximum concurrent gates in the physical capacity pool")
+	cmd.Flags().StringVar(&gateTier, "gate-tier", "", "server-owned landing tier identity (defaults from --target: main=full, deploy/release=release, staging=change)")
+	cmd.Flags().DurationVar(&gateTimeout, "gate-timeout", queue.DefaultStageTimeout, "hard timeout applied independently to gate, repair, and anti-weakening review stages")
 	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
 	cmd.Flags().DurationVar(&maxRetryDelay, "max-retry-delay", queue.DefaultMaxRetryDelay, "backoff ceiling for repeated failures")
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
@@ -452,10 +478,21 @@ func first(values ...string) string {
 // process uses the managed staging-capsule lifecycle and requires an explicit
 // deterministic gate. It has no raw-main fallback.
 func queueProcessCmd() *cobra.Command {
-	var project, queueRoot, gate, target, resolver, repair string
+	var project, queueRoot, gate, target, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
+	var gateTimeout time.Duration
 	cmd := &cobra.Command{Use: "process", Aliases: []string{"drain"}, Short: "Process candidates through a configured protected integration", RunE: func(cmd *cobra.Command, _ []string) error {
-		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot}
-		state, err := store.Process(cmd.Context(), queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, ""))
+		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second}
+		deps := queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair, "")
+		deps.GateTimeout = gateTimeout
+		if strings.TrimSpace(repair) != "" {
+			if repairReview == "" || repairerID == "" || reviewerID == "" || reviewPolicyDigest == "" {
+				return fmt.Errorf("queue process: --repair requires --repair-review, --repairer-id, --reviewer-id, and --review-policy-digest")
+			}
+			deps.RepairerID = repairerID
+			deps.RepairReviewer = queue.ShellRepairReviewer{Command: repairReview, ReviewerID: reviewerID}
+			deps.ReviewPolicyDigest = reviewPolicyDigest
+		}
+		state, err := store.Process(cmd.Context(), deps)
 		if err != nil {
 			return err
 		}
@@ -467,6 +504,11 @@ func queueProcessCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
+	cmd.Flags().StringVar(&repairReview, "repair-review", "", "independent anti-weakening review command")
+	cmd.Flags().StringVar(&repairerID, "repairer-id", "", "stable repair agent identity")
+	cmd.Flags().StringVar(&reviewerID, "reviewer-id", "", "stable independent reviewer identity")
+	cmd.Flags().StringVar(&reviewPolicyDigest, "review-policy-digest", "", "deterministic anti-weakening policy digest")
+	cmd.Flags().DurationVar(&gateTimeout, "gate-timeout", queue.DefaultStageTimeout, "hard timeout applied independently to gate, repair, and anti-weakening review stages")
 	_ = cmd.MarkFlagRequired("gate")
 	return cmd
 }
@@ -486,6 +528,7 @@ func queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair
 		Gate:        queue.ShellGate{Command: gate},
 		WorkerID:    workerID,
 		GateVersion: gate,
+		GateTier:    queueGateTier(target),
 		TargetRef:   target,
 		GateMemo:    queue.FileGateMemo{ProjectRoot: project, QueueRoot: queueRoot},
 	}
@@ -496,11 +539,15 @@ func queueProcessDepsWithRoot(project, queueRoot, gate, target, resolver, repair
 		ResolverCommand: resolver,
 		Headroom:        headroom.Default(),
 	}
-	deps.Finalizer = queue.ProtectedFinalizer{ProjectRoot: project, TargetRef: target}
+	deps.Finalizer = queue.ProtectedFinalizer{ProjectRoot: project, QueueRoot: queueRoot, TargetRef: target}
 	if strings.TrimSpace(repair) != "" {
 		deps.Repairer = queue.ShellRepairer{Command: repair}
 	}
 	return deps
+}
+
+func queueGateTier(target string) string {
+	return queue.RequiredGateTierForTarget(target)
 }
 
 // queueMigrateCmd is the only v1 upgrade path. It requires an explicit
@@ -511,7 +558,7 @@ func queueMigrateCmd() *cobra.Command {
 		if err := validateQueueMigrationTargetBase(cmd.Context(), project, base); err != nil {
 			return err
 		}
-		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LegacyTargetRef: target, LegacyTargetBaseSHAAtAdmission: base, LegacyTargetPolicy: queue.TargetPolicy(policy)}).List()
+		state, err := (queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: 2 * time.Second, LegacyTargetRef: target, LegacyTargetBaseSHAAtAdmission: base, LegacyTargetPolicy: queue.TargetPolicy(policy)}).List()
 		if err != nil {
 			return err
 		}

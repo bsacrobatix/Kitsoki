@@ -97,6 +97,36 @@ func ExportWIP(ctx context.Context, store objectstore.Store, prefix, executionID
 		return nil, fmt.Errorf("bucketsource: create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	if dirty {
+		index := filepath.Join(tmpDir, "capture.index")
+		env := []string{"GIT_INDEX_FILE=" + index}
+		if _, err := gitOutputWIPEnv(ctx, root, env, "read-tree", "HEAD"); err != nil {
+			return nil, fmt.Errorf("bucketsource: initialize dirty WIP capture: %w", err)
+		}
+		if _, err := gitOutputWIPEnv(ctx, root, env, "add", "-A", "--", "."); err != nil {
+			return nil, fmt.Errorf("bucketsource: capture dirty tracked and untracked WIP: %w", err)
+		}
+		tree, err := gitOutputWIPEnv(ctx, root, env, "write-tree")
+		if err != nil {
+			return nil, fmt.Errorf("bucketsource: seal dirty WIP tree: %w", err)
+		}
+		commitEnv := append(env,
+			"GIT_AUTHOR_NAME=Kitsoki WIP", "GIT_AUTHOR_EMAIL=wip@kitsoki.invalid",
+			"GIT_COMMITTER_NAME=Kitsoki WIP", "GIT_COMMITTER_EMAIL=wip@kitsoki.invalid",
+			"GIT_AUTHOR_DATE=@0 +0000", "GIT_COMMITTER_DATE=@0 +0000",
+		)
+		captured, err := gitOutputWIPEnv(ctx, root, commitEnv, "commit-tree", strings.TrimSpace(tree), "-p", "HEAD", "-m", "kitsoki: deterministic retained WIP")
+		if err != nil {
+			return nil, fmt.Errorf("bucketsource: commit dirty WIP snapshot: %w", err)
+		}
+		ref := "refs/kitsoki/retained-wip/" + executionID
+		if _, err := gitOutputWIP(ctx, root, "update-ref", ref, strings.TrimSpace(captured)); err != nil {
+			return nil, fmt.Errorf("bucketsource: anchor dirty WIP snapshot: %w", err)
+		}
+		defer func() { _, _ = gitOutputWIP(context.Background(), root, "update-ref", "-d", ref) }()
+		head = strings.TrimSpace(captured)
+		refs = append(refs, ref)
+	}
 	bundlePath := filepath.Join(tmpDir, "refs.bundle")
 	if _, err := gitOutputWIP(ctx, root, "bundle", "create", bundlePath, "--all"); err != nil {
 		return nil, fmt.Errorf("bucketsource: create wip bundle: %w", err)
@@ -141,6 +171,17 @@ func ExportWIP(ctx context.Context, store objectstore.Store, prefix, executionID
 func gitOutputWIP(ctx context.Context, root string, args ...string) (string, error) {
 	argv := append([]string{"-C", root}, args...)
 	out, err := exec.CommandContext(ctx, "git", argv...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func gitOutputWIPEnv(ctx context.Context, root string, env []string, args ...string) (string, error) {
+	argv := append([]string{"-C", root}, args...)
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}

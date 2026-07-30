@@ -702,6 +702,10 @@ func (e HygieneDiagnosticError) Unwrap() error {
 }
 
 type RunRequest struct {
+	// JobID is an optional deterministic provider idempotency key. Durable
+	// queue callers set it before dispatch so a crash between provider start
+	// and dispatch-mapping persistence reuses the same run identity.
+	JobID            artifactjob.JobID
 	Pipeline         string
 	Workspace        control.Handle
 	DefinitionDigest string
@@ -829,7 +833,7 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			return RunResult{}, fmt.Errorf("capsule ci: executor control authority does not match selected pipeline %q executor %q", req.Pipeline, p.Executor)
 		}
 	}
-	job, err := s.Jobs.Register(ctx, artifactjob.RegisterRequest{AppID: "capsule-ci", Story: envelope.StoryPath, Origin: artifactjob.Origin{Kind: req.Trigger.Kind, Ref: req.Trigger.Ref}, WorkspaceInstanceID: artifactjob.InstanceID(req.Workspace.ID), Owner: "capsule-ci"})
+	job, err := s.Jobs.Register(ctx, artifactjob.RegisterRequest{ID: req.JobID, AppID: "capsule-ci", Story: envelope.StoryPath, Origin: artifactjob.Origin{Kind: req.Trigger.Kind, Ref: req.Trigger.Ref}, WorkspaceInstanceID: artifactjob.InstanceID(req.Workspace.ID), Owner: "capsule-ci"})
 	if err != nil {
 		return RunResult{}, err
 	}

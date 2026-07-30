@@ -113,7 +113,8 @@ func TestWorkerDetachedRunRegistersImmediatelyAndCompletesInBackground(t *testin
 		t.Fatalf("accepted run = %+v", accepted.Run)
 	}
 
-	// A duplicate detached dispatch while the first is active conflicts.
+	// A duplicate detached dispatch while the first is active returns the
+	// same durable registration. This is the controller crash replay path.
 	dupRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/capsules/run?detach=1", bytes.NewReader(body))
 	dupRequest.Header.Set("Authorization", "Bearer test-token")
 	dupRequest.Header.Set("Content-Type", "application/json")
@@ -122,8 +123,18 @@ func TestWorkerDetachedRunRegistersImmediatelyAndCompletesInBackground(t *testin
 		t.Fatal(err)
 	}
 	dupRaw := readAndClose(t, dupResponse)
-	if dupResponse.StatusCode != http.StatusConflict {
+	if dupResponse.StatusCode != http.StatusAccepted {
 		t.Fatalf("duplicate detached run status = %d: %s", dupResponse.StatusCode, dupRaw)
+	}
+	var replay struct {
+		Run workerserver.RunRecord `json:"run"`
+	}
+	if err := json.Unmarshal(dupRaw, &replay); err != nil {
+		t.Fatal(err)
+	}
+	if replay.Run.ExecutionID != accepted.Run.ExecutionID || replay.Run.EnvelopeDigest != accepted.Run.EnvelopeDigest ||
+		replay.Run.StartedAt != accepted.Run.StartedAt {
+		t.Fatalf("duplicate detached run created a new identity: first=%+v replay=%+v", accepted.Run, replay.Run)
 	}
 
 	close(release)

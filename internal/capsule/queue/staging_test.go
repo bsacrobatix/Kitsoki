@@ -8,6 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"kitsoki/internal/capsule/headroom"
+	capsuleproject "kitsoki/internal/capsule/project"
 )
 
 func TestStagingIntegrationProcessesReceiptBoundCandidateThroughProtectedStaging(t *testing.T) {
@@ -135,10 +138,20 @@ func TestProtectedIntegrationNativeSelfCapsulePromotesWithoutDevWorkspaceScript(
 	if _, err := store.Submit(Submit{Branch: "agent/candidate", SHA: sha, Receipt: persistedReceipt(t, root, sha), TargetRef: "main"}); err != nil {
 		t.Fatal(err)
 	}
+	guard := headroom.Guard{Enabled: true, FreeBytes: func(string) (int64, error) {
+		return headroom.MinimumFloorBytes, nil
+	}}
+	manager, err := capsuleproject.Open(root, []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Headroom = guard
 	state, err := store.Process(context.Background(), ProcessDeps{
-		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
-		Gate:        ShellGate{Command: "git diff --check"},
-		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+		Integration: ProtectedIntegration{
+			ProjectRoot: root, TargetRef: "main", Manager: manager, Headroom: guard,
+		},
+		Gate:      ShellGate{Command: "git diff --check"},
+		Finalizer: ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
 	})
 	if err != nil {
 		t.Fatal(err)

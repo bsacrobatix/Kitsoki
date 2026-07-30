@@ -583,6 +583,7 @@ func stackBaseFor(ahead []Candidate) (treeSHA, id, workspacePath string) {
 type ProtectedFinalizer struct {
 	ProjectRoot string
 	TargetRef   string
+	QueueRoot   string
 	// SkipWIPPreservation disables the dirty-checkout capture; only tests
 	// exercising the CAS in isolation should set it.
 	SkipWIPPreservation bool
@@ -601,11 +602,37 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	// checkout restored clean before the ref CAS.
 	var preserved string
 	var wipSkipped []string
+	var checkoutWarning string
+	projectionPending := false
 	if !p.SkipWIPPreservation {
-		var err error
-		preserved, wipSkipped, err = PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
-		if err != nil {
-			return FinalizeResult{}, Environmental(fmt.Errorf("queue: protected checkout WIP preservation: %w", err))
+		projection, reusable, projectionErr := p.reusableProjection(ctx, target)
+		if projectionErr != nil {
+			return FinalizeResult{}, Environmental(fmt.Errorf("queue: inspect pending checkout projection: %w", projectionErr))
+		}
+		if reusable {
+			preserved = projection.PreservedBranch
+			projectionPending = true
+			checkoutWarning = "protected checkout still matches its pending projection; skipped duplicate WIP capture"
+		} else {
+			var err error
+			preserved, wipSkipped, err = PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
+			if err != nil {
+				// PreserveWIP publishes the immutable preservation branch before it
+				// attempts to restore the protected checkout. Once that branch
+				// exists, a restore failure (most commonly a 0444 primary checkout)
+				// is checkout hygiene, not a reason to block the protected-ref CAS:
+				// the bytes are durable and the checkout is still carrying them.
+				//
+				// If capture itself failed and no branch exists, retain the old
+				// fail-closed behavior because advancing the ref could then make
+				// unanchored work harder to recover.
+				var restoreErr *PreservedWIPRestoreError
+				if preserved == "" || !errors.As(err, &restoreErr) {
+					return FinalizeResult{}, Environmental(fmt.Errorf("queue: protected checkout WIP preservation: %w", err))
+				}
+				projectionPending = true
+				checkoutWarning = fmt.Sprintf("protected checkout restore failed after durable WIP capture on %s: %v", preserved, err)
+			}
 		}
 	}
 	planRequest := reconcile.PlanRequest{
@@ -663,15 +690,36 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	if len(wipSkipped) > 0 {
 		log += fmt.Sprintf("; %d path(s) could not be read and were left untouched in the checkout: %s", len(wipSkipped), strings.Join(wipSkipped, ", "))
 	}
+	if checkoutWarning != "" {
+		log += "; " + checkoutWarning
+	}
 	// The CAS only moves the ref; when the target branch is the protected
-	// checkout's HEAD the worktree must follow it, or the old tree lingers as a
-	// staged reversal of the commit that just landed. Both outcomes are logged,
-	// success included — a silent success is indistinguishable from a silent
-	// skip, which is how that reversal stayed unlocalized for ~100 landings.
-	if summary, err := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget); err != nil {
-		log += "; checkout sync failed: " + err.Error()
-	} else if summary != "" {
-		log += "; " + summary
+	// checkout's HEAD the worktree must follow it, or the old tree lingers as
+	// a staged reversal of the commit that just landed.
+	// A failed restore means the checkout deliberately still carries local
+	// bytes. Do not hard-reset it after the CAS; the protected ref is already
+	// authoritative and the preserved branch is the durable recovery point.
+	if !projectionPending {
+		summary, syncErr := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget)
+		if syncErr != nil {
+			projectionPending = true
+			log += "; checkout sync failed: " + syncErr.Error()
+		} else if summary != "" {
+			// Successful and deliberately skipped syncs are both evidence:
+			// retaining the summary keeps them distinguishable.
+			log += "; " + summary
+		}
+	}
+	if projectionPending {
+		if projectionErr := p.writeProjection(ctx, target, result.NewTarget, preserved); projectionErr != nil {
+			// The ref CAS already won and is the authority. Never report the
+			// candidate as unlanded; retain a loud diagnostic for reconciliation.
+			log += "; checkout projection persistence failed: " + projectionErr.Error()
+		} else {
+			log += "; checkout projection retained for the next finalizer"
+		}
+	} else {
+		p.clearProjection(target)
 	}
 	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: log, PreservedWIPBranch: preserved}, nil
 }
@@ -756,10 +804,33 @@ func (r ShellRepairer) Repair(ctx context.Context, spec Speculation, _ error) ([
 	}
 	runner := r.Runner
 	if runner == nil {
-		runner = execCommandRunner{}
+		runner = scrubbedShellRunner{}
 	}
 	output, err := runner.Run(ctx, spec.WorkspacePath, "sh", "-c", r.Command)
 	return commandEvidence("queue:repair", output), err
+}
+
+type ShellRepairReviewer struct {
+	Command, ReviewerID string
+	Runner              CommandRunner
+}
+
+func (r ShellRepairReviewer) Review(ctx context.Context, in RepairReview) (RepairReviewResult, error) {
+	if strings.TrimSpace(r.Command) == "" || strings.TrimSpace(r.ReviewerID) == "" {
+		return RepairReviewResult{}, fmt.Errorf("repair review command and reviewer identity are required")
+	}
+	if strings.TrimSpace(in.After.WorkspacePath) == "" {
+		return RepairReviewResult{}, fmt.Errorf("repair review workspace is unavailable")
+	}
+	runner := r.Runner
+	if runner == nil {
+		runner = scrubbedShellRunner{}
+	}
+	output, err := runner.Run(ctx, in.After.WorkspacePath, "sh", "-c", r.Command, "--", in.Before.SHA, in.After.SHA)
+	return RepairReviewResult{
+		Passed: err == nil, ReviewerID: r.ReviewerID,
+		Evidence: commandEvidence("queue:repair-review", output),
+	}, err
 }
 
 // workspaceHead reads the current HEAD of a speculative workspace, used to
@@ -806,6 +877,31 @@ type execCommandRunner struct{}
 func (execCommandRunner) Run(ctx context.Context, dir, program string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
+// scrubbedShellRunner preserves the ordinary toolchain environment while
+// removing provider/cloud credentials from untrusted gate, repair, and review
+// subprocesses. Lifecycle git operations keep using execCommandRunner.
+type scrubbedShellRunner struct{}
+
+func (scrubbedShellRunner) Run(ctx context.Context, dir, program string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, program, args...)
+	cmd.Dir = dir
+	for _, item := range os.Environ() {
+		name, _, _ := strings.Cut(item, "=")
+		upper := strings.ToUpper(name)
+		if strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET") ||
+			strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "CREDENTIAL") ||
+			strings.Contains(upper, "API_KEY") || strings.Contains(upper, "PRIVATE_KEY") ||
+			strings.Contains(upper, "ACCESS_KEY") || strings.Contains(upper, "KEY_ID") ||
+			strings.HasPrefix(upper, "AWS_") || strings.HasPrefix(upper, "AZURE_") ||
+			strings.HasPrefix(upper, "GOOGLE_") || strings.HasPrefix(upper, "S3_") ||
+			strings.HasPrefix(upper, "DO_") || strings.HasPrefix(upper, "KITSOKI_WORKER_OUTPUTS_") {
+			continue
+		}
+		cmd.Env = append(cmd.Env, item)
+	}
 	return cmd.CombinedOutput()
 }
 
@@ -1041,7 +1137,7 @@ func (g ShellGate) Run(ctx context.Context, spec Speculation) (GateResult, error
 	}
 	runner := g.Runner
 	if runner == nil {
-		runner = execCommandRunner{}
+		runner = scrubbedShellRunner{}
 	}
 	output, runErr := runner.Run(ctx, spec.WorkspacePath, "sh", "-c", g.Command)
 	evidence := commandEvidence("queue:gate", output)

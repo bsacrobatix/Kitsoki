@@ -375,6 +375,24 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"error": terminal.Error, "result": terminal.Result, "run": terminal})
 		return
 	}
+	// A detached StartDetached request is idempotent for the deterministic
+	// prepared execution identity. The first request registers the run before
+	// replying; if its controller crashes after HTTP success but before its
+	// local dispatch marker, a replay returns that same durable non-terminal
+	// record and never starts a second story goroutine.
+	if r.URL.Query().Get("detach") == "1" {
+		if existing, readErr := s.readRun(prepared.ID); readErr == nil {
+			if existing.EnvelopeDigest != prepared.Envelope.Digest {
+				writeError(w, http.StatusConflict, "execution identity is already bound to a different envelope", requestID(r))
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]any{"run": s.projectRun(existing)})
+			return
+		} else if !os.IsNotExist(readErr) {
+			writeError(w, http.StatusInternalServerError, "read durable detached execution", requestID(r))
+			return
+		}
+	}
 	// Detached dispatch: register the run durably, respond 202 with the
 	// non-terminal record, and drive the story in a background goroutine whose
 	// context outlives this request. The caller reconciles terminal state from

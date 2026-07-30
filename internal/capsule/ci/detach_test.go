@@ -68,7 +68,8 @@ func TestPoolProviderStartDetachedLeavesWorkerRunning(t *testing.T) {
 	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
 	calls := poolTestStubStartDetached(t, executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, Status: "running", Stage: "registered"}, nil)
 
-	provider, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, t.TempDir())
+	root := t.TempDir()
+	provider, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,14 +90,65 @@ func TestPoolProviderStartDetachedLeavesWorkerRunning(t *testing.T) {
 	}
 }
 
-func TestPoolProviderStartDetachedReleasesWorkerOnDispatchFailure(t *testing.T) {
+func TestPoolProviderStartDetachedRecoversActiveJobAfterControllerMappingLoss(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubObjectStore(t)
+	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
+	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
+	calls := poolTestStubStartDetached(t, executor.ExecutionStatus{
+		Schema: executor.ExecutionStatusSchema, Status: "running", Stage: "registered",
+	}, nil)
+
+	root := t.TempDir()
+	prepared := poolTestPrepared(t, "job-detach-recover", "exec-detach-recover")
+	first, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.(executor.DetachedStarter).StartDetached(context.Background(), prepared, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a fresh controller process with no FileRunStore/dispatch
+	// mapping. The provider must recover from the shared pool reservation,
+	// not call Acquire again (which would return ErrJobActive).
+	restarted, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := restarted.(executor.DetachedStarter).StartDetached(context.Background(), prepared, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ExecutionID != prepared.ID || status.EnvelopeDigest != prepared.Envelope.Digest ||
+		status.Status != "running" || status.Stage != "recovering" {
+		t.Fatalf("recovered status = %+v", status)
+	}
+	if *calls != 1 {
+		t.Fatalf("remote detached starts=%d, want exactly 1", *calls)
+	}
+	if created := fixture.fake.Created(); len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	state, err := (vmpool.Store{ProjectRoot: root}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Workers) != 1 || state.Workers[0].ExecutionID != prepared.ID ||
+		state.Workers[0].EnvelopeDigest != prepared.Envelope.Digest {
+		t.Fatalf("durable worker identity = %+v", state.Workers)
+	}
+}
+
+func TestPoolProviderStartDetachedPreservesWorkerOnAmbiguousDispatchFailure(t *testing.T) {
 	fixture := newPoolTestFixture(t, true)
 	poolTestStubObjectStore(t)
 	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
 	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
 	poolTestStubStartDetached(t, executor.ExecutionStatus{}, context.DeadlineExceeded)
 
-	provider, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, t.TempDir())
+	root := t.TempDir()
+	provider, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +156,142 @@ func TestPoolProviderStartDetachedReleasesWorkerOnDispatchFailure(t *testing.T) 
 	if _, err := starter.StartDetached(context.Background(), poolTestPrepared(t, "job-detach-fail", "exec-detach-fail"), nil); err == nil {
 		t.Fatal("dispatch failure did not propagate")
 	}
-	if destroyed := fixture.fake.Destroyed(); len(destroyed) != 1 {
-		t.Fatalf("failed detached dispatch must release its droplet; destroyed = %v", destroyed)
+	if destroyed := fixture.fake.Destroyed(); len(destroyed) != 0 {
+		t.Fatalf("ambiguous detached dispatch must preserve its droplet for idempotent replay; destroyed = %v", destroyed)
+	}
+	state, err := (vmpool.Store{ProjectRoot: root}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Workers) != 1 || state.Workers[0].DispatchPhase != vmpool.DispatchStarting {
+		t.Fatalf("dispatch state = %+v, want one starting reservation", state.Workers)
+	}
+}
+
+func TestPoolProviderStartDetachedRecoversCrashAfterAcquireBeforeHTTP(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubObjectStore(t)
+	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
+	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
+	calls := poolTestStubStartDetached(t, executor.ExecutionStatus{
+		Schema: executor.ExecutionStatusSchema, Status: "running", Stage: "registered",
+	}, nil)
+
+	crash := errors.New("simulated crash after acquire before http")
+	origHook := poolDetachedDispatchHook
+	fired := false
+	poolDetachedDispatchHook = func(stage string) error {
+		if stage == "after_acquire_before_http" && !fired {
+			fired = true
+			return crash
+		}
+		return nil
+	}
+	t.Cleanup(func() { poolDetachedDispatchHook = origHook })
+
+	root := t.TempDir()
+	prepared := poolTestPrepared(t, "job-crash-before-http", "exec-crash-before-http")
+	first, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.(executor.DetachedStarter).StartDetached(context.Background(), prepared, nil); !errors.Is(err, crash) {
+		t.Fatalf("first dispatch err = %v, want simulated crash", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("remote starts before retry = %d, want 0", *calls)
+	}
+
+	restarted, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.(executor.DetachedStarter).StartDetached(context.Background(), prepared, nil); err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 1 {
+		t.Fatalf("remote starts after retry = %d, want 1", *calls)
+	}
+	assertSingleStartedDispatch(t, root, fixture, prepared)
+}
+
+func TestPoolProviderStartDetachedRecoversCrashAfterHTTPBeforeMarker(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubObjectStore(t)
+	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
+	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
+
+	origStart := poolRemoteStartDetached
+	httpCalls := 0
+	registrations := map[string]struct{}{}
+	poolRemoteStartDetached = func(_ context.Context, _ executor.HTTPRemoteWorker, prepared executor.Prepared, _ executor.EventSink) (executor.ExecutionStatus, error) {
+		httpCalls++
+		registrations[prepared.ID] = struct{}{}
+		return executor.ExecutionStatus{
+			Schema:         executor.ExecutionStatusSchema,
+			ExecutionID:    prepared.ID,
+			EnvelopeDigest: prepared.Envelope.Digest,
+			Status:         "running",
+			Stage:          "registered",
+		}, nil
+	}
+	t.Cleanup(func() { poolRemoteStartDetached = origStart })
+
+	crash := errors.New("simulated crash after http before marker")
+	origHook := poolDetachedDispatchHook
+	fired := false
+	poolDetachedDispatchHook = func(stage string) error {
+		if stage == "after_http_before_marker" && !fired {
+			fired = true
+			return crash
+		}
+		return nil
+	}
+	t.Cleanup(func() { poolDetachedDispatchHook = origHook })
+
+	root := t.TempDir()
+	prepared := poolTestPrepared(t, "job-crash-after-http", "exec-crash-after-http")
+	first, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.(executor.DetachedStarter).StartDetached(context.Background(), prepared, nil); !errors.Is(err, crash) {
+		t.Fatalf("first dispatch err = %v, want simulated crash", err)
+	}
+
+	restarted, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.(executor.DetachedStarter).StartDetached(context.Background(), prepared, nil); err != nil {
+		t.Fatal(err)
+	}
+	if httpCalls != 2 {
+		t.Fatalf("HTTP attempts = %d, want replay after ambiguous crash", httpCalls)
+	}
+	if len(registrations) != 1 {
+		t.Fatalf("unique remote registrations = %d, want 1", len(registrations))
+	}
+	assertSingleStartedDispatch(t, root, fixture, prepared)
+}
+
+func assertSingleStartedDispatch(t *testing.T, root string, fixture *poolTestFixture, prepared executor.Prepared) {
+	t.Helper()
+	if created := fixture.fake.Created(); len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	if destroyed := fixture.fake.Destroyed(); len(destroyed) != 0 {
+		t.Fatalf("destroyed instances = %v, want none", destroyed)
+	}
+	state, err := (vmpool.Store{ProjectRoot: root}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Workers) != 1 ||
+		state.Workers[0].ExecutionID != prepared.ID ||
+		state.Workers[0].EnvelopeDigest != prepared.Envelope.Digest ||
+		state.Workers[0].DispatchPhase != vmpool.DispatchStarted {
+		t.Fatalf("durable dispatch = %+v", state.Workers)
 	}
 }
 

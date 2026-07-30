@@ -121,9 +121,27 @@ func workerID(jobID string) string {
 // than an orphaned instance with no local trace. On a Create failure the
 // worker is marked StatusFailed with the error and that error is returned.
 func (p *Pool) Acquire(ctx context.Context, jobID string) (Worker, error) {
+	return p.AcquireExecution(ctx, jobID, "", "")
+}
+
+// AcquireExecution is Acquire with an optional immutable asynchronous
+// execution identity. The identity is committed in the same durable worker
+// reservation that enforces ErrJobActive, before any cloud API call.
+func (p *Pool) AcquireExecution(ctx context.Context, jobID, executionID, envelopeDigest string) (Worker, error) {
+	return p.AcquireDispatch(ctx, jobID, DispatchReservation{ExecutionID: executionID, EnvelopeDigest: envelopeDigest})
+}
+
+// AcquireDispatch persists all controller resume material in the same
+// pre-cloud reservation as the execution identity.
+func (p *Pool) AcquireDispatch(ctx context.Context, jobID string, dispatch DispatchReservation) (Worker, error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return Worker{}, fmt.Errorf("vmpool: job id is required")
+	}
+	executionID := strings.TrimSpace(dispatch.ExecutionID)
+	envelopeDigest := strings.TrimSpace(dispatch.EnvelopeDigest)
+	if (executionID == "") != (envelopeDigest == "") {
+		return Worker{}, fmt.Errorf("vmpool: execution id and envelope digest must be set together")
 	}
 	cfg := p.config()
 	image := cfg.Image
@@ -155,16 +173,25 @@ func (p *Pool) Acquire(ctx context.Context, jobID string) (Worker, error) {
 	created := p.now()
 
 	worker := Worker{
-		ID:               id,
-		JobID:            jobID,
-		InstanceName:     cfg.NamePrefix + jobID,
-		Status:           StatusCreating,
-		Image:            image,
-		ImageGeneration:  imagePointer.Generation,
-		ImageDigest:      imagePointer.ImageDigest,
-		ImageSourceSHA:   imagePointer.SourceSHA,
-		ImageEnvironment: imagePointer.Environment,
-		CreatedAt:        created,
+		ID:                 id,
+		JobID:              jobID,
+		ExecutionID:        executionID,
+		EnvelopeDigest:     envelopeDigest,
+		DispatchToken:      dispatch.Token,
+		DispatchCertPEM:    dispatch.CertPEM,
+		DispatchServerName: dispatch.ServerName,
+		DispatchListenPort: dispatch.ListenPort,
+		InstanceName:       cfg.NamePrefix + jobID,
+		Status:             StatusCreating,
+		Image:              image,
+		ImageGeneration:    imagePointer.Generation,
+		ImageDigest:        imagePointer.ImageDigest,
+		ImageSourceSHA:     imagePointer.SourceSHA,
+		ImageEnvironment:   imagePointer.Environment,
+		CreatedAt:          created,
+	}
+	if executionID != "" {
+		worker.DispatchPhase = DispatchReserved
 	}
 
 	if err := p.Store.Update(func(state *State) error {
@@ -448,6 +475,45 @@ func (p *Pool) MarkRunning(ctx context.Context, workerID, jobID string) error {
 		}
 		w.Status = StatusRunning
 		w.LastActivityAt = p.now()
+		return nil
+	})
+}
+
+// MarkDispatchStarting durably records that the controller is about to send
+// StartDetached for the exact execution bound to workerID. A replacement
+// controller seeing this phase must replay the same remote registration
+// identity; it must not assume the registration completed.
+func (p *Pool) MarkDispatchStarting(workerID, executionID, envelopeDigest string) error {
+	return p.markDispatchPhase(workerID, executionID, envelopeDigest, DispatchStarting)
+}
+
+// MarkDispatchStarted durably records that StartDetached returned
+// successfully. Only this phase permits recovery without replaying the
+// remote registration.
+func (p *Pool) MarkDispatchStarted(workerID, executionID, envelopeDigest string) error {
+	return p.markDispatchPhase(workerID, executionID, envelopeDigest, DispatchStarted)
+}
+
+func (p *Pool) markDispatchPhase(workerID, executionID, envelopeDigest string, phase DispatchPhase) error {
+	return p.Store.Update(func(state *State) error {
+		idx := state.indexByID(workerID)
+		if idx < 0 {
+			return fmt.Errorf("vmpool: worker %s not found", workerID)
+		}
+		w := &state.Workers[idx]
+		if w.Status.Terminal() {
+			return fmt.Errorf("vmpool: worker %s is terminal (%s)", workerID, w.Status)
+		}
+		if w.ExecutionID != executionID || w.EnvelopeDigest != envelopeDigest {
+			return fmt.Errorf("vmpool: worker %s dispatch identity is %s/%s, not %s/%s",
+				workerID, w.ExecutionID, w.EnvelopeDigest, executionID, envelopeDigest)
+		}
+		// A retry may race a prior successful controller's final marker. Never
+		// move the durable phase backward from started to starting.
+		if w.DispatchPhase == DispatchStarted && phase == DispatchStarting {
+			return nil
+		}
+		w.DispatchPhase = phase
 		return nil
 	})
 }

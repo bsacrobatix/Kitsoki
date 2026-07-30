@@ -64,9 +64,11 @@ var ErrWorkerNotReady = errors.New("vmpool: worker did not become ready")
 
 // LeaseSpec configures one ephemeral worker lease for one job.
 type LeaseSpec struct {
-	JobID      string
-	ListenPort int               // default DefaultLeaseListenPort
-	Objects    objectstore.Store // optional: wired into SourceObjects
+	JobID          string
+	ExecutionID    string            // optional exact detached execution identity
+	EnvelopeDigest string            // required with ExecutionID
+	ListenPort     int               // default DefaultLeaseListenPort
+	Objects        objectstore.Store // optional: wired into SourceObjects
 	// BucketURL, OutputsKeyEnv, and OutputsSecretEnv optionally configure
 	// worker-side output mirroring: BucketURL is written verbatim into the
 	// worker's env file as KITSOKI_WORKER_OUTPUTS_URL; OutputsKeyEnv and
@@ -238,7 +240,14 @@ func (d *Dispatcher) Lease(ctx context.Context, spec LeaseSpec) (*WorkerLease, e
 		return probe(ctx, w, client, token, spec.ListenPort)
 	}
 
-	worker, err := leasePool.Acquire(ctx, jobID)
+	worker, err := leasePool.AcquireDispatch(ctx, jobID, DispatchReservation{
+		ExecutionID:    spec.ExecutionID,
+		EnvelopeDigest: spec.EnvelopeDigest,
+		Token:          token,
+		CertPEM:        string(identity.CertPEM),
+		ServerName:     instanceName,
+		ListenPort:     spec.ListenPort,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("vmpool: lease: acquire: %w", err)
 	}
@@ -297,6 +306,90 @@ func (d *Dispatcher) Lease(ctx context.Context, spec LeaseSpec) (*WorkerLease, e
 		Endpoint: endpoint,
 		Remote:   remote,
 		Release:  release,
+	}, nil
+}
+
+// Resume reconstructs the controller side of an existing non-terminal lease
+// from its durable reservation. It is used after a controller crash between
+// AcquireDispatch and the final StartDetached marker, so retrying never
+// provisions a second VM and never invents a new remote registration
+// identity.
+func (d *Dispatcher) Resume(ctx context.Context, spec LeaseSpec) (*WorkerLease, error) {
+	if d.Pool == nil {
+		return nil, fmt.Errorf("vmpool: resume: dispatcher pool is required")
+	}
+	jobID := strings.TrimSpace(spec.JobID)
+	if jobID == "" || strings.TrimSpace(spec.ExecutionID) == "" || strings.TrimSpace(spec.EnvelopeDigest) == "" {
+		return nil, fmt.Errorf("vmpool: resume: job id, execution id, and envelope digest are required")
+	}
+	cfg := d.Pool.Config.WithDefaults()
+	spec = spec.withDefaults(cfg)
+
+	state, err := d.Pool.Store.Load()
+	if err != nil {
+		return nil, fmt.Errorf("vmpool: resume: load state: %w", err)
+	}
+	var worker Worker
+	found := false
+	for _, candidate := range state.Workers {
+		if candidate.JobID == jobID && !candidate.Status.Terminal() {
+			worker = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("vmpool: resume: no active worker for job %s", jobID)
+	}
+	if worker.ExecutionID != spec.ExecutionID || worker.EnvelopeDigest != spec.EnvelopeDigest {
+		return nil, fmt.Errorf("vmpool: resume: worker %s dispatch identity is %s/%s, not %s/%s",
+			worker.ID, worker.ExecutionID, worker.EnvelopeDigest, spec.ExecutionID, spec.EnvelopeDigest)
+	}
+	if worker.DispatchToken == "" || worker.DispatchCertPEM == "" || worker.DispatchServerName == "" || worker.DispatchListenPort <= 0 {
+		return nil, fmt.Errorf("vmpool: resume: worker %s has incomplete durable dispatch credentials", worker.ID)
+	}
+	if spec.ListenPort != worker.DispatchListenPort {
+		return nil, fmt.Errorf("vmpool: resume: worker %s listens on %d, not %d", worker.ID, worker.DispatchListenPort, spec.ListenPort)
+	}
+	identity := ServerIdentity{CertPEM: []byte(worker.DispatchCertPEM)}
+	client, err := pinnedClient(identity)
+	if err != nil {
+		return nil, fmt.Errorf("vmpool: resume: %w", err)
+	}
+
+	leasePool := *d.Pool
+	probe := d.healthProbe()
+	leasePool.Health = func(ctx context.Context, w Worker) error {
+		return probe(ctx, w, client, worker.DispatchToken, worker.DispatchListenPort)
+	}
+	if worker.Status != StatusRunning {
+		ready, waitErr := d.waitReady(ctx, &leasePool, worker.ID, spec.PollInterval, spec.ReadyTimeout)
+		if waitErr != nil {
+			return nil, fmt.Errorf("vmpool: resume: %w", waitErr)
+		}
+		if err := leasePool.MarkRunning(ctx, ready.ID, jobID); err != nil {
+			return nil, fmt.Errorf("vmpool: resume: mark running: %w", err)
+		}
+		worker = ready
+		worker.Status = StatusRunning
+	}
+
+	endpoint := fmt.Sprintf("https://%s:%d", worker.PublicIP, worker.DispatchListenPort)
+	remote := executor.HTTPRemoteWorker{
+		Endpoint:   endpoint,
+		Client:     client,
+		Credential: staticCredential(worker.DispatchToken),
+	}
+	if spec.Objects != nil {
+		remote.SourceObjects = bucketsource.Publisher{Store: spec.Objects}
+	}
+	return &WorkerLease{
+		Worker:   worker,
+		Endpoint: endpoint,
+		Remote:   remote,
+		Release: func(ctx context.Context) error {
+			return leasePool.Release(ctx, worker.ID)
+		},
 	}, nil
 }
 

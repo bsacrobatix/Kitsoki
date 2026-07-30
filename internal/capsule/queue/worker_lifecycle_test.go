@@ -87,10 +87,11 @@ func wltGet(t *testing.T, store Store, id string) Candidate {
 }
 
 // wltReadyCandidate submits a candidate and fast-forwards it directly to
-// ready_to_finalize with a valid prepared tree/base, bypassing prepare(): the
-// default AutonomousFinalization policy's finalizationAuthorized short
-// circuits to true without needing a full DependencyFingerprint/Approval
-// tuple, so this is sufficient to exercise finalize() in isolation.
+// ready_to_finalize with a valid prepared tree/base and the default worker's
+// gate-policy digest, bypassing prepare(). The default AutonomousFinalization
+// policy's finalizationAuthorized short-circuits to true without needing a
+// full DependencyFingerprint/Approval tuple, so this is sufficient to
+// exercise finalize() in isolation.
 func wltReadyCandidate(t *testing.T, store Store, name string) Candidate {
 	t.Helper()
 	c := wltSubmit(t, store, name)
@@ -99,6 +100,7 @@ func wltReadyCandidate(t *testing.T, store Store, name string) Candidate {
 		cand.TreeSHA = "tree-" + cand.SHA
 		cand.BaseSHA = "base-" + cand.SHA
 		cand.GateVersion = "test/v1"
+		cand.GatePolicyDigest = fingerprint("", "", "", "full", "")
 	})
 }
 

@@ -38,6 +38,21 @@ func gitOutputEnv(ctx context.Context, dir string, env []string, args ...string)
 
 const preservedWIPPrefix = "queue/preserved-wip/"
 
+// PreservedWIPRestoreError proves that capture and the second byte-completeness
+// snapshot both succeeded and only checkout restoration failed. Callers may
+// safely advance a protected ref only for this typed failure: a branch name in
+// an arbitrary later error is not, by itself, proof that capture was complete.
+type PreservedWIPRestoreError struct {
+	Branch string
+	Err    error
+}
+
+func (e *PreservedWIPRestoreError) Error() string {
+	return fmt.Sprintf("queue: preserved branch %s created but checkout restore failed: %v", e.Branch, e.Err)
+}
+
+func (e *PreservedWIPRestoreError) Unwrap() error { return e.Err }
+
 // wipExcludedRoots are control/evidence directories that are never captured or
 // cleaned by WIP preservation, whether or not the repository ignores them: the
 // queue's own durable state lives under .capsules, and .artifacts/.context are
@@ -105,7 +120,7 @@ func PreserveWIP(ctx context.Context, root string, at time.Time) (branch string,
 		return branch, skipped, fmt.Errorf("queue: checkout changed during WIP capture; preserved branch %s retained, checkout untouched", branch)
 	}
 	if err := restoreCapturedPaths(ctx, root, skipped); err != nil {
-		return branch, skipped, fmt.Errorf("queue: preserved branch %s created but checkout restore failed: %w", branch, err)
+		return branch, skipped, &PreservedWIPRestoreError{Branch: branch, Err: err}
 	}
 	remainingStatus, err := porcelainStatus(ctx, root)
 	if err != nil {
