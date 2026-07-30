@@ -98,8 +98,20 @@ export function installKitsokiVisualHelper(options: InstallOptions = {}): Kitsok
   }
 
   const routePoll = win.setInterval(() => {
-    if (win.location.href === lastHref) return;
-    lastHref = win.location.href;
+    // beforeunload is not the only way this window goes away: a helper injected
+    // into an embedded document -- or a jsdom environment torn down between two
+    // test files -- loses its location without ever firing it. The poll then
+    // throws on every tick from outside any caller's stack, which surfaces as an
+    // unhandled error attributed to whatever happens to be running. Stop polling
+    // a window that no longer has a location instead of raising forever.
+    const location = win.location as Location | undefined;
+    if (!location) {
+      observer.disconnect();
+      win.clearInterval(routePoll);
+      return;
+    }
+    if (location.href === lastHref) return;
+    lastHref = location.href;
     dirty.add("full");
   }, 250);
   win.addEventListener("beforeunload", () => {
