@@ -2,15 +2,29 @@ package host_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"kitsoki/internal/capsule/headroom"
 	"kitsoki/internal/host"
 )
 
+func requireLocalCapsuleHeadroom(t *testing.T) {
+	t.Helper()
+	if err := headroom.Default().Ensure(t.TempDir()); err != nil {
+		var refusal *headroom.Error
+		if errors.As(err, &refusal) {
+			t.Skipf("local Capsule materialization unavailable: %v", refusal)
+		}
+		t.Fatalf("inspect local Capsule headroom: %v", err)
+	}
+}
+
 func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
+	requireLocalCapsuleHeadroom(t)
 	project := t.TempDir()
 	writeSyntheticCapsuleDefinition(t, project, "clean")
 
@@ -145,6 +159,7 @@ func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
 }
 
 func TestCapsuleWorkspace_CreateDefaultsToDevelopmentDefinition(t *testing.T) {
+	requireLocalCapsuleHeadroom(t)
 	project := t.TempDir()
 	writeSyntheticCapsuleDefinition(t, project, "development")
 
