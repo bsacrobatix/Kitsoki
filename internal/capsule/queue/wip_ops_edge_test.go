@@ -488,7 +488,7 @@ func TestWoeSyncProtectedCheckoutNoOpWhenCheckedOutBranchDiffers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA, nil); err != nil {
+	if _, err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA); err != nil {
 		t.Fatalf("expected a no-op, got err=%v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "tracked.txt"))
@@ -497,9 +497,11 @@ func TestWoeSyncProtectedCheckoutNoOpWhenCheckedOutBranchDiffers(t *testing.T) {
 	}
 }
 
-// TestWoeSyncProtectedCheckoutRefusesWhenWorktreeDivergedFromOldTip covers
-// the diff-index-against-oldSHA refusal: a locally dirty worktree must never
-// be hard-reset.
+// TestWoeSyncProtectedCheckoutRefusesWhenWorktreeDivergedFromOldTip covers the
+// collision refusal: a local edit on a path the landing ALSO changed must never
+// be overwritten. The safety property is unchanged; the refusal is now raised as
+// a typed *ProtectedSyncConflictError that names the offending path, instead of
+// a bare string mentioning only the pre-finalization tip.
 func TestWoeSyncProtectedCheckoutRefusesWhenWorktreeDivergedFromOldTip(t *testing.T) {
 	dir := wipRepo(t)
 	oldSHA := git(t, dir, "rev-parse", "HEAD")
@@ -508,9 +510,16 @@ func TestWoeSyncProtectedCheckoutRefusesWhenWorktreeDivergedFromOldTip(t *testin
 		t.Fatal(err)
 	}
 
-	err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA, nil)
-	if err == nil || !strings.Contains(err.Error(), "refusing hard sync") {
-		t.Fatalf("err=%v, want a refusal naming the pre-finalization tip", err)
+	_, err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA)
+	if err == nil {
+		t.Fatal("expected a refusal when the landing and the worktree both changed tracked.txt")
+	}
+	var conflict *ProtectedSyncConflictError
+	if !asProtectedSyncConflict(err, &conflict) {
+		t.Fatalf("err=%T %v, want *ProtectedSyncConflictError", err, err)
+	}
+	if !strings.Contains(err.Error(), "tracked.txt") || !strings.Contains(err.Error(), oldSHA) {
+		t.Fatalf("refusal must name both the conflicting path and the pre-finalization tip: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "tracked.txt"))
 	if err != nil || string(got) != "locally-dirty" {
@@ -518,9 +527,29 @@ func TestWoeSyncProtectedCheckoutRefusesWhenWorktreeDivergedFromOldTip(t *testin
 	}
 }
 
-// TestWoeSyncProtectedCheckoutRefusesOnUnexpectedUntrackedFile covers the
-// plain (non-tolerated) untracked-file refusal.
-func TestWoeSyncProtectedCheckoutRefusesOnUnexpectedUntrackedFile(t *testing.T) {
+// TestWoeSyncProtectedCheckoutIgnoresUntrackedFilesOutsideTheLanding replaces
+// an earlier assertion that an untracked file ANYWHERE in the checkout must
+// abort the whole sync. That blanket refusal was the direct cause of a
+// data-loss bug, so it is not a property worth keeping:
+//
+//   - It protected nothing. The sync's mutation step never removed untracked
+//     files (`git reset --hard` does not, and the scoped form does not either),
+//     so aborting on their account defended no content.
+//   - Aborting was itself the harm. The protected ref has ALREADY moved by the
+//     time the sync runs, so refusing left the index and worktree on the
+//     pre-landing tree — i.e. a staged reversal of the commit that just landed,
+//     which a plain `git commit` would then apply. Because the real protected
+//     checkout permanently carries untracked/modified paths under
+//     PreserveWIP's excluded roots, that abort fired on essentially every
+//     landing.
+//
+// The genuine property — an untracked file sitting exactly where the landing
+// ADDS a file must refuse loudly rather than be overwritten — is a collision on
+// a landed path, and is covered by
+// TestPsrSyncRefusesWhenTheLandingAddedAFileTheOperatorAlreadyCreated. Here the
+// untracked file is on a path the landing never touched, so the sync must
+// proceed and leave that file completely alone.
+func TestWoeSyncProtectedCheckoutIgnoresUntrackedFilesOutsideTheLanding(t *testing.T) {
 	dir := wipRepo(t)
 	oldSHA := git(t, dir, "rev-parse", "HEAD")
 	woeMoveRefToNewTree(t, dir, "tracked.txt", "v2", "advance")
@@ -528,39 +557,65 @@ func TestWoeSyncProtectedCheckoutRefusesOnUnexpectedUntrackedFile(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA, nil)
-	if err == nil || !strings.Contains(err.Error(), "untracked files appeared") {
-		t.Fatalf("err=%v, want an untracked-files refusal", err)
+	if _, err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA); err != nil {
+		t.Fatalf("an untracked file outside the landing must not block the sync: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "tracked.txt"))
-	if err != nil || string(got) != "v1" {
-		t.Fatalf("checkout should still hold its pre-sync content after refusal: %q err=%v", got, err)
+	if err != nil || string(got) != "v2" {
+		t.Fatalf("landed path not advanced: %q err=%v", got, err)
+	}
+	// No staged reversal of the landing is left behind.
+	if staged := git(t, dir, "diff", "--cached", "--stat", "HEAD"); strings.TrimSpace(staged) != "" {
+		t.Fatalf("sync left a staged reversal of the landing: %s", staged)
+	}
+	surprise, err := os.ReadFile(filepath.Join(dir, "surprise.txt"))
+	if err != nil || string(surprise) != "surprise" {
+		t.Fatalf("untracked file outside the landing was disturbed: %q err=%v", surprise, err)
 	}
 }
 
 // TestWoeSyncProtectedCheckoutToleratesWIPPreservationsOwnSkippedFiles pins
-// the fix in bb7c3e378: an untracked path left behind by WIP preservation
-// because it could not be read at all (so it was skipped rather than
-// captured) must not make the sync guard misfire and refuse the hard sync
-// finalization needs. The hard sync must still proceed and the tolerated
-// file must survive it untouched.
+// the fix in bb7c3e378: a path left behind by WIP preservation because it could
+// not be read at all (so it was skipped rather than captured) must not make the
+// sync guard misfire and refuse the sync finalization needs. The sync must still
+// proceed and the skipped file must survive it untouched.
+//
+// The tolerance is now structural rather than an explicit tolerate-list: a
+// scoped sync only consults the paths the landing changed, so a skipped path
+// elsewhere is unreachable by construction. A skipped path that the landing DID
+// change is a named collision instead — never silently overwritten — because a
+// file that could not be read was never captured onto a preserved branch and so
+// has no copy to recover from.
 func TestWoeSyncProtectedCheckoutToleratesWIPPreservationsOwnSkippedFiles(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permissions; this test needs a non-root process")
+	}
 	dir := wipRepo(t)
 	oldSHA := git(t, dir, "rev-parse", "HEAD")
 	woeMoveRefToNewTree(t, dir, "tracked.txt", "v2", "advance")
-	if err := os.WriteFile(filepath.Join(dir, "surprise.txt"), []byte("surprise"), 0o644); err != nil {
+	unreadable := filepath.Join(dir, "surprise.txt")
+	if err := os.WriteFile(unreadable, []byte("surprise"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Genuinely unreadable, which is what "skipped" means in PreserveWIP.
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o644) })
 
-	if err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA, []string{"surprise.txt"}); err != nil {
-		t.Fatalf("expected a tolerated untracked path to permit the hard sync, got err=%v", err)
+	if _, err := syncProtectedCheckout(context.Background(), dir, "refs/heads/main", oldSHA); err != nil {
+		t.Fatalf("a skipped (unreadable) path outside the landing must permit the sync, got err=%v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "tracked.txt"))
 	if err != nil || string(got) != "v2" {
-		t.Fatalf("hard sync did not advance the checkout to the new tip: %q err=%v", got, err)
+		t.Fatalf("sync did not advance the checkout to the new tip: %q err=%v", got, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "surprise.txt")); err != nil {
-		t.Fatalf("tolerated untracked file should survive the hard reset: %v", err)
+	info, err := os.Lstat(unreadable)
+	if err != nil {
+		t.Fatalf("skipped file should survive the sync: %v", err)
+	}
+	if info.Mode().Perm() != 0o000 {
+		t.Fatalf("skipped file mode changed: %#o", info.Mode().Perm())
 	}
 }
 

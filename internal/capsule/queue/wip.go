@@ -359,40 +359,187 @@ func preservedBranchName(ctx context.Context, root string, at time.Time) (string
 	}
 }
 
-// syncProtectedCheckout hard-resets the protected checkout when (and only
-// when) the just-updated target ref is its checked-out branch, so the worktree
-// matches the new protected tip after the ref CAS. The ref has already moved,
-// so cleanliness is judged against the old target tree: only a worktree that
-// still exactly matches the pre-CAS tip (callers preserve WIP first) is
-// eligible for a hard sync.
-// tolerateUntracked lists paths that are expected to still be untracked —
-// WIP preservation's own skipped (unreadable) paths, deliberately left
-// exactly as found — so their presence must not itself look like a race
-// that appeared mid-finalization. Anything untracked beyond that set still
-// refuses the hard sync exactly as before.
-func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string, tolerateUntracked []string) error {
+// syncProtectedCheckout brings the protected checkout up to the new protected
+// tip when (and only when) the just-updated target ref is its checked-out
+// branch. The ref CAS moves the ref only — it never touches the index or the
+// worktree — so without this step the checkout keeps serving the pre-landing
+// tree, which git then reports as a *staged reversal of the commit that just
+// landed* (including staged deletions of every file the landing added). A
+// plain `git commit` in that state silently backs the landing out, so a
+// successful landing must never leave it.
+//
+// The sync is deliberately scoped to the paths the landing actually changed
+// (oldSHA..HEAD) and is applied from HEAD, rather than being a blanket
+// `git reset --hard`. Two independent hazards make the blanket form wrong:
+//
+//   - Eligibility could never be satisfied. The old form gated the reset on
+//     `git diff-index --quiet <oldSHA> --` over the WHOLE tree, with none of
+//     wipPathspec's exclusions — while PreserveWIP excludes those same roots
+//     from both capture and cleanup, so anything permanently dirty under
+//     .kitsoki/.artifacts/.context (in the real protected checkout, the
+//     regenerated .kitsoki/bin/claude and .kitsoki/bin/codex launch-policy
+//     shims) left the checkout permanently ineligible. Every landing then
+//     refused the sync and left exactly the staged reversal described above.
+//     Judging only the paths the landing touched removes that whole class of
+//     false ineligibility: a path the landing did not touch cannot possibly
+//     need syncing, so its dirtiness is none of this function's business.
+//
+//   - Succeeding was destructive too. `git reset --hard` rewrites every
+//     tracked path, including the excluded-root paths PreserveWIP
+//     deliberately declined to capture — so on the rare clean-enough
+//     checkout it silently destroyed the one category of WIP that has no
+//     preserved-branch copy to recover from. Touching only landed paths is
+//     the narrowest mutation that still achieves the acceptance criterion.
+//
+// Where the two genuinely collide — the landing changed a path the operator
+// also has dirty, or added a file the operator independently created
+// untracked — there is no safe winner to pick, so this refuses loudly and
+// names the path instead of overwriting local work or leaving a reversal.
+//
+// This takes no tolerated-untracked set, unlike the blanket form it replaces.
+// WIP preservation's own skipped (unreadable) paths only matter here if the
+// landing also changed one, and then they are a named conflict like any other
+// collision — never something to tolerate and overwrite, since a path that
+// could not be read was never captured onto a preserved branch either.
+// Elsewhere in the tree they are now simply unreachable: a scoped sync cannot
+// touch a path the landing did not change. (The old blanket untracked refusal
+// protected nothing on its own either — `git reset --hard` does not remove
+// untracked files. Its only real effect was to abort the sync and leave the
+// reversal behind.)
+// It returns a short summary of what it actually did, which the caller records
+// in the finalization log. That summary is not cosmetic. The previous version
+// returned a bare nil both when it had synced the checkout and when it had
+// deliberately done nothing (detached HEAD, or a different branch checked out),
+// and the caller only appended to the log on error — so a successful sync and a
+// skipped sync were indistinguishable in the recorded evidence. That silence is
+// a large part of why this defect survived ~100 finalizations without being
+// localized: the logs could not answer "did the sync run?". Every outcome now
+// names itself.
+func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) (string, error) {
 	head, err := gitOutput(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || head != strings.TrimPrefix(target, "refs/heads/") {
-		return nil // detached or different branch checked out; ref move is enough
+		// Detached or a different branch checked out; the ref move is enough.
+		return "checkout not synced: target is not the checked-out branch", nil
 	}
-	if strings.TrimSpace(oldSHA) != "" {
-		if _, err := gitOutput(ctx, root, "diff-index", "--quiet", oldSHA, "--"); err != nil {
-			return fmt.Errorf("queue: protected worktree does not match pre-finalization tip %s; refusing hard sync", oldSHA)
-		}
+	oldSHA = strings.TrimSpace(oldSHA)
+	if oldSHA == "" {
+		// Without the pre-finalization tip there is no way to tell stale
+		// pre-landing content apart from genuine local WIP, and therefore no
+		// way to prove any mutation is safe. Refuse loudly rather than
+		// hard-resetting the checkout on a guess.
+		return "", fmt.Errorf("queue: cannot sync protected checkout without the pre-finalization tip; refusing to touch the worktree")
 	}
-	untrackedOut, err := gitOutput(ctx, root, append([]string{"ls-files", "--others", "--exclude-standard"}, wipPathspec()...)...)
+	landed, err := landedPaths(ctx, root, oldSHA)
 	if err != nil {
-		return err
+		return "", err
 	}
-	var untracked []string
-	for _, line := range strings.Split(untrackedOut, "\n") {
-		if line != "" {
-			untracked = append(untracked, line)
+	if len(landed) == 0 {
+		return "checkout already at the landed tip; no path needed syncing", nil
+	}
+	conflicts, err := landedPathConflicts(ctx, root, oldSHA, landed)
+	if err != nil {
+		return "", err
+	}
+	if len(conflicts) > 0 {
+		return "", &ProtectedSyncConflictError{Paths: conflicts, OldSHA: oldSHA}
+	}
+	for _, path := range landed {
+		if _, err := gitOutput(ctx, root, "cat-file", "-e", "HEAD:"+path); err == nil {
+			// Present in the new tip: checkout updates the index entry and the
+			// worktree content together, covering both "the landing modified
+			// it" and "the landing added it".
+			if _, err := gitOutput(ctx, root, "checkout", "-q", "HEAD", "--", path); err != nil {
+				return "", err
+			}
+			continue
+		}
+		// Absent from the new tip: the landing deleted it. Drop the stale
+		// index entry and remove the stale worktree file.
+		if _, err := gitOutput(ctx, root, "rm", "-f", "-q", "--cached", "--ignore-unmatch", "--", path); err != nil {
+			return "", err
+		}
+		if err := os.Remove(filepath.Join(root, filepath.FromSlash(path))); err != nil && !os.IsNotExist(err) {
+			return "", err
 		}
 	}
-	if unexpected := setDiff(untracked, tolerateUntracked); len(unexpected) > 0 {
-		return fmt.Errorf("queue: untracked files appeared in protected checkout during finalization; refusing hard sync: %s", strings.Join(unexpected, ", "))
+	return fmt.Sprintf("checkout synced to the landed tip across %d path(s)", len(landed)), nil
+}
+
+// landedPaths lists every path that differs between the pre-finalization tip
+// and the new protected tip now at HEAD — exactly the paths whose stale
+// content would otherwise read as a reversal of the landing. HEAD is used as
+// the post-landing side (rather than the CAS's reported new target) because
+// HEAD is what a subsequent `git commit` in this checkout would diff against,
+// and matching HEAD is the property that has to hold.
+func landedPaths(ctx context.Context, root, oldSHA string) ([]string, error) {
+	out, err := gitOutput(ctx, root, "diff", "--name-only", "--no-renames", oldSHA, "HEAD")
+	if err != nil {
+		return nil, err
 	}
-	_, err = gitOutput(ctx, root, "reset", "-q", "--hard", head)
-	return err
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			paths = append(paths, line)
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// landedPathConflicts returns the landed paths that cannot be synced without
+// destroying local work. A landed path is safe when the checkout still holds
+// the pre-finalization content there (plain stale content — the normal case,
+// and what the sync exists to fix) or already holds the new content. Anything
+// else means the operator's own edit sits on a path the landing also changed,
+// and no automatic choice between them is defensible. An untracked file at a
+// landed path is the same collision in its added-file form: syncing would
+// overwrite content that has no preserved-branch copy.
+func landedPathConflicts(ctx context.Context, root, oldSHA string, landed []string) ([]string, error) {
+	var conflicts []string
+	for _, path := range landed {
+		if _, err := gitOutput(ctx, root, "diff-index", "--quiet", oldSHA, "--", path); err == nil {
+			continue // matches the pre-finalization tip: stale, safe to advance
+		}
+		if _, err := gitOutput(ctx, root, "diff-index", "--quiet", "HEAD", "--", path); err == nil {
+			continue // already matches the new tip: nothing to do
+		}
+		conflicts = append(conflicts, path)
+	}
+	untrackedOut, err := gitOutput(ctx, root, append([]string{"ls-files", "--others", "--exclude-standard", "--"}, landed...)...)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(untrackedOut, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			conflicts = append(conflicts, line)
+		}
+	}
+	sort.Strings(conflicts)
+	return dedupePaths(conflicts), nil
+}
+
+func dedupePaths(paths []string) []string {
+	var out []string
+	for i, p := range paths {
+		if i == 0 || p != paths[i-1] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ProtectedSyncConflictError reports that the protected checkout could not be
+// advanced to the newly landed tip because the operator holds local changes on
+// paths the landing itself changed. Both states are real work and picking
+// either silently is a data-loss bug — overwriting loses the local edit,
+// skipping leaves a staged reversal of the landing that a plain `git commit`
+// would apply. The named paths must be reconciled by hand.
+type ProtectedSyncConflictError struct {
+	Paths  []string
+	OldSHA string
+}
+
+func (e *ProtectedSyncConflictError) Error() string {
+	return fmt.Sprintf("queue: refusing to sync the protected checkout: %d path(s) changed by the landing also hold local changes since the pre-finalization tip %s: %s; the landing itself is applied and the protected ref has moved, but these paths were left untouched — reconcile them by hand (inspect any queue/preserved-wip/* branch from this finalization) before committing in this checkout",
+		len(e.Paths), e.OldSHA, strings.Join(e.Paths, ", "))
 }

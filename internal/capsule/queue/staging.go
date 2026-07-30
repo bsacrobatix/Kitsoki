@@ -664,10 +664,14 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 		log += fmt.Sprintf("; %d path(s) could not be read and were left untouched in the checkout: %s", len(wipSkipped), strings.Join(wipSkipped, ", "))
 	}
 	// The CAS only moves the ref; when the target branch is the protected
-	// checkout's HEAD the worktree must follow it, or the old tree lingers as
-	// apparent local modifications.
-	if err := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget, wipSkipped); err != nil {
+	// checkout's HEAD the worktree must follow it, or the old tree lingers as a
+	// staged reversal of the commit that just landed. Both outcomes are logged,
+	// success included — a silent success is indistinguishable from a silent
+	// skip, which is how that reversal stayed unlocalized for ~100 landings.
+	if summary, err := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget); err != nil {
 		log += "; checkout sync failed: " + err.Error()
+	} else if summary != "" {
+		log += "; " + summary
 	}
 	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: log, PreservedWIPBranch: preserved}, nil
 }
