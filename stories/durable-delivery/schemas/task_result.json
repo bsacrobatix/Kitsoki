@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["passed", "summary", "trace_ref"],
+  "properties": {
+    "passed": { "type": "boolean" },
+    "summary": { "type": "string", "minLength": 1 },
+    "trace_ref": { "type": "string", "minLength": 1 },
+    "bundle_ref": { "type": "string" },
+    "bundle_digest": { "type": "string" },
+    "bundle_kind": { "type": "string" }
+  }
+}

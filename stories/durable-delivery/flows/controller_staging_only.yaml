@@ -1,0 +1,51 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.work_queue:
+    by_call:
+      enqueue_fixer:
+        data: { work_ref: wq-fix-1, status: queued, replayed: false }
+      get_fixer:
+        data:
+          work_ref: wq-fix-1
+          queue: delivery-fixer
+          status: succeeded
+          countable: true
+          receipt:
+            trace_ref: trace-fixer-1
+            bundle_ref: bundles/fix-1.bundle
+            bundle_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            bundle_kind: git-bundle
+      enqueue_reviewer:
+        data: { work_ref: wq-review-1, status: queued, replayed: false }
+      get_reviewer:
+        data: { work_ref: wq-review-1, queue: delivery-reviewer, status: succeeded, countable: false }
+
+turns:
+  - intent: { name: start, slots: { candidate_id: queue-1, project: /repo, target_mode: staging-only, workdir: /workspace, failure_context: "gate failed" } }
+    expect_state: waiting_fixer
+    expect_world: { fixer_work_ref: wq-fix-1 }
+  - intent: { name: refresh }
+    expect_state: waiting_fixer
+    expect_world:
+      fixer_status: succeeded
+  - intent: { name: refresh }
+    expect_state: waiting_reviewer
+    expect_world:
+      fixer_status: succeeded
+      reviewer_work_ref: wq-review-1
+      fixer_receipt:
+        trace_ref: trace-fixer-1
+        bundle_ref: bundles/fix-1.bundle
+        bundle_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        bundle_kind: git-bundle
+  - intent: { name: refresh }
+    expect_state: waiting_reviewer
+    expect_world: { reviewer_status: succeeded }
+  - intent: { name: refresh }
+    expect_state: done
+    expect_world: { reviewer_status: succeeded, next_stage_action: complete }
+
+expect_no_errors: true

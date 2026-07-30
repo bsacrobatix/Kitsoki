@@ -1,0 +1,47 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.work_queue_worker:
+    by_call:
+      claim_reviewer:
+        data:
+          claimed: true
+          work_ref: wq-review-red
+          queue: delivery-reviewer
+          payload:
+            candidate_id: queue-red
+            project: /repo
+            workdir: /workspace
+            fixer_work_ref: wq-fix-red
+            bundle_ref: bundles/fix-red.bundle
+            bundle_digest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            bundle_kind: git-bundle
+            fixer_trace_ref: trace-fixer-red
+          fence: 13
+          attempt: 1
+      fail_reviewer:
+        data: { work_ref: wq-review-red, queue: delivery-reviewer, status: failed, fence: 13, attempt: 1 }
+  host.agent.task:
+    by_call:
+      run_reviewer:
+        delay: "10ms"
+        data:
+          submitted:
+            passed: false
+            summary: "The repair weakened the regression assertion."
+            trace_ref: trace-reviewer-red
+
+turns:
+  - intent: { name: work_reviewer }
+    advance_clock: "100ms"
+    expect_state: worker_failed
+    expect_world:
+      work_ref: wq-review-red
+      task_result:
+        passed: false
+        summary: "The repair weakened the regression assertion."
+        trace_ref: trace-reviewer-red
+
+expect_no_errors: true

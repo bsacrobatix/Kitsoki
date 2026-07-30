@@ -2,11 +2,15 @@
 // exposed as a host verb family so starlark glue (ctx.host.call) can inspect
 // and steer the queue without shelling out to `kitsoki queue`.
 //
-// Nine ops, registered bare at "host.queue" (longest-prefix convention, see
+// Registered bare at "host.queue" (longest-prefix convention, see
 // host.graph / host.demo — the registry injects the dropped suffix as
 // args["op"]):
 //
+//	submit    {request}              -> durable_bundle admission
+//	get       {id}                   -> one candidate plus projected next action
 //	status    {[id]}                 -> full queue state, or one candidate when "id" is set
+//	retry     {id[, actor, reason]}  -> normalize kick/resume for recoverable work
+//	cancel    {id[, actor, reason]}  -> park without discarding retained evidence
 //	kick      {id[, actor, reason]}  -> clear a retry_wait candidate's backoff timer
 //	park      {id[, actor, reason]}  -> move a candidate to needs_input
 //	resume    {id[, actor, reason]}  -> re-queue a parked candidate with a fresh attempt budget
@@ -28,19 +32,28 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"kitsoki/internal/capsule/delivery"
 	"kitsoki/internal/capsule/queue"
 )
 
 // QueueHandler implements the host.queue.* multi-op verb.
-func QueueHandler(_ context.Context, args map[string]any) (Result, error) {
+func QueueHandler(ctx context.Context, args map[string]any) (Result, error) {
 	op, _ := args["op"].(string)
 	store, err := queueStoreArg(args)
 	if err != nil {
 		return Result{}, err
 	}
 	switch op {
+	case "submit":
+		return queueDeliverySubmit(ctx, store, args)
+	case "get":
+		return queueDeliveryGet(store, args)
 	case "status":
 		return queueStatusOp(store, args)
+	case "retry":
+		return queueDeliveryOp(store, args, "retry", delivery.Service.Retry)
+	case "cancel":
+		return queueDeliveryOp(store, args, "cancel", delivery.Service.Cancel)
 	case "kick":
 		return queueOperatorOp(store, args, "kick", queue.Store.Kick)
 	case "park":
@@ -56,10 +69,63 @@ func QueueHandler(_ context.Context, args map[string]any) (Result, error) {
 	case "unapprove":
 		return queueOperatorOp(store, args, "unapprove", queue.Store.Unapprove)
 	case "reject":
-		return queueOperatorOp(store, args, "reject", queue.Store.Reject)
+		return queueDeliveryOp(store, args, "reject", delivery.Service.Reject)
 	default:
-		return Result{}, fmt.Errorf("host.queue: unknown op %q (want one of status, kick, park, resume, emergency, override, approve, unapprove, reject)", op)
+		return Result{}, fmt.Errorf("host.queue: unknown op %q (want one of submit, get, status, retry, cancel, kick, park, resume, emergency, override, approve, unapprove, reject)", op)
 	}
+}
+
+func queueDeliverySubmit(ctx context.Context, store queue.Store, args map[string]any) (Result, error) {
+	raw, err := json.Marshal(args["request"])
+	if err != nil {
+		return Result{}, fmt.Errorf("host.queue.submit: request must be JSON serializable: %w", err)
+	}
+	var request delivery.SubmitRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return Result{}, fmt.Errorf("host.queue.submit: decode request: %w", err)
+	}
+	result, err := delivery.New(store).Submit(ctx, request)
+	if err != nil {
+		return Result{Error: "host.queue.submit: " + err.Error()}, nil
+	}
+	return deliveryHostResult(result)
+}
+
+func queueDeliveryGet(store queue.Store, args map[string]any) (Result, error) {
+	id, _ := args["id"].(string)
+	result, err := delivery.New(store).Get(id)
+	if err != nil {
+		return Result{Error: "host.queue.get: " + err.Error()}, nil
+	}
+	return deliveryHostResult(result)
+}
+
+func queueDeliveryOp(
+	store queue.Store,
+	args map[string]any,
+	verb string,
+	run func(delivery.Service, queue.Op) (delivery.Result, error),
+) (Result, error) {
+	id, _ := args["id"].(string)
+	actor, _ := args["actor"].(string)
+	reason, _ := args["reason"].(string)
+	result, err := run(delivery.New(store), queue.Op{ID: id, Actor: actor, Reason: reason})
+	if err != nil {
+		return Result{Error: fmt.Sprintf("host.queue.%s: %v", verb, err)}, nil
+	}
+	return deliveryHostResult(result)
+}
+
+func deliveryHostResult(result delivery.Result) (Result, error) {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return Result{}, fmt.Errorf("host.queue: encode delivery result: %w", err)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return Result{}, fmt.Errorf("host.queue: decode delivery result: %w", err)
+	}
+	return Result{Data: data}, nil
 }
 
 func queueApprovalOp(store queue.Store, args map[string]any) (Result, error) {
@@ -98,25 +164,17 @@ func queueStoreArg(args map[string]any) (queue.Store, error) {
 // single candidate when "id" is provided.
 func queueStatusOp(store queue.Store, args map[string]any) (Result, error) {
 	if id, _ := args["id"].(string); id != "" {
-		c, err := store.Get(id)
+		result, err := delivery.New(store).Get(id)
 		if err != nil {
 			return Result{Error: err.Error()}, nil
 		}
-		data, err := queueJSONMap("candidate", c)
-		if err != nil {
-			return Result{}, err
-		}
-		return Result{Data: data}, nil
+		return deliveryHostResult(result)
 	}
-	state, err := store.List()
+	result, err := delivery.New(store).Status()
 	if err != nil {
 		return Result{Error: err.Error()}, nil
 	}
-	data, err := queueJSONMap("state", state)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Data: data}, nil
+	return deliveryHostResult(result)
 }
 
 // queueOperatorOp is the shared shape of the six human-override verbs,

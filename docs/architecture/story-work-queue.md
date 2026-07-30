@@ -210,6 +210,23 @@ The queue composes with, but does not absorb, existing services:
 | `workerregistry` | The registry declares stable worker identity, enabled state, placement, and advertised capabilities. The queue uses that declaration plus live capacity supplied by adapters to match work; it does not own worker configuration, secrets, or health transport. |
 | Capsule merge queue | `internal/capsule/queue` serializes receipt-bound Git promotion into protected branches. It remains the only protected-Git promotion authority. The story work queue must never claim Git landing, mutate promotion candidates, or share its persistence/state machine. |
 
+## Durable Delivery Management
+
+`internal/capsule/delivery` is the single stateless management contract over
+the Capsule merge queue. It adds no ledger. Its built-in surfaces are:
+
+- CLI: `kitsoki delivery submit|get|status|retry|cancel|reject`;
+- JSON-RPC/MCP: `queue.submit|get|status|retry|cancel|reject`;
+- Starlark: the same operations under `host.queue.*`.
+
+`cancel` parks work while retaining its branch, bundle, receipt, and evidence;
+`retry` normalizes queue kick/resume; `reject` is terminal. The projected
+`next_action` is derived from queue state and never makes a second transition.
+Named project-profile commands make `change`, `full`, and `release` Capsule CI
+pipelines execute different deterministic gates. Missing explicit `full` or
+`release` commands fail closed; only legacy `change` retains test/build
+fallback compatibility.
+
 ## Storage Semantics
 
 SQLite is the single-host mode. Atomic claim and fence increment occur in one

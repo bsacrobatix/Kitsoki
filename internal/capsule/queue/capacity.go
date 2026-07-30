@@ -23,10 +23,17 @@ type GateAdmissionRequest struct {
 	ProjectID, TargetRef, Tier, WorkerID string
 }
 
+// defaultGateCapacityRootOverride is test-only injection for hermetic package
+// processes. Production never assigns it.
+var defaultGateCapacityRootOverride string
+
 // DefaultGateCapacityRoot is the per-user host authority shared by every
 // repository on this workstation/controller. UserCacheDir is owner-scoped on
 // supported hosts, avoiding a predictable world-writable /tmp authority.
 func DefaultGateCapacityRoot() string {
+	if filepath.IsAbs(defaultGateCapacityRootOverride) {
+		return defaultGateCapacityRootOverride
+	}
 	if root, err := os.UserCacheDir(); err == nil && filepath.IsAbs(root) {
 		return filepath.Join(root, "kitsoki", "runtime")
 	}
@@ -37,6 +44,18 @@ func DefaultGateCapacityRoot() string {
 // opt-in. Operators may raise Max or select a different named physical pool,
 // but an unconfigured worker always shares one host-level slot.
 func DefaultFileGateCapacity() FileGateCapacity {
+	if filepath.IsAbs(defaultGateCapacityRootOverride) {
+		// Hermetic package tests exercise queue state, leases, retries, and
+		// fencing in parallel; they are not competing for a physical machine
+		// gate. Keep the file-lock implementation but remove artificial
+		// in-process serialization. Explicit capacity tests construct their own
+		// FileGateCapacity with the desired bound.
+		return FileGateCapacity{Root: DefaultGateCapacityRoot(), Pool: "default", Max: 256}
+	}
+	return productionDefaultFileGateCapacity()
+}
+
+func productionDefaultFileGateCapacity() FileGateCapacity {
 	return FileGateCapacity{Root: DefaultGateCapacityRoot(), Pool: "default", Max: 1}
 }
 

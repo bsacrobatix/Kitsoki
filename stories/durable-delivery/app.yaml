@@ -1,0 +1,351 @@
+app:
+  id: durable-delivery
+  version: 0.1.0
+  title: "Durable delivery repair and review"
+  author: "kitsoki"
+  license: "CC0"
+
+# This Story owns management policy only. host.work_queue owns task durability,
+# host.agent.task performs bounded repair/review work, and the Capsule merge
+# queue remains the only delivery ledger and protected-ref authority.
+hosts:
+  - host.work_queue
+  - host.work_queue_worker
+  - host.agent.task
+
+agents:
+  fixer:
+    system_prompt: "Repair the supplied delivery failure with the smallest correct change. Preserve tests and policy. Produce a retained Git bundle and report its server-relative reference and digest."
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    bash_profile:
+      commands: [git, go, make]
+    effect: write
+  reviewer:
+    system_prompt: "Independently review the supplied repair. Reject weakened, deleted, skipped, or loosened tests and any reduced gate or policy coverage. Do not modify files."
+    tools: [Read, Grep, Glob]
+    effect: read
+
+world:
+  candidate_id: { type: string, default: "" }
+  project: { type: string, default: "." }
+  target_mode: { type: string, default: "staging-only" }
+  workdir: { type: string, default: "." }
+  failure_context: { type: string, default: "" }
+  fixer_work_ref: { type: string, default: "" }
+  fixer_status: { type: string, default: "" }
+  fixer_receipt: { type: object, default: {} }
+  reviewer_work_ref: { type: string, default: "" }
+  reviewer_status: { type: string, default: "" }
+  next_stage_action: { type: string, default: "" }
+  claimed: { type: bool, default: false }
+  work_ref: { type: string, default: "" }
+  work_queue: { type: string, default: "" }
+  work_payload: { type: object, default: {} }
+  fence: { type: int, default: 0 }
+  attempt: { type: int, default: 0 }
+  task_result: { type: object, default: {} }
+  last_job_id: { type: string, default: "" }
+
+intents:
+  start:
+    description: "Queue durable repair work for a delivery candidate."
+    examples: [start, repair delivery]
+    priority: 90
+    slots:
+      candidate_id: { type: string, required: true }
+      project: { type: string, required: false }
+      target_mode: { type: string, required: false }
+      workdir: { type: string, required: true }
+      failure_context: { type: string, required: true }
+  refresh:
+    description: "Refresh the current durable task."
+    examples: [refresh, status]
+    priority: 80
+  route:
+    description: "(internal) route a refreshed durable task."
+    examples: []
+    priority: 1
+  work_fixer:
+    description: "Claim and execute one configured fixer job."
+    examples: [work fixer]
+    priority: 70
+  work_reviewer:
+    description: "Claim and execute one configured independent review job."
+    examples: [work reviewer]
+    priority: 70
+  complete_task:
+    description: "(internal) complete a claimed worker task."
+    examples: []
+    priority: 1
+  look:
+    description: "Show current delivery progress."
+    examples: [look]
+    priority: 5
+
+root: idle
+
+states:
+  idle:
+    view:
+      - heading: "Durable delivery"
+      - prose: "Start queues repair work. Worker intents are deployment-driven and safe to replay."
+    on:
+      start:
+        - target: waiting_fixer
+          effects:
+            - set:
+                candidate_id: "{{ slots.candidate_id }}"
+                project: "{{ slots.project ?? world.project }}"
+                target_mode: "{{ slots.target_mode ?? world.target_mode }}"
+                workdir: "{{ slots.workdir }}"
+                failure_context: "{{ slots.failure_context }}"
+            - invoke: host.work_queue
+              id: enqueue_fixer
+              with:
+                op: enqueue
+                queue: delivery-fixer
+                idempotency_key: "delivery:{{ slots.candidate_id }}:fixer:v1"
+                input:
+                  candidate_id: "{{ slots.candidate_id }}"
+                  project: "{{ slots.project ?? world.project }}"
+                  workdir: "{{ slots.workdir }}"
+                  failure_context: "{{ slots.failure_context }}"
+              bind:
+                fixer_work_ref: work_ref
+      work_fixer:
+        - target: fixer_running
+          effects:
+            - invoke: host.work_queue_worker
+              id: claim_fixer
+              with: { op: claim, queue: delivery-fixer }
+              bind:
+                claimed: claimed
+                work_ref: work_ref
+                work_queue: queue
+                work_payload: payload
+                fence: fence
+                attempt: attempt
+      work_reviewer:
+        - target: reviewer_running
+          effects:
+            - invoke: host.work_queue_worker
+              id: claim_reviewer
+              with: { op: claim, queue: delivery-reviewer }
+              bind:
+                claimed: claimed
+                work_ref: work_ref
+                work_queue: queue
+                work_payload: payload
+                fence: fence
+                attempt: attempt
+      look: [{ target: . }]
+
+  waiting_fixer:
+    view:
+      - heading: "Waiting for fixer"
+      - prose: "Durable work: {{ world.fixer_work_ref }}"
+    on:
+      refresh:
+        - target: route_fixer
+          effects:
+            - invoke: host.work_queue
+              id: get_fixer
+              with: { op: get, work_ref: "{{ world.fixer_work_ref }}" }
+              bind:
+                fixer_status: status
+                fixer_receipt: receipt
+      look: [{ target: . }]
+
+  route_fixer:
+    on_enter:
+      - emit_intent: route
+    on:
+      route:
+        - when: "world.fixer_status == 'succeeded'"
+          target: waiting_reviewer
+          effects:
+            - invoke: host.work_queue
+              id: enqueue_reviewer
+              with:
+                op: enqueue
+                queue: delivery-reviewer
+                idempotency_key: "delivery:{{ world.candidate_id }}:reviewer:v1"
+                input:
+                  candidate_id: "{{ world.candidate_id }}"
+                  project: "{{ world.project }}"
+                  fixer_work_ref: "{{ world.fixer_work_ref }}"
+                  workdir: "{{ world.workdir }}"
+                  bundle_ref: "{{ world.fixer_receipt.bundle_ref }}"
+                  bundle_digest: "{{ world.fixer_receipt.bundle_digest }}"
+                  bundle_kind: "{{ world.fixer_receipt.bundle_kind }}"
+                  fixer_trace_ref: "{{ world.fixer_receipt.trace_ref }}"
+              bind:
+                reviewer_work_ref: work_ref
+        - when: "world.fixer_status == 'failed' || world.fixer_status == 'cancelled'"
+          target: blocked
+        - target: waiting_fixer
+
+  waiting_reviewer:
+    view:
+      - heading: "Waiting for independent reviewer"
+      - prose: "Durable work: {{ world.reviewer_work_ref }}"
+    on:
+      refresh:
+        - target: route_reviewer
+          effects:
+            - invoke: host.work_queue
+              id: get_reviewer
+              with: { op: get, work_ref: "{{ world.reviewer_work_ref }}" }
+              bind:
+                reviewer_status: status
+      look: [{ target: . }]
+
+  route_reviewer:
+    on_enter:
+      - emit_intent: route
+    on:
+      route:
+        - when: "world.reviewer_status == 'succeeded' && world.target_mode == 'staging-only'"
+          target: done
+          effects:
+            - set: { next_stage_action: "complete" }
+        - when: "world.reviewer_status == 'succeeded'"
+          target: next_stage_ready
+          effects:
+            - set: { next_stage_action: "next_stage_ready" }
+        - when: "world.reviewer_status == 'failed' || world.reviewer_status == 'cancelled'"
+          target: blocked
+        - target: waiting_reviewer
+
+  fixer_running:
+    view:
+      - heading: "Fixer running"
+      - prose: "A fenced durable fixer job is executing."
+    on_enter:
+      - invoke: host.agent.task
+        id: run_fixer
+        background: true
+        with:
+          agent: fixer
+          working_dir: "{{ world.work_payload.workdir }}"
+          acceptance: { schema: schemas/task_result.json, max_retries: 2 }
+          context:
+            prompt: prompts/fix.md
+            args: { payload: "{{ world.work_payload }}" }
+        bind:
+          last_job_id: job_id
+        on_complete:
+          - set:
+              task_result: "{{ world.last_job_result.submitted }}"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+            invoke: host.work_queue_worker
+            id: complete_fixer
+            with:
+              op: complete
+              work_ref: "{{ world.work_ref }}"
+              fence: "{{ world.fence }}"
+              receipt:
+                schema: kitsoki/work-queue-receipt/v1
+                outcome: done
+                job_id: "{{ world.work_ref }}"
+                attempt: "{{ world.attempt }}"
+                fence: "{{ world.fence }}"
+                trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
+                bundle_ref: "{{ world.last_job_result.submitted.bundle_ref }}"
+                bundle_digest: "{{ world.last_job_result.submitted.bundle_digest }}"
+                bundle_kind: "{{ world.last_job_result.submitted.bundle_kind }}"
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+            invoke: host.work_queue_worker
+            id: fail_fixer
+            with:
+              op: fail
+              work_ref: "{{ world.work_ref }}"
+              fence: "{{ world.fence }}"
+              retryable: false
+              reason: "{{ world.last_job_result.submitted.summary }}"
+              receipt:
+                schema: kitsoki/work-queue-receipt/v1
+                outcome: failed
+                job_id: "{{ world.work_ref }}"
+                attempt: "{{ world.attempt }}"
+                fence: "{{ world.fence }}"
+                trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+            target: worker_done
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+            target: worker_failed
+
+  reviewer_running:
+    view:
+      - heading: "Independent reviewer running"
+      - prose: "A read-only reviewer is checking the retained repair."
+    on_enter:
+      - invoke: host.agent.task
+        id: run_reviewer
+        background: true
+        with:
+          agent: reviewer
+          working_dir: "{{ world.work_payload.workdir }}"
+          acceptance: { schema: schemas/task_result.json, max_retries: 2 }
+          context:
+            prompt: prompts/review.md
+            args: { payload: "{{ world.work_payload }}" }
+        bind:
+          last_job_id: job_id
+        on_complete:
+          - set:
+              task_result: "{{ world.last_job_result.submitted }}"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+            invoke: host.work_queue_worker
+            id: complete_reviewer
+            with:
+              op: complete
+              work_ref: "{{ world.work_ref }}"
+              fence: "{{ world.fence }}"
+              receipt:
+                schema: kitsoki/work-queue-receipt/v1
+                outcome: done
+                job_id: "{{ world.work_ref }}"
+                attempt: "{{ world.attempt }}"
+                fence: "{{ world.fence }}"
+                trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+            invoke: host.work_queue_worker
+            id: fail_reviewer
+            with:
+              op: fail
+              work_ref: "{{ world.work_ref }}"
+              fence: "{{ world.fence }}"
+              retryable: false
+              reason: "{{ world.last_job_result.submitted.summary }}"
+              receipt:
+                schema: kitsoki/work-queue-receipt/v1
+                outcome: rejected
+                job_id: "{{ world.work_ref }}"
+                attempt: "{{ world.attempt }}"
+                fence: "{{ world.fence }}"
+                trace_ref: "{{ world.last_job_result.submitted.trace_ref }}"
+          - when: "world.last_job_status == 'done' && world.last_job_result.submitted.passed"
+            target: worker_done
+          - when: "world.last_job_status != 'done' || !world.last_job_result.submitted.passed"
+            target: worker_failed
+
+  worker_done:
+    view:
+      - heading: "Worker task complete"
+      - prose: "The fenced workqueue receipt is durable; this disposable agent can exit."
+  worker_failed:
+    view:
+      - heading: "Worker task failed"
+      - prose: "The non-success receipt is durable; review will not advance."
+  next_stage_ready:
+    view:
+      - heading: "Next stage ready"
+      - prose: "The independent review passed. Server policy may enqueue the exact retained result into the next configured target."
+  done:
+    view:
+      - heading: "Staging delivery complete"
+  blocked:
+    view:
+      - heading: "Delivery blocked"
+      - prose: "A durable task failed or the independent reviewer rejected the repair."

@@ -99,6 +99,7 @@ func NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(runner CapsuleCICom
 		if commands == nil {
 			commands = map[string]any{}
 		}
+		pipeline := capsuleCIStringArg(args, "pipeline", "")
 		jobID := safeArtifactID(capsuleCIStringArg(args, "job_id", "run"))
 		commandTimeout, err := capsuleCICommandTimeout(args)
 		if err != nil {
@@ -108,13 +109,11 @@ func NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(runner CapsuleCICom
 		if err != nil {
 			return Result{Error: fmt.Sprintf("host.capsule_ci.project_checks: evidence destination: %v", err), FailureKind: FailureFatal}, nil
 		}
-		checks := make([]map[string]any, 0, 2)
-		commandEvidence := make([]map[string]any, 0, 2)
+		commandSpecs := capsuleCICommandSpecs(commands, pipeline)
+		checks := make([]map[string]any, 0, len(commandSpecs))
+		commandEvidence := make([]map[string]any, 0, len(commandSpecs))
 		allPassed := true
-		for _, check := range []struct {
-			id  string
-			key string
-		}{{id: "tests", key: "test"}, {id: "build", key: "build"}} {
+		for _, check := range commandSpecs {
 			command := strings.TrimSpace(fmt.Sprint(commands[check.key]))
 			if command == "" || command == "<nil>" {
 				continue
@@ -151,13 +150,13 @@ func NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(runner CapsuleCICom
 			outcome = "failed"
 			summary = "One or more declared project commands failed."
 		}
-		artifact := map[string]any{"schema": "capsule-ci-project-checks/v1", "job_id": capsuleCIStringArg(args, "job_id", ""), "profile": filepath.ToSlash(filepath.Join(".kitsoki", "project-profile.yaml")), "checks": commandEvidence, "outcome": outcome}
+		artifact := map[string]any{"schema": "capsule-ci-project-checks/v1", "job_id": capsuleCIStringArg(args, "job_id", ""), "pipeline": pipeline, "profile": filepath.ToSlash(filepath.Join(".kitsoki", "project-profile.yaml")), "checks": commandEvidence, "outcome": outcome}
 		if err := writeCapsuleCIEvidence(evidencePath, artifact); err != nil {
 			return Result{}, fmt.Errorf("host.capsule_ci.project_checks: write evidence: %w", err)
 		}
 		verdict := map[string]any{
 			"schema":             "capsule-ci-verdict/v1",
-			"pipeline":           capsuleCIStringArg(args, "pipeline", ""),
+			"pipeline":           pipeline,
 			"outcome":            outcome,
 			"summary":            summary,
 			"checks":             checks,
@@ -169,6 +168,29 @@ func NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(runner CapsuleCICom
 		}
 		return Result{Data: map[string]any{"ok": allPassed && len(checks) > 0, "checks": checks, "evidence": evidenceRef, "verdict": verdict}}, nil
 	}
+}
+
+type capsuleCICommandSpec struct {
+	id  string
+	key string
+}
+
+// capsuleCICommandSpecs makes the selected Capsule pipeline operational rather
+// than a verdict label. A project may define commands.<pipeline> as its exact
+// deterministic gate. Legacy change pipelines retain the test/build pair;
+// missing full or release gates fail closed rather than silently weakening.
+func capsuleCICommandSpecs(commands map[string]any, pipeline string) []capsuleCICommandSpec {
+	pipeline = strings.TrimSpace(pipeline)
+	if pipeline != "" {
+		command := strings.TrimSpace(fmt.Sprint(commands[pipeline]))
+		if command != "" && command != "<nil>" {
+			return []capsuleCICommandSpec{{id: pipeline, key: pipeline}}
+		}
+		if pipeline != "change" {
+			return nil
+		}
+	}
+	return []capsuleCICommandSpec{{id: "tests", key: "test"}, {id: "build", key: "build"}}
 }
 
 func capsuleCIEvidencePath(workdir, jobID string, destination CapsuleCIEvidenceDestination) (string, string, error) {

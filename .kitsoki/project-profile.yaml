@@ -15,6 +15,9 @@ stack:
 commands:
   build: "go build ./..."
   test: "make test"
+  change: "make capsule-ci-quick"
+  full: "make test"
+  release: "make test && go build ./..."
 tracker:
   sources:
     - id: local

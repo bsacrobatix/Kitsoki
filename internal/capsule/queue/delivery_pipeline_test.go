@@ -60,7 +60,7 @@ func TestDeliveryDefaultsDeriveTierAndHostCapacity(t *testing.T) {
 			t.Fatalf("target %q tier=%q, want %q", target, got, want)
 		}
 	}
-	capacity := DefaultFileGateCapacity()
+	capacity := productionDefaultFileGateCapacity()
 	if !filepath.IsAbs(capacity.Root) || capacity.Pool != "default" || capacity.Max != 1 {
 		t.Fatalf("default capacity=%+v, want absolute per-user root/default/1", capacity)
 	}

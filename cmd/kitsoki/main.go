@@ -248,6 +248,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(workerCmd())
 	root.AddCommand(vmpoolCmd())
 	root.AddCommand(queueCmd())
+	root.AddCommand(deliveryCmd())
 	root.AddCommand(waveCmd())
 	root.AddCommand(gitopsCmd())
 	root.AddCommand(repoCmd())

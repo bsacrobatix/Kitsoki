@@ -115,6 +115,35 @@ func TestQueueHandler_ParkResumeHappyPath(t *testing.T) {
 	}
 }
 
+func TestQueueHandler_DeliveryCancelRetryRejectParity(t *testing.T) {
+	dir := t.TempDir()
+	seeded, err := queue.Store{ProjectRoot: dir}.Submit(queue.Submit{
+		Branch: "delivery", SHA: strings.Repeat("b", 40),
+		Admission: queue.EmergencySkipTestsAdmission,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		op         string
+		wantPhase  queue.Status
+		wantAction string
+	}{
+		{"cancel", queue.NeedsInput, "repair"},
+		{"retry", queue.Queued, "processing"},
+		{"reject", queue.Rejected, "terminal"},
+	}
+	for _, test := range tests {
+		res := queueCall(t, test.op, dir, map[string]any{"id": seeded.ID, "actor": "tester"})
+		if phase := queueCandidatePhase(t, res); phase != string(test.wantPhase) {
+			t.Fatalf("%s phase=%q want %q", test.op, phase, test.wantPhase)
+		}
+		if action, _ := res.Data["next_action"].(string); action != test.wantAction {
+			t.Fatalf("%s next_action=%q want %q", test.op, action, test.wantAction)
+		}
+	}
+}
+
 // TestNewStarlarkRunHandler_CtxHostQueueVerbAllowListed proves the queue
 // verbs are reachable from a starlark script through ctx.host.call when the
 // run's capabilities allow-list them: host.queue.status resolves through the
@@ -157,5 +186,49 @@ func TestNewStarlarkRunHandler_CtxHostQueueVerbAllowListed(t *testing.T) {
 	}
 	if count, ok := res.Data["count"].(int64); !ok || count != 0 {
 		t.Errorf("result.Data[count] = %#v (%T), want 0", res.Data["count"], res.Data["count"])
+	}
+}
+
+func TestNewStarlarkRunHandler_CtxHostDeliveryLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	project := filepath.Join(dir, "proj")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seeded, err := queue.Store{ProjectRoot: project}.Submit(queue.Submit{
+		Branch: "delivery", SHA: strings.Repeat("c", 40),
+		Admission: queue.EmergencySkipTestsAdmission,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "glue.star")
+	if err := os.WriteFile(script, []byte(
+		"def main(ctx):\n"+
+			"    cancelled = ctx.host.call(\"host.queue.cancel\", {\"project\": ctx.inputs[\"project\"], \"id\": ctx.inputs[\"id\"]})\n"+
+			"    retried = ctx.host.call(\"host.queue.retry\", {\"project\": ctx.inputs[\"project\"], \"id\": ctx.inputs[\"id\"]})\n"+
+			"    return {\"cancel_action\": cancelled[\"next_action\"], \"retry_action\": retried[\"next_action\"]}\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script+".yaml", []byte(
+		"inputs:\n  project: { type: string }\n  id: { type: string }\noutputs:\n  cancel_action: { type: string }\n  retry_action: { type: string }\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	RegisterBuiltins(reg)
+	res, err := NewStarlarkRunHandler(reg)(context.Background(), map[string]any{
+		"script": script,
+		"inputs": map[string]any{"project": project, "id": seeded.ID},
+		"capabilities": starlarkTestHostCapabilities(
+			"host.queue.cancel", "host.queue.retry",
+		),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Error != "" || res.Data["cancel_action"] != "repair" || res.Data["retry_action"] != "processing" {
+		t.Fatalf("result=%+v", res)
 	}
 }

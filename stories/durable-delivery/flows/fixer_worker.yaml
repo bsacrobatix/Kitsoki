@@ -1,0 +1,46 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.work_queue_worker:
+    by_call:
+      claim_fixer:
+        data:
+          claimed: true
+          work_ref: wq-fix-1
+          queue: delivery-fixer
+          payload: { candidate_id: queue-1, project: /repo, workdir: /workspace, failure_context: "gate failed" }
+          fence: 7
+          attempt: 1
+      complete_fixer:
+        data: { work_ref: wq-fix-1, queue: delivery-fixer, status: succeeded, fence: 7, attempt: 1 }
+  host.agent.task:
+    by_call:
+      run_fixer:
+        delay: "10ms"
+        data:
+          submitted:
+            passed: true
+            summary: "Fixed the implementation without weakening tests."
+            trace_ref: trace-fixer-1
+            bundle_ref: bundles/fix-1.bundle
+            bundle_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            bundle_kind: git-bundle
+
+turns:
+  - intent: { name: work_fixer }
+    advance_clock: "100ms"
+    expect_state: worker_done
+    expect_world:
+      work_ref: wq-fix-1
+      fence: 7
+      task_result:
+        passed: true
+        summary: "Fixed the implementation without weakening tests."
+        trace_ref: trace-fixer-1
+        bundle_ref: bundles/fix-1.bundle
+        bundle_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        bundle_kind: git-bundle
+
+expect_no_errors: true

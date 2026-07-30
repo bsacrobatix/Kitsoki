@@ -46,6 +46,58 @@ func TestCapsuleCIProjectChecksBuildsTypedVerdictAndEvidence(t *testing.T) {
 	}
 }
 
+func TestCapsuleCIProjectChecksRoutesNamedPipelineGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".kitsoki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := "schema: project-profile/v1\nid: example\ncommands:\n  test: legacy test\n  build: legacy build\n  change: quick gate\n  full: full gate\n  release: release gate\n"
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), []byte(profile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ pipeline, command string }{
+		{"change", "quick gate"},
+		{"full", "full gate"},
+		{"release", "release gate"},
+	} {
+		pipeline, wantCommand := test.pipeline, test.command
+		t.Run(pipeline, func(t *testing.T) {
+			var commands []string
+			result, err := NewCapsuleCIProjectChecksHandler(CapsuleCICommandRunnerFunc(func(_ context.Context, _ string, command string) (string, int, error) {
+				commands = append(commands, command)
+				return "ok", 0, nil
+			}))(context.Background(), map[string]any{"workdir": root, "job_id": pipeline, "pipeline": pipeline})
+			if err != nil || result.Error != "" {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if len(commands) != 1 || commands[0] != wantCommand {
+				t.Fatalf("pipeline %s commands=%v", pipeline, commands)
+			}
+			checks := result.Data["checks"].([]map[string]any)
+			if len(checks) != 1 || checks[0]["id"] != pipeline {
+				t.Fatalf("checks=%#v", checks)
+			}
+		})
+	}
+}
+
+func TestCapsuleCIProjectChecksMissingFullOrReleaseGateFailsClosed(t *testing.T) {
+	root := capsuleCIProfileRoot(t)
+	for _, pipeline := range []string{"full", "release"} {
+		result, err := NewCapsuleCIProjectChecksHandler(CapsuleCICommandRunnerFunc(func(context.Context, string, string) (string, int, error) {
+			t.Fatalf("%s unexpectedly ran a legacy command", pipeline)
+			return "", 0, nil
+		}))(context.Background(), map[string]any{"workdir": root, "job_id": "missing-" + pipeline, "pipeline": pipeline})
+		if err != nil || result.Error != "" {
+			t.Fatalf("%s result=%+v err=%v", pipeline, result, err)
+		}
+		verdict := result.Data["verdict"].(map[string]any)
+		if verdict["outcome"] != "needs_input" || verdict["promotion_eligible"] != false {
+			t.Fatalf("%s verdict=%#v", pipeline, verdict)
+		}
+	}
+}
+
 func TestCapsuleCIProjectChecksUsesTrustedRetainedEvidenceDestination(t *testing.T) {
 	root := capsuleCIProfileRoot(t)
 	retained := filepath.Join(t.TempDir(), "ci-evidence")

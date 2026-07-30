@@ -1,0 +1,39 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.work_queue:
+    by_call:
+      enqueue_fixer:
+        data: { work_ref: wq-fix-2, status: queued, replayed: false }
+      get_fixer:
+        data:
+          work_ref: wq-fix-2
+          queue: delivery-fixer
+          status: succeeded
+          countable: true
+          receipt:
+            trace_ref: trace-fixer-2
+            bundle_ref: bundles/fix-2.bundle
+            bundle_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            bundle_kind: git-bundle
+      enqueue_reviewer:
+        data: { work_ref: wq-review-2, status: queued, replayed: false }
+      get_reviewer:
+        data: { work_ref: wq-review-2, queue: delivery-reviewer, status: succeeded, countable: false }
+
+turns:
+  - intent: { name: start, slots: { candidate_id: queue-2, project: /repo, target_mode: ladder, workdir: /workspace, failure_context: "full gate failed" } }
+    expect_state: waiting_fixer
+  - intent: { name: refresh }
+    expect_state: waiting_fixer
+  - intent: { name: refresh }
+    expect_state: waiting_reviewer
+  - intent: { name: refresh }
+    expect_state: waiting_reviewer
+  - intent: { name: refresh }
+    expect_state: next_stage_ready
+    expect_world: { next_stage_action: next_stage_ready }
+
+expect_no_errors: true

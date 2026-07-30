@@ -7,6 +7,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/capsule/delivery"
 	"kitsoki/internal/capsule/queue"
 )
 
@@ -26,7 +27,7 @@ func TestQueueStatusOnEmptyQueue(t *testing.T) {
 	if res != nil {
 		t.Fatalf("empty queue status must not be a tool error: %+v", res)
 	}
-	result, ok := out.(QueueStatusResult)
+	result, ok := out.(delivery.Result)
 	if !ok {
 		t.Fatalf("unexpected status result type %T", out)
 	}
@@ -112,11 +113,46 @@ func TestQueueParkResumeOverrideHappyPath(t *testing.T) {
 	if statusRes != nil {
 		t.Fatalf("status of a known candidate must not be a tool error: %+v", statusRes)
 	}
-	statusResult, ok := statusOut.(QueueStatusResult)
+	statusResult, ok := statusOut.(delivery.Result)
 	if !ok || statusResult.Candidate == nil {
 		t.Fatalf("id status must return the candidate: %+v", statusOut)
 	}
 	if !statusResult.Candidate.OverrideGate || statusResult.Candidate.Phase != queue.Queued {
 		t.Fatalf("durable state must reflect the override: %+v", statusResult.Candidate)
 	}
+}
+
+func TestQueueDeliveryOperationsShareServiceResult(t *testing.T) {
+	h, store := queueTestHandlers(t)
+	seeded, err := store.Submit(queue.Submit{
+		Branch: "delivery", SHA: strings.Repeat("b", 40),
+		Admission: queue.EmergencySkipTestsAdmission,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(
+		run func(context.Context, *mcpsdk.CallToolRequest, QueueOpInput) (*mcpsdk.CallToolResult, any, error),
+		wantPhase queue.Status,
+		wantAction delivery.Action,
+	) {
+		t.Helper()
+		toolResult, out, err := run(context.Background(), nil, QueueOpInput{ID: seeded.ID, Actor: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if toolResult != nil {
+			t.Fatalf("tool error: %+v", toolResult)
+		}
+		result, ok := out.(delivery.Result)
+		if !ok || result.Candidate == nil {
+			t.Fatalf("result=%#v (%T)", out, out)
+		}
+		if result.Candidate.Phase != wantPhase || result.Action != wantAction {
+			t.Fatalf("result=%+v want phase=%s action=%s", result, wantPhase, wantAction)
+		}
+	}
+	call(h.cancel, queue.NeedsInput, delivery.ActionRepair)
+	call(h.retry, queue.Queued, delivery.ActionProcessing)
+	call(h.reject, queue.Rejected, delivery.ActionTerminal)
 }

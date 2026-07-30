@@ -6,6 +6,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/capsule/delivery"
 	"kitsoki/internal/capsule/queue"
 )
 
@@ -29,13 +30,6 @@ type QueueOpInput struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// QueueStatusResult carries either the full queue state (no id) or a single
-// candidate (id given), never both.
-type QueueStatusResult struct {
-	State     *queue.State     `json:"state,omitempty"`
-	Candidate *queue.Candidate `json:"candidate,omitempty"`
-}
-
 // QueueOpResult is the candidate as it stands after the operator verb applied.
 type QueueOpResult struct {
 	Candidate queue.Candidate `json:"candidate"`
@@ -46,18 +40,60 @@ type queueToolHandlers struct {
 }
 
 func (h queueToolHandlers) status(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueStatusInput) (*mcpsdk.CallToolResult, any, error) {
+	service := delivery.New(h.store)
 	if id := strings.TrimSpace(input.ID); id != "" {
-		candidate, err := h.store.Get(id)
+		result, err := service.Get(id)
 		if err != nil {
 			return queueToolError(err), nil, nil
 		}
-		return nil, QueueStatusResult{Candidate: &candidate}, nil
+		return nil, result, nil
 	}
-	state, err := h.store.List()
+	result, err := service.Status()
 	if err != nil {
 		return queueToolError(err), nil, nil
 	}
-	return nil, QueueStatusResult{State: &state}, nil
+	return nil, result, nil
+}
+
+func (h queueToolHandlers) submit(ctx context.Context, _ *mcpsdk.CallToolRequest, input delivery.SubmitRequest) (*mcpsdk.CallToolResult, any, error) {
+	result, err := delivery.New(h.store).Submit(ctx, input)
+	if err != nil {
+		return queueToolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func (h queueToolHandlers) get(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueStatusInput) (*mcpsdk.CallToolResult, any, error) {
+	if strings.TrimSpace(input.ID) == "" {
+		return buildToolError(ErrBadRequest, "queue: candidate id is required"), nil, nil
+	}
+	result, err := delivery.New(h.store).Get(input.ID)
+	if err != nil {
+		return queueToolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func (h queueToolHandlers) deliveryOperate(
+	verb func(delivery.Service, queue.Op) (delivery.Result, error),
+	input QueueOpInput,
+) (*mcpsdk.CallToolResult, any, error) {
+	if strings.TrimSpace(input.ID) == "" {
+		return buildToolError(ErrBadRequest, "queue: candidate id is required"), nil, nil
+	}
+	result, err := verb(delivery.New(h.store), queue.Op{ID: input.ID, Actor: input.Actor, Reason: input.Reason})
+	if err != nil {
+		return queueToolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func (h queueToolHandlers) retry(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
+	return h.deliveryOperate(delivery.Service.Retry, input)
+}
+
+func (h queueToolHandlers) cancel(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
+	return h.deliveryOperate(delivery.Service.Cancel, input)
 }
 
 func (h queueToolHandlers) operate(verb func(queue.Op) (queue.Candidate, error), input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
@@ -87,7 +123,7 @@ func (h queueToolHandlers) override(_ context.Context, _ *mcpsdk.CallToolRequest
 	return h.operate(h.store.Override, input)
 }
 func (h queueToolHandlers) reject(_ context.Context, _ *mcpsdk.CallToolRequest, input QueueOpInput) (*mcpsdk.CallToolResult, any, error) {
-	return h.operate(h.store.Reject, input)
+	return h.deliveryOperate(delivery.Service.Reject, input)
 }
 
 func queueToolError(err error) *mcpsdk.CallToolResult {
@@ -103,7 +139,11 @@ func RegisterQueueTools(server *mcpsdk.Server, store queue.Store) {
 		panic("queue tools require a server and a project root")
 	}
 	h := queueToolHandlers{store: store}
+	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.submit", Description: "Admit one retained, verified durable_bundle request into the merge queue."}, h.submit)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.get", Description: "Read one durable delivery candidate and its projected next action."}, h.get)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.status", Description: "Read the merge queue: full ordered state, or one candidate when id is given."}, h.status)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.retry", Description: "Retry recoverable delivery work by kicking retry_wait or resuming parked work."}, h.retry)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.cancel", Description: "Park delivery work without losing its retained branch, bundle, receipts, or evidence."}, h.cancel)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.kick", Description: "Operator verb: clear a retry_wait candidate's backoff so the next worker pass retries immediately; audited in durable evidence."}, h.kick)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.park", Description: "Operator verb: park a non-terminal candidate as needs_input so it stops consuming worker passes; audited in durable evidence."}, h.park)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "queue.resume", Description: "Operator verb: return a parked or retry_wait candidate to the queue with a fresh attempt budget; the prior count stays in evidence."}, h.resume)

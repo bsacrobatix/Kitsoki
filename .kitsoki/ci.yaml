@@ -28,3 +28,37 @@ pipelines:
       pass_exits: [passed]
       fail_exits: [failed]
       park_exits: [needs_input]
+  full:
+    story: stories/capsule-ci/app.yaml
+    triggers: [local, branch_update, staging]
+    environment: ci
+    executor: host
+    mode: one-shot
+    required: true
+    permissions:
+      network: live
+      external_write: allow
+    agents:
+      policy: deny
+    result:
+      schema: capsule-ci-verdict/v1
+      pass_exits: [passed]
+      fail_exits: [failed]
+      park_exits: [needs_input]
+  release:
+    story: stories/capsule-ci/app.yaml
+    triggers: [local]
+    environment: ci
+    executor: host
+    mode: one-shot
+    required: true
+    permissions:
+      network: live
+      external_write: allow
+    agents:
+      policy: deny
+    result:
+      schema: capsule-ci-verdict/v1
+      pass_exits: [passed]
+      fail_exits: [failed]
+      park_exits: [needs_input]
