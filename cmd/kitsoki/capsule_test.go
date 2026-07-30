@@ -2,12 +2,26 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kitsoki/internal/capsule/headroom"
 )
+
+func requireLocalCapsuleHeadroom(t *testing.T) {
+	t.Helper()
+	if err := headroom.Default().Ensure(t.TempDir()); err != nil {
+		var refusal *headroom.Error
+		if errors.As(err, &refusal) {
+			t.Skipf("local Capsule materialization unavailable: %v", refusal)
+		}
+		t.Fatalf("inspect local Capsule headroom: %v", err)
+	}
+}
 
 func TestCapsuleListIncludesCoreAndRepoHistoryCapsules(t *testing.T) {
 	out, err := execRoot(t, "capsule", "list")
@@ -143,6 +157,7 @@ func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
 }
 
 func TestCapsuleOpenCoreUsesManagedPathWithLegacyManifest(t *testing.T) {
+	requireLocalCapsuleHeadroom(t)
 	dest := filepath.Join(t.TempDir(), "opened")
 	absDest, err := filepath.Abs(dest)
 	if err != nil {
@@ -201,6 +216,7 @@ func TestCapsuleCloseRefusesNonCapsule(t *testing.T) {
 }
 
 func TestCapsuleVerifyCoreUsesManagedOpenWithLegacyResult(t *testing.T) {
+	requireLocalCapsuleHeadroom(t)
 	out, err := execRoot(t, "capsule", "verify", "clean-repo", "--json")
 	if err != nil {
 		t.Fatalf("capsule verify clean-repo --json: %v\n%s", err, out)

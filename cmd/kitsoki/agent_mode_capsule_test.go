@@ -66,6 +66,7 @@ func TestAgentModeCapsuleProvisioner_CreateFailurePropagates(t *testing.T) {
 // scripts/dev-workspace.sh — through Manager.Create, including reacquire on a
 // second call. Hermetic: the project is the clean-repo capsule fixture.
 func TestCreateProtectedRootCapsule_SelfKindDefinition(t *testing.T) {
+	requireLocalCapsuleHeadroom(t)
 	project := capsuletest.Open(t, "clean-repo")
 	capsDir := filepath.Join(project, ".kitsoki", "capsules")
 	require.NoError(t, os.MkdirAll(capsDir, 0o755))

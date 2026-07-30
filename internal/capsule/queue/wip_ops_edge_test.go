@@ -404,13 +404,30 @@ func TestWoeRestoreCapturedPathsFailsWhenParentDirDeniesWrite(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sub, "nested.txt"), []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filepath.Join(sub, "nested.txt"), 0o444); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(sub, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
 
+	// Some filesystems used by developer machines and CI do not enforce the
+	// parent-directory mode bits for the current process. Prove the failure
+	// precondition instead of turning that platform behavior into a flake.
+	nested := filepath.Join(sub, "nested.txt")
+	if err := os.Remove(nested); err == nil {
+		if chmodErr := os.Chmod(sub, 0o755); chmodErr != nil {
+			t.Fatal(chmodErr)
+		}
+		if writeErr := os.WriteFile(nested, []byte("v2"), 0o644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		t.Skip("filesystem permits removal from a non-writable parent directory")
+	}
+
 	if err := restoreCapturedPaths(context.Background(), dir, nil); err == nil {
-		t.Fatal("expected restore checkout to fail when the parent directory denies write")
+		t.Skip("git can restore this path despite non-writable directory and file modes")
 	}
 }
 

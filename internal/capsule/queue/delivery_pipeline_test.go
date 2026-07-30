@@ -499,7 +499,7 @@ func TestShellGateScrubsProviderSecretsAndTimeoutReleasesCapacity(t *testing.T) 
 	release()
 }
 
-func TestTwoLandingsReusePendingCheckoutProjectionWithoutBranchChurn(t *testing.T) {
+func TestTwoLandingsRefuseUnsafeFileToNonEmptyDirectoryWIP(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")
 	commit(t, root, "one.txt", "one\n", "one")
@@ -535,15 +535,27 @@ func TestTwoLandingsReusePendingCheckoutProjectionWithoutBranchChurn(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := git(t, root, "rev-parse", "main"); got != state.Candidates[1].ResultMainSHA {
-		t.Fatalf("main=%s want landed result=%s state=%#v", got, state.Candidates[1].ResultMainSHA, state.Candidates)
+	if got := git(t, root, "rev-parse", "main"); got != base {
+		t.Fatalf("unsafe restore moved main=%s want=%s state=%#v", got, base, state.Candidates)
 	}
-	git(t, root, "merge-base", "--is-ancestor", two, "main")
+	for _, candidate := range state.Candidates {
+		if candidate.phase() != RetryWait || candidate.RetryReason != "finalization_failed" || candidate.ReasonCode != ReasonEnvironmentDegraded {
+			t.Fatalf("unsafe restore candidate=%s phase=%s retry_reason=%s failure=%q", candidate.ID, candidate.phase(), candidate.RetryReason, candidate.Failure)
+		}
+		if !strings.Contains(candidate.Failure, "non-empty directory") {
+			t.Fatalf("unsafe restore failure is not actionable: %q", candidate.Failure)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "base.txt", "local.txt")); err != nil || string(got) != "never lose" {
+		t.Fatalf("unsafe restore lost local bytes=%q err=%v", got, err)
+	}
 	branches := strings.Fields(git(t, root, "for-each-ref", "--format=%(refname:short)", "refs/heads/queue/preserved-wip"))
-	if len(branches) != 1 {
-		t.Fatalf("preserved branch churn: %v", branches)
+	if len(branches) != 2 {
+		t.Fatalf("each refused candidate must retain independent recovery evidence: %v", branches)
 	}
-	if got := strings.TrimSpace(git(t, root, "show", branches[0]+":base.txt/local.txt")); got != "never lose" {
-		t.Fatalf("preserved local bytes=%q", got)
+	for _, branch := range branches {
+		if got := strings.TrimSpace(git(t, root, "show", branch+":base.txt/local.txt")); got != "never lose" {
+			t.Fatalf("preserved local bytes on %s=%q", branch, got)
+		}
 	}
 }

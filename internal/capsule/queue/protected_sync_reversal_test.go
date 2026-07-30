@@ -452,7 +452,7 @@ func TestPsrStagingCASIgnoresDifferentCheckedOutMainTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "operator-untracked.txt"), []byte("untracked operator work\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	statusBefore := git(t, root, "status", "--porcelain=v1", "--untracked-files=all")
+	statusBefore := git(t, root, "status", "--porcelain=v1", "--untracked-files=all", "--", ".", ":(exclude).capsules", ":(exclude).capsules/**")
 	indexBefore := git(t, root, "write-tree")
 	preservedBefore := git(t, root, "for-each-ref", "--format=%(refname)", "refs/heads/queue/preserved-wip/")
 
@@ -490,7 +490,7 @@ func TestPsrStagingCASIgnoresDifferentCheckedOutMainTree(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(root, "operator-untracked.txt")); err != nil || string(got) != "untracked operator work\n" {
 		t.Fatalf("staging CAS touched untracked main WIP: %q err=%v", got, err)
 	}
-	if statusAfter := git(t, root, "status", "--porcelain=v1", "--untracked-files=all"); statusAfter != statusBefore {
+	if statusAfter := git(t, root, "status", "--porcelain=v1", "--untracked-files=all", "--", ".", ":(exclude).capsules", ":(exclude).capsules/**"); statusAfter != statusBefore {
 		t.Fatalf("staging CAS changed main status:\nbefore=%q\nafter=%q", statusBefore, statusAfter)
 	}
 	if indexAfter := git(t, root, "write-tree"); indexAfter != indexBefore {
