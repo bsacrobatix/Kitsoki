@@ -178,7 +178,10 @@ reported as `429`.
 Capsule through this service, but admission is not delivery. It returns the
 durable admission, anchor, candidate, and current candidate phase. Its
 `status.terminal` is true only for `landed` or `rejected`; `queued`,
-`retry_wait`, and `needs_input` are deliberately not success.
+`retry_wait`, `needs_input`, `needs_conflict_input`, and `needs_human` are
+deliberately not success. `needs_human` in particular is terminal *for
+automation* — the worker will never retry it — but it is not a success
+terminal: a human must `resume`/`override`/`reject` it.
 
 Remote promotion requires `--remote-status-command` to be the exact command
 for this authority host, for example:

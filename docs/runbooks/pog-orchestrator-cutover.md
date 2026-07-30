@@ -38,9 +38,12 @@ mid-incident — a cutover is not the time to also debug a stuck candidate):
 kitsoki queue status --project "$LAPTOP_POG_ROOT"
 ```
 
-Resolve anything in `needs_input`/`needs_conflict_input` first (`kitsoki
-queue kick|resume|override|reject`, per `docs/architecture/merge-queue.md`)
-— don't carry a stuck candidate across the move.
+Resolve anything in `needs_human`/`needs_input`/`needs_conflict_input` first
+(`kitsoki queue kick|resume|override|reject`, per
+`docs/architecture/merge-queue.md`) — don't carry a stuck candidate across the
+move. `needs_human` is the queue's own declaration that automation exhausted
+its options, so it is exactly the stuck candidate this step exists to catch;
+its `reason_code` and `needs_human_evidence_ref` tell you what to open.
 
 1.2. On the orchestrator, confirm the base host is ready for agent-backed
 work (provider/toolkit/MCP):

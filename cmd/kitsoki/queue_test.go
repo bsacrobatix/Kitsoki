@@ -158,6 +158,43 @@ func TestQueueSummaryLineFormatsPhasesAndRetryReasons(t *testing.T) {
 	require.Contains(t, line, "gate_failed=1")
 }
 
+// TestQueueSummaryLineFormatsNeedsHumanAndTypedReasonCodes pins the typed
+// enum's visibility in the DEFAULT human `queue status` roll-up. Both views
+// are printed side by side because they answer different questions:
+// retry_reasons[...] is the unconstrained prose/stage-tag view, and
+// reason_codes[...] is the closed-set classification an operator can act on
+// ("two candidates are repairer-exhausted" rather than two distinct strings).
+// Without the second, the enum would be invisible outside --json.
+func TestQueueSummaryLineFormatsNeedsHumanAndTypedReasonCodes(t *testing.T) {
+	summary := queue.StatusSummary{
+		PhaseCounts:       map[queue.Status]int{queue.Queued: 1, queue.NeedsHuman: 2, queue.NeedsInput: 1},
+		RetryReasonCounts: map[string]int{"max_attempts_exhausted": 2, "parked_by_operator": 1},
+		ReasonCodeCounts: map[queue.ReasonCode]int{
+			queue.ReasonRepairerExhausted: 2,
+			queue.ReasonOperatorParked:    1,
+		},
+		TrainDepth:      4,
+		ParkedCount:     3,
+		NeedsHumanCount: 2,
+		OldestParkedAge: "2h0m0s",
+	}
+	line := queueSummaryLine(summary)
+	require.Contains(t, line, "parked=3")
+	require.Contains(t, line, "needs_human=2")
+	require.Contains(t, line, "oldest_parked=2h0m0s")
+	require.Contains(t, line, "reason_codes[")
+	require.Contains(t, line, "operator-parked=1")
+	require.Contains(t, line, "repairer-exhausted=2")
+	// The free-text roll-up is carried alongside, never replaced.
+	require.Contains(t, line, "retry_reasons[")
+	require.Contains(t, line, "max_attempts_exhausted=2")
+
+	// No typed codes at all (a queue with nothing parked or retrying) prints
+	// no empty bracket group.
+	bare := queueSummaryLine(queue.StatusSummary{PhaseCounts: map[queue.Status]int{queue.Queued: 1}, TrainDepth: 1})
+	require.NotContains(t, bare, "reason_codes[")
+}
+
 func TestQueueProcessDepsSetsGateMemo(t *testing.T) {
 	deps := queueProcessDeps("/project", "make test", "", "", "", "worker-1")
 	memo, ok := deps.GateMemo.(queue.FileGateMemo)

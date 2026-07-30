@@ -333,8 +333,9 @@ func queueStatusCmd() *cobra.Command {
 }
 
 // queueSummaryLine is the single-line human roll-up printed above the
-// per-candidate StatusLines: train depth, parked count/age, and per-phase
-// and per-retry-reason counts — "where did the last N minutes go" without
+// per-candidate StatusLines: train depth, parked count/age (with the
+// needs_human subset broken out), and per-phase, per-retry-reason and
+// per-typed-reason-code counts — "where did the last N minutes go" without
 // eyeballing every candidate line.
 func queueSummaryLine(s queue.StatusSummary) string {
 	phases := make([]string, 0, len(s.PhaseCounts))
@@ -359,6 +360,19 @@ func queueSummaryLine(s queue.StatusSummary) string {
 		}
 		sort.Strings(reasons)
 		line += " retry_reasons[" + strings.Join(reasons, " ") + "]"
+	}
+	// The typed roll-up next to the free-text one: retry_reasons[...] is the
+	// unconstrained stage-tag/operator-prose view, reason_codes[...] is the
+	// closed-set classification an operator can actually act on ("three
+	// candidates are repairer-exhausted" vs three distinct prose strings).
+	// Both are printed because they answer different questions.
+	if len(s.ReasonCodeCounts) > 0 {
+		codes := make([]string, 0, len(s.ReasonCodeCounts))
+		for code, n := range s.ReasonCodeCounts {
+			codes = append(codes, fmt.Sprintf("%s=%d", code, n))
+		}
+		sort.Strings(codes)
+		line += " reason_codes[" + strings.Join(codes, " ") + "]"
 	}
 	return line
 }

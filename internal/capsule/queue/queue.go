@@ -1095,5 +1095,21 @@ func StatusLine(c Candidate, at time.Time) string {
 	case Landed:
 		next = "complete"
 	}
-	return fmt.Sprintf("%d %s %s owner=%s elapsed=%s base=%s tree=%s next=%s logs=%s", c.Sequence, c.ID, c.phase(), c.WorkerID, elapsed, c.BaseSHA, c.TreeSHA, next, first(c.GateLog, c.FinalizationLog, c.WorkspacePath))
+	line := fmt.Sprintf("%d %s %s owner=%s elapsed=%s base=%s tree=%s next=%s logs=%s", c.Sequence, c.ID, c.phase(), c.WorkerID, elapsed, c.BaseSHA, c.TreeSHA, next, first(c.GateLog, c.FinalizationLog, c.WorkspacePath))
+	// The typed code is the whole point of the enum, so it must be legible
+	// in the DEFAULT human output, not only under --json: an operator
+	// eyeballing `queue status` should read a stable, switchable
+	// classification, not just hand-typed prose. Appended (never inserted)
+	// and only when set, so every field position an existing reader already
+	// depends on stays exactly where it was.
+	if c.ReasonCode != "" {
+		line += " reason_code=" + string(c.ReasonCode)
+	}
+	// The needs_human evidence pointer is a distinct durable field from the
+	// logs= fallback chain above (it can be the candidate ID when no log
+	// exists), so it is rendered explicitly rather than left to coincide.
+	if c.NeedsHumanEvidenceRef != "" {
+		line += " needs_human_evidence=" + c.NeedsHumanEvidenceRef
+	}
+	return line
 }

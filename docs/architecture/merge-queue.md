@@ -42,12 +42,24 @@ prose. The codes: `gate-failed`, `merge-conflict`, `lease-lost`,
 `seal-mismatch` (reserved), `resolver-failed`, `resolver-exhausted`,
 `repairer-exhausted`, `finalization-failed`, `budget-exhausted` (generic
 fallback), `environment-degraded`, `harness-failure`, `operator-parked`, and
-`legacy-freeform` for any pre-existing record that has a `retry_reason` but
-no code (every `state.json` written before this enum existed loads cleanly
-and is classified this way — see `normalize`; the stamp only fires on a
-candidate that is currently `retry_wait` or parked, so a live candidate that
-merely retried in the past, or a `landed` record, keeps an empty
-`reason_code` rather than being mislabeled legacy).
+`legacy-freeform` for a pre-existing record whose `retry_reason` is its
+current explanation but which has no code.
+
+Every `state.json` written before this enum existed loads cleanly, but the
+`legacy-freeform` stamp is deliberately **narrower** than "any record with a
+non-empty `retry_reason`": `normalize` applies it only to a candidate
+currently in `retry_wait` or a parked phase. `retry_reason` is durable
+history that outlives the failure it describes — `claimPreparation` clears
+`reason_code` and `failure` on the candidate it claims but intentionally
+keeps `retry_reason` as "what happened last time", and it survives landing
+too — so an unscoped stamp would classify in-flight (`preparing`/`gating`/
+`finalizing`) and `landed` records as legacy when they are nothing of the
+kind. That mislabel would also be permanent, because `normalize` runs inside
+`write`: the next durable save for any unrelated reason would persist it.
+Such records therefore keep an empty `reason_code`, matching `Summarize`'s
+own `retry_wait`/parked guard for both roll-ups. In practice this classifies
+exactly the population the enum was introduced for (the parked candidates
+carrying hand-typed prose) and nothing else.
 
 `resolver-failed` and `resolver-exhausted` are deliberately two codes, not
 one: `resolver-failed` is the still-retrying counterpart (a failed
@@ -96,7 +108,27 @@ backward compatible for any consumer that pattern-matches the literal string
 every automation park.
 
 This engine repo has no such consumer. POG (the known downstream, pinned via
-`kitsoki.lock`) does, as of this writing:
+`kitsoki.lock`) does, as of this writing.
+
+**A registered POG CI gate goes red, not merely quiet.** This one is not a
+degraded message, so it is listed first and separately:
+
+- `scripts/test-queue-core-integration.sh:196` asserts
+  `.candidates[0].phase == "needs_input" and .candidates[0].attempt == 2 and
+  .candidates[0].retry_reason == "max_attempts_exhausted"` against
+  `.capsules/queue/state.json` after driving max-attempt exhaustion. The
+  writer of that park is THIS engine: the test's `worker_once` helper runs
+  `scripts/process-promotion-queue.sh` with `POG_KITSOKI_BIN`, and that
+  script is a thin wrapper that execs `<kitsoki> queue worker`, with no
+  POG-native fallback path. Since `retryOrPark`'s exhaustion path now parks
+  as `needs_human`, the assertion hard-fails with `max-attempt exhaustion did
+  not park the candidate`. This gate is registered in
+  `scripts/kitsoki-ci.mjs` as `queue-core-integration`, so the failure is a
+  red required check, not a local-only surprise. (The adjacent
+  `retry_wait`/`gate_failed` assertion at line 188 is unaffected and still
+  holds.)
+
+Production consumers that degrade rather than fail:
 
 - `scripts/promotion-status.sh` — its parked-candidate branch does not
   recognize `needs_human` and falls through to a generic message instead of
@@ -114,13 +146,29 @@ This engine repo has no such consumer. POG (the known downstream, pinned via
 - `portal/src/data/streams.ts` — routes a parked stream back to the portal
   Inbox only on `needs_input`; a `needs_human` stream will not route there.
 
+Finally, three POG tests hand-seed a `needs_input` fixture *as* the
+automation-park case. They keep passing (they never invoke the engine to
+produce the park), but they silently stop covering what they were written to
+cover, so they belong in the same change rather than being discovered later:
+`scripts/test-promotion-status.sh:54`,
+`scripts/test-pog-prune-capsule-workspaces.sh:166`, and
+`scripts/test-runner-session-reaper.sh:824`. (`scripts/test-promotion.sh:350`
+also asserts a `needs_input` automation park, but it is not registered in
+`scripts/kitsoki-ci.mjs` and its assertions — `.attempts`, a POG-only overlay
+the engine does not write, and `retry_reason == "promotion_failed"` — already
+describe a pre-engine POG-native path, so it is stale independently of this
+change and is deliberately excluded from the list above.)
+
 **This is a blocking follow-up, not an oversight to be worked around here.**
 POG's `kitsoki.lock` must not be bumped past the commit that introduces
-`needs_human` until the consumers above are updated to treat `needs_human`
-as parked/human-actionable alongside `needs_input`. Nothing is broken today
-because POG still pins an engine revision that predates this change; this
-note exists so that stays true only until someone deliberately fixes the
-POG-side consumers, not by accident.
+`needs_human` until the CI-gate assertion, the five production consumers, and
+(ideally in the same change) the three fixtures above are updated to treat
+`needs_human` as parked/human-actionable alongside `needs_input`. Nothing is
+broken today because POG still pins an engine revision that predates this
+change; this note exists so that stays true only until someone deliberately
+fixes the POG-side consumers, not by accident. Anyone acting on this list
+should re-grep POG for the literal `needs_input` before bumping rather than
+trusting this enumeration to have stayed current.
 
 ## External worker results: verify privately, then admit
 
@@ -246,7 +294,7 @@ the typed `queue.ErrBusy` result within the configured lock wait.
 | Verb        | From                                   | Effect |
 | ----------- | -------------------------------------- | ------ |
 | `kick`      | `retry_wait`                           | clears `retry_at`; attempts untouched |
-| `park`      | any non-terminal                       | `needs_input`; stops delaying the train |
+| `park`      | any non-terminal (incl. `needs_human`) | `needs_input` + `operator-parked`; stops delaying the train. Parking a candidate automation had already parked as `needs_human` fully *replaces* that park: `needs_human_evidence_ref` is cleared with it, so a `needs_input` record never advertises an automation evidence pointer it no longer describes (the prior park stays in `evidence`) |
 | `resume`    | parked / `retry_wait`                  | back to `queued`, fresh attempt budget |
 | `emergency` | any non-terminal                       | priority lane, FIFO within itself |
 | `override`  | any non-terminal                       | **human immediate merge**: emergency priority + durable attributed gate waiver (`operator-override/v1`); integration tree and protected CAS still apply |

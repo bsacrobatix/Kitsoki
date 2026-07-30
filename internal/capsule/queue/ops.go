@@ -137,6 +137,13 @@ func (s Store) Kick(op Op) (Candidate, error) {
 // worker passes and stops delaying the train. A live worker lease is respected
 // via the operator-intervention guard: the in-flight result is discarded when
 // it lands.
+//
+// Parking a candidate automation already parked as needs_human is allowed
+// (an operator re-labelling a stuck candidate as their own is legitimate and
+// stays audited in Evidence), but it fully replaces the automation park: the
+// needs_human evidence pointer is cleared alongside Phase/Status/ReasonCode,
+// so a needs_input candidate can never be left carrying a needs_human
+// evidence ref that no longer describes its state.
 func (s Store) Park(op Op) (Candidate, error) {
 	return s.operate(op, "park", func(_ *State, c *Candidate) error {
 		if terminal(c.phase()) {
@@ -146,6 +153,7 @@ func (s Store) Park(op Op) (Candidate, error) {
 		// The code names *who/how* (a human explicitly parked this), never
 		// what the operator happened to type as their own reason.
 		c.RetryReason, c.ReasonCode = first(op.Reason, "parked_by_operator"), ReasonOperatorParked
+		c.NeedsHumanEvidenceRef = ""
 		c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
 		c.ParkedAt, c.ParkedBy = op.at(), op.actor()
 		return nil

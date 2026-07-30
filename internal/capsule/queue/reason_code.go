@@ -1,7 +1,5 @@
 package queue
 
-import "strings"
-
 // ReasonCode is a small, closed classification of why a candidate could not
 // proceed. It is carried alongside — never instead of — the free-text
 // RetryReason/Failure detail string: RetryReason stays exactly what it always
@@ -146,10 +144,13 @@ func reasonCodeForStage(stage string) ReasonCode {
 // exhausted (ReasonResolverExhausted) than while still retrying
 // (ReasonResolverFailed), so this stays an explicit switch rather than a
 // thin wrapper.
+//
+// Environmental exhaustion deliberately does NOT route through here: the
+// wall-clock environmental bound lives entirely in retryOrParkEnv, which
+// mints the "<stage>_environment_degraded" reason string and calls parkHuman
+// with ReasonEnvironmentDegraded directly. Only retryOrPark calls this
+// function, and it only ever passes bare stage tags.
 func exhaustionReasonCode(stage string, hasRepairer bool) ReasonCode {
-	if strings.HasSuffix(stage, "_environment_degraded") {
-		return ReasonEnvironmentDegraded
-	}
 	switch stage {
 	case "gate_failed":
 		if hasRepairer {
