@@ -298,18 +298,43 @@ func Harness(err error) error {
 // either. Adapters classify their own errors as environmental at the exact
 // git/filesystem operation that failed; the worker never string-matches an
 // error to guess its class.
-type EnvError struct{ Err error }
+type EnvError struct {
+	Err error
+	// Immediate marks an environmental failure that a short backoff will not
+	// clear: the gate never produced a verdict, and waiting does not make the
+	// next attempt more likely to produce one. A missing toolchain and a killed
+	// gate are both this shape. The worker parks such a candidate at once with
+	// Cause named in its retry_reason, rather than spending the lenient retry
+	// window rediscovering the same thing — five slow attempts on an unchanged
+	// SHA is the exact failure mode this prevents.
+	Immediate bool
+	// Cause is a short, greppable token naming the condition (killed_SIGKILL,
+	// command_not_found, ...). It is appended to the park reason so
+	// `queue status` distinguishes a killed or starved gate from a red one
+	// without anyone having to open a transcript.
+	Cause string
+}
 
 func (e EnvError) Error() string { return "queue environment: " + e.Err.Error() }
 func (e EnvError) Unwrap() error { return e.Err }
 
 // Environmental wraps err so the worker classifies it as an environmental
-// failure instead of a product failure.
+// failure instead of a product failure, on the lenient bounded-retry path.
 func Environmental(err error) error {
 	if err == nil {
 		return nil
 	}
 	return EnvError{Err: err}
+}
+
+// EnvironmentalImmediate wraps err as an environmental failure that must be
+// parked and reported at once instead of retried. cause names the condition for
+// the candidate's park reason.
+func EnvironmentalImmediate(cause string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return EnvError{Err: err, Immediate: true, Cause: cause}
 }
 
 type Repairer interface {

@@ -158,7 +158,8 @@ the typed `queue.ErrBusy` result within the configured lock wait.
 - **CLI**: `kitsoki queue kick|park|resume|emergency|override|reject <id>
   [--actor --reason --project]`, plus `submit`, `submit-external`,
   `serve-admission`, `status`, `worker`
-  (`--retry-delay`, `--max-retry-delay`, `--max-attempts`).
+  (`--retry-delay`, `--max-retry-delay`, `--max-attempts`,
+  `--env-retry-delay`, `--max-env-duration`).
 - **JSON-RPC** (runstatus server): `queue.status`, `queue.kick`, `queue.park`,
   `queue.resume`, `queue.emergency`, `queue.override`, `queue.reject` with
   params `{id, actor, reason, project?}` — the portal-UI surface.
@@ -166,11 +167,50 @@ the typed `queue.ErrBusy` result within the configured lock wait.
 - **Starlark host**: `ctx.host.call("host.queue.<verb>", {...})`, deny-by-
   default allow-listed like every host verb.
 
+## Failure classification
+
+A candidate's failure is one of three classes, and the class decides the
+policy. Adapters classify their own errors at the exact operation that failed;
+the worker never string-matches an error to guess.
+
+| Class | Produced by | Policy |
+| --- | --- | --- |
+| **Product** (plain error) | a gate that ran and reported red | exponential backoff, consumes `--max-attempts`, parks as `needs_input` when exhausted |
+| **Environmental** (`Environmental`) | transient infrastructure: a target not yet fetched, lock contention, a workspace-create race, a lost remote transport | fixed `--env-retry-delay`, keeps queue position, does **not** consume the attempt budget, parks once degraded past `--max-env-duration` |
+| **Environmental / immediate** (`EnvironmentalImmediate`) | the gate produced **no verdict** and waiting cannot change that: a missing toolchain, a gate killed or starved mid-run | parks at once as `needs_input`, rolls the attempt back, `retry_reason` carries the named cause |
+| **Harness** (`Harness`) | the gate is misconfigured (unknown executor/pipeline) | parks at once |
+
+Only a product failure may ever consume the attempt budget, because only a
+product failure is a verdict on the candidate's code. No classification can
+land red code: a failing gate keeps `Passed=false` in every branch.
+
+`ShellGate` reads its class from the gate process's **exit status**, which is a
+shell gate's only way to declare one:
+
+| Exit status | Class | Cause token |
+| --- | --- | --- |
+| `75` (`GateEnvExitCode`, EX_TEMPFAIL) | immediate environmental | `gate_declared_environment_unusable` |
+| `126` / `127` | immediate environmental | `command_not_executable` / `command_not_found` |
+| killed by a signal, or `128+N` | immediate environmental | `killed_signal_<N>` |
+| any other nonzero | product | — |
+
+So a gate script should preflight the tools it needs and `exit 75` with a named
+message when one is absent, rather than letting `command not found` surface
+hundreds of seconds deep inside a suite where it is indistinguishable from a
+red test. `queue status` then shows the class and cause directly
+(`retry_reason=gate_no_verdict_killed_signal_9`,
+`gate_evidence` carrying `queue:gate:exit=137 class=environment cause=…`), and
+`env_retries` / `first_env_failure_at` are populated instead of left at the zero
+value.
+
 ## Testing
 
 `internal/capsule/queue` covers the semantics with unit fakes and real-git
 end-to-end tests: backoff and max-attempts parking, kick/park/resume/override,
-emergency ordering, harness classification, parked-head non-blocking,
+emergency ordering, harness classification, environmental classification
+(`shell_gate_class_test.go` drives the real `ShellGate` against real
+subprocesses, so the exit statuses under test are the real ones — a fake that
+always resolved its tools would prove nothing), parked-head non-blocking,
 attempt inheritance across resubmission, WIP byte-completeness (including
 control-state survival), disjoint auto-merge, conflict resolution via an
 injected resolver runner (no LLM in automated tests), conflict retention

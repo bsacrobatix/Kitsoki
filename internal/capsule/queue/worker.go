@@ -477,10 +477,43 @@ func (w Worker) failGate(state *State, c *Candidate, err error) {
 	// budget, matching speculation and finalization.
 	var envErr EnvError
 	if errors.As(err, &envErr) {
+		if envErr.Immediate {
+			w.parkNoVerdict(c, "gate_no_verdict", envErr.Cause)
+			return
+		}
 		w.retryOrParkEnv(c, "gate_failed")
 		return
 	}
 	w.retryOrPark(state, c, "gate_failed")
+}
+
+// parkNoVerdict parks a candidate whose gate never produced a verdict for a
+// nameable environmental reason — a missing toolchain, a killed or starved gate.
+// It parks immediately and loudly rather than retrying: the condition will not
+// clear on its own, and spending the retry window on it only makes the same
+// answer arrive slower. Five attempts across ~25 minutes on an unchanged SHA is
+// the failure mode being removed here.
+//
+// The claim-time attempt increment is rolled back because the gate never judged
+// this candidate's code, so a later legitimate attempt still gets its full
+// budget. The environmental bookkeeping is still recorded, so `queue status`
+// shows the class instead of leaving first_env_failure_at at the zero value
+// while retry_reason says a flat gate_failed.
+func (w Worker) parkNoVerdict(c *Candidate, stage, cause string) {
+	n := now(w.Deps)
+	if c.Attempt > 0 {
+		c.Attempt--
+	}
+	if c.FirstEnvFailureAt.IsZero() {
+		c.FirstEnvFailureAt = n
+	}
+	c.EnvRetries++
+	reason := stage
+	if strings.TrimSpace(cause) != "" {
+		reason = stage + "_" + cause
+	}
+	w.park(c, reason)
+	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:gate produced no verdict (%s); parked immediately as needs_input without consuming the product attempt budget", first(cause, "unclassified")))
 }
 
 // retryOrPark applies the bounded retry policy: requeue to the back of the

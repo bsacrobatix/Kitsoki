@@ -3,12 +3,14 @@ package queue
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"kitsoki/internal/capsule/control"
@@ -914,6 +916,106 @@ func sameResolvedPath(actual, expected string) bool {
 	return filepath.Clean(actualResolved) == filepath.Clean(expectedResolved)
 }
 
+// GateEnvExitCode is the reserved process exit status by which a deterministic
+// shell gate declares its own failure environmental — the worker's toolchain,
+// host state, or a dependency was unusable — rather than a verdict on the
+// candidate's tree. It is sysexits.h's EX_TEMPFAIL ("temporary failure, the
+// user is invited to retry"), which is exactly this contract.
+//
+// A shell gate cannot hand the worker a typed Go EnvError the way an in-process
+// adapter can, so the exit status is its classification channel. Gate scripts
+// should preflight the tools they need and exit GateEnvExitCode with a named
+// message when one is absent, instead of letting "command not found" surface
+// hundreds of seconds deep inside a suite where it is indistinguishable from a
+// red test.
+const GateEnvExitCode = 75
+
+// classifyShellGateFailure maps a shell gate's process exit into the queue's
+// failure taxonomy. Only the exit status is consulted — never the output text —
+// so this stays a declared contract rather than a pattern-matching guess, in
+// keeping with EnvError's rule that adapters classify at the exact operation
+// that failed.
+//
+// Environmental statuses:
+//
+//   - GateEnvExitCode: the gate explicitly declared its environment unusable.
+//   - 126 / 127: POSIX shell "found but not executable" / "command not found".
+//     The shell never reached the program, so this cannot be a verdict on the
+//     candidate's code.
+//   - killed by a signal, or a shell-reported 128+N: the gate process died
+//     rather than reporting. An OOM or resource kill (SIGKILL), a worker
+//     shutdown or lease loss (SIGTERM), or a cancelled context says nothing
+//     about the tree under test.
+//
+// Everything else — most importantly a plain exit 1 from a suite that ran and
+// reported red — stays a product failure and consumes the bounded attempt
+// budget.
+//
+// Every environmental verdict here is Immediate: none of these conditions clears
+// by waiting, so the candidate parks at once with the cause named rather than
+// rediscovering the same thing over a retry window. Misclassifying in either
+// direction can never land red code: the caller keeps Passed=false regardless,
+// so the only thing this decides is whether the candidate burns an attempt and
+// how it is labelled.
+func classifyShellGateFailure(err error) error {
+	cause := shellGateFailureCause(err)
+	if cause == "" {
+		return err
+	}
+	return EnvironmentalImmediate(cause, err)
+}
+
+// shellGateFailureCause names the environmental condition behind a failed shell
+// gate, or "" when the gate ran and reported a genuine red verdict.
+func shellGateFailureCause(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		// No process status at all: a runner-level failure (the shell could not
+		// be started, a custom CommandRunner failed). Left as a product failure
+		// so an unclassifiable gate never silently gains a different policy.
+		return ""
+	}
+	code := exitErr.ExitCode()
+	if code < 0 {
+		// ExitCode reports -1 when the process was terminated by a signal. Which
+		// signal killed the gate is the single most useful datum for diagnosing a
+		// gate that died mid-suite, and was exactly what earlier evidence lacked.
+		// The number, not the name, keeps this token stable across platforms and
+		// identical to the shell-reported 128+N form below.
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return fmt.Sprintf("killed_signal_%d", int(status.Signal()))
+		}
+		return "killed_unknown_signal"
+	}
+	switch {
+	case code == GateEnvExitCode:
+		return "gate_declared_environment_unusable"
+	case code == 126:
+		return "command_not_executable"
+	case code == 127:
+		return "command_not_found"
+	case code > 128:
+		// A shell reports a signal-killed child as 128+N.
+		return fmt.Sprintf("killed_signal_%d", code-128)
+	}
+	return ""
+}
+
+// shellGateExitEvidence records the gate's exit status, the class it was given,
+// and the named cause, so `queue status` shows an operator why a candidate was
+// parked as infrastructure rather than judged red.
+func shellGateExitEvidence(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return "queue:gate:exit=unknown class=product"
+	}
+	cause := shellGateFailureCause(err)
+	if cause == "" {
+		return fmt.Sprintf("queue:gate:exit=%d class=product", exitErr.ExitCode())
+	}
+	return fmt.Sprintf("queue:gate:exit=%d class=environment cause=%s", exitErr.ExitCode(), cause)
+}
+
 // ShellGate runs the declared deterministic command only in the managed
 // speculative workspace. It rejects a command that leaves that workspace dirty
 // or moves HEAD, so a gate cannot smuggle unvalidated changes into staging.
@@ -940,7 +1042,9 @@ func (g ShellGate) Run(ctx context.Context, spec Speculation) (GateResult, error
 	output, runErr := runner.Run(ctx, spec.WorkspacePath, "sh", "-c", g.Command)
 	evidence := commandEvidence("queue:gate", output)
 	if runErr != nil {
-		return GateResult{Passed: false, Evidence: evidence}, fmt.Errorf("queue: deterministic gate: %w", runErr)
+		wrapped := fmt.Errorf("queue: deterministic gate: %w", runErr)
+		evidence = append(evidence, shellGateExitEvidence(wrapped))
+		return GateResult{Passed: false, Evidence: evidence}, classifyShellGateFailure(wrapped)
 	}
 	after, err := gitOutput(ctx, spec.WorkspacePath, "rev-parse", "HEAD")
 	if err != nil {
