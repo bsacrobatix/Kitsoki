@@ -314,6 +314,7 @@ func medicHandleConflict(c *Candidate, state *State, deps MedicDeps, now time.Ti
 	c.ParkedAt, c.ParkedBy = time.Time{}, ""
 	c.RetryReason, c.ReasonCode = "", ""
 	c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
+	c.ProductFailureSignature, c.ProductRepeatStreak = "", 0
 	c.Position = nextPosition(state.Candidates)
 	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:medic dispatch_resolver by %s at %s dispatch=%d/%d position=%d", deps.medicID(), now.Format(time.RFC3339), c.MedicDispatches, deps.maxDispatches(), c.Position))
 	return MedicAction{CandidateID: c.ID, Verb: "dispatch_resolver", Reason: "needs_conflict_input", At: now}, true

@@ -235,7 +235,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			if gateErr == nil {
 				gateErr = fmt.Errorf("deterministic gate failed")
 			}
-			w.failGate(state, cur, gateErr)
+			w.failGate(state, cur, gateErr, gateFailureOutcome{Result: result, Speculation: spec})
 			return
 		}
 		// spec.SHA may have advanced past the first closure's snapshot when a
@@ -261,6 +261,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// unrelated environmental blip.
 		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
 		cur.EnvFailureSignature, cur.EnvRepeatStreak = "", 0
+		cur.ProductFailureSignature, cur.ProductRepeatStreak = "", 0
 		// For exactly the same reason it ends whatever stall the medic was
 		// treating: speculation and the deterministic gate both came back
 		// green, so this candidate is out of the conflict/gate-failure stall
@@ -445,6 +446,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		cur.FinalizationLog = first(result.Log, cur.FinalizationLog)
 		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
 		cur.EnvFailureSignature, cur.EnvRepeatStreak = "", 0
+		cur.ProductFailureSignature, cur.ProductRepeatStreak = "", 0
 	}); updateErr != nil {
 		return true, updateErr
 	}
@@ -609,6 +611,7 @@ func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 		c.Phase, c.Status, c.ConflictContinuation = NeedsConflictInput, NeedsConflictInput, err.Error()
 		c.RetryReason, c.ReasonCode = "merge_conflict_unresolved", ReasonMergeConflict
 		c.ParkedAt, c.ParkedBy = now(w.Deps), "queue-worker"
+		c.ProductFailureSignature, c.ProductRepeatStreak = "", 0
 		return
 	}
 	var envErr EnvError
@@ -618,7 +621,13 @@ func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	}
 	w.retryOrPark(state, c, "speculation_failed")
 }
-func (w Worker) failGate(state *State, c *Candidate, err error) {
+
+type gateFailureOutcome struct {
+	Result      GateResult
+	Speculation Speculation
+}
+
+func (w Worker) failGate(state *State, c *Candidate, err error, outcome ...gateFailureOutcome) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
 	var harness HarnessError
 	if errors.As(err, &harness) {
@@ -637,7 +646,27 @@ func (w Worker) failGate(state *State, c *Candidate, err error) {
 		w.retryOrParkEnv(c, "gate_failed", envErr.Err)
 		return
 	}
-	w.retryOrPark(state, c, "gate_failed")
+	var signature string
+	if len(outcome) > 0 {
+		attempted := outcome[0]
+		result := attempted.Result
+		// The current attempt's verdict is load-bearing. Many real gates use
+		// the same generic error/exit status for every red run while putting
+		// the actual failed assertion in Log or Evidence. Never sign
+		// Candidate.Evidence here: it is accumulated history and would make
+		// every later attempt unique.
+		signature = fingerprint(
+			"product-gate-outcome/v1",
+			fmt.Sprintf("%T", err),
+			strings.TrimSpace(err.Error()),
+			attempted.Speculation.SHA,
+			attempted.Speculation.RuntimeConfigDigest,
+			w.gatePolicyDigest(c.TargetRef, attempted.Speculation.RuntimeConfigDigest),
+			first(result.GateVersion, w.Deps.GateVersion),
+			first(result.OutcomeDigest, fingerprint(strings.TrimSpace(result.Log), fingerprint(result.Evidence...))),
+		)
+	}
+	w.retryOrPark(state, c, "gate_failed", signature)
 }
 
 // parkNoVerdict parks a candidate whose gate never produced a verdict for a
@@ -674,11 +703,37 @@ func (w Worker) parkNoVerdict(c *Candidate, stage, cause string) {
 // exhausted. Both outcomes are durable and human-recoverable (kick / resume /
 // override), so a failing candidate can delay only itself, never wedge the
 // train, and never spin unbounded.
-func (w Worker) retryOrPark(state *State, c *Candidate, reason string) {
+func (w Worker) retryOrPark(state *State, c *Candidate, reason string, outcomeSignature ...string) {
+	// Product failures are deterministic outcomes from the candidate's code
+	// and the named stage. One retry is useful to rule out a one-off; a second
+	// byte-identical result is not. Persist the signature so this remains true
+	// across worker/process restarts.
+	sig := ""
+	if len(outcomeSignature) > 0 {
+		sig = strings.TrimSpace(outcomeSignature[0])
+	}
+	// Only deterministic gate verdicts currently carry a complete attempted
+	// tree/runtime/policy identity. Other product stages retain MaxAttempts
+	// but interrupt this consecutive-gate-outcome streak.
+	if sig == "" {
+		c.ProductFailureSignature, c.ProductRepeatStreak = "", 0
+	} else {
+		if sig == c.ProductFailureSignature {
+			c.ProductRepeatStreak++
+		} else {
+			c.ProductFailureSignature, c.ProductRepeatStreak = sig, 1
+		}
+	}
 	if c.Attempt >= w.Deps.maxAttempts() {
 		code := exhaustionReasonCode(reason, w.Deps.Repairer != nil)
 		w.parkHuman(c, "max_attempts_exhausted", code)
 		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:max attempts (%d) exhausted after %s; parked as needs_human (%s)", c.Attempt, reason, code))
+		return
+	}
+	if sig != "" && c.ProductRepeatStreak >= w.Deps.maxProductRepeat() {
+		code := reasonCodeForStage(reason)
+		w.parkHuman(c, reason+"_repeated_outcome", code)
+		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:product failure repeated identically %d time(s); parked after attempt %d/%d as needs_human (%s)", c.ProductRepeatStreak, c.Attempt, w.Deps.maxAttempts(), code))
 		return
 	}
 	n := now(w.Deps)
@@ -718,6 +773,9 @@ func (w Worker) retryOrPark(state *State, c *Candidate, reason string) {
 // outcome=unknown.
 func (w Worker) retryOrParkEnv(c *Candidate, reason string, cause error) {
 	n := now(w.Deps)
+	// An environmental outcome interrupts a run of consecutive product
+	// outcomes. A later product failure must start a fresh signature streak.
+	c.ProductFailureSignature, c.ProductRepeatStreak = "", 0
 	if c.Attempt > 0 {
 		c.Attempt--
 	}

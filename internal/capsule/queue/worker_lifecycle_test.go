@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -666,6 +667,290 @@ func TestWltFailGateEnvErrorWithDifferingMessagesKeepsRetrying(t *testing.T) {
 		if cand.EnvRepeatStreak != 1 {
 			t.Fatalf("attempt %d: streak=%d, want 1 (each message differs)", attempt, cand.EnvRepeatStreak)
 		}
+	}
+}
+
+// --- product repeat-streak parking (retryOrPark) --------------------------
+
+func TestWltProductFailureParksOnSecondIdenticalOutcomeAcrossRestart(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "product-repeat")
+	clock := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
+		return GateResult{
+			Passed:      false,
+			GateVersion: "unit/v1",
+			Log:         "FAIL package alpha",
+			Evidence:    []string{"unit:alpha: expected 1 got 2"},
+		}, nil
+	})
+	deps := ProcessDeps{
+		Integration: specIntegration(),
+		Gate:        gate,
+		MaxAttempts: 5,
+		RetryDelay:  time.Second,
+		Now:         func() time.Time { return clock },
+	}
+
+	worker := Worker{Store: store, Deps: deps}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := wltGet(t, store, c.ID)
+	if first.Phase != RetryWait || first.ProductRepeatStreak != 1 || first.ProductFailureSignature == "" {
+		t.Fatalf("first outcome: candidate=%#v", first)
+	}
+
+	// Reconstruct both Store and Worker to prove the signature is durable,
+	// rather than process-local retry bookkeeping.
+	clock = first.RetryAt.Add(time.Second)
+	restarted := Worker{Store: Store{ProjectRoot: store.ProjectRoot}, Deps: deps}
+	if _, err := restarted.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := wltGet(t, store, first.ID)
+	if second.Phase != NeedsHuman || second.RetryReason != "gate_failed_repeated_outcome" {
+		t.Fatalf("second outcome: phase=%s reason=%s, want needs_human/gate_failed_repeated_outcome", second.Phase, second.RetryReason)
+	}
+	if second.Attempt != 2 || second.ProductRepeatStreak != 2 {
+		t.Fatalf("second outcome: attempt=%d streak=%d, want 2/2", second.Attempt, second.ProductRepeatStreak)
+	}
+	if second.ReasonCode != ReasonGateFailed || second.NeedsHumanEvidenceRef == "" {
+		t.Fatalf("second outcome missing typed custody: code=%s evidence_ref=%q", second.ReasonCode, second.NeedsHumanEvidenceRef)
+	}
+}
+
+func TestWltDifferentProductFailureResetsStreakAndKeepsRetrying(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "product-vary")
+	clock := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	attempt := 0
+	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
+		attempt++
+		return GateResult{
+			Passed:      false,
+			GateVersion: "unit/v1",
+			Log:         fmt.Sprintf("FAIL package %d", attempt),
+			Evidence:    []string{fmt.Sprintf("unit:package-%d: assertion failed", attempt)},
+		}, nil
+	})
+	worker := Worker{Store: store, Deps: ProcessDeps{
+		Integration: specIntegration(),
+		Gate:        gate,
+		MaxAttempts: 5,
+		RetryDelay:  time.Second,
+		Now:         func() time.Time { return clock },
+	}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := wltGet(t, store, c.ID)
+	clock = first.RetryAt.Add(time.Second)
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := wltGet(t, store, c.ID)
+
+	if second.Phase != RetryWait {
+		t.Fatalf("candidate=%#v", second)
+	}
+	if second.ProductRepeatStreak != 1 {
+		t.Fatalf("changed product outcome streak=%d, want reset to 1", second.ProductRepeatStreak)
+	}
+	if second.ProductFailureSignature == "" || second.ProductFailureSignature == first.ProductFailureSignature {
+		t.Fatalf("changed product outcome did not replace signature: first=%q second=%q", first.ProductFailureSignature, second.ProductFailureSignature)
+	}
+}
+
+func TestWltShellGateProductSignatureUsesCurrentStdout(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		command    func(t *testing.T) string
+		wantPhase  Status
+		wantStreak int
+	}{
+		{
+			name: "same stdout parks",
+			command: func(*testing.T) string {
+				return "printf 'FAIL alpha'; exit 1"
+			},
+			wantPhase:  NeedsHuman,
+			wantStreak: 2,
+		},
+		{
+			name: "different stdout retries",
+			command: func(t *testing.T) string {
+				marker := filepath.Join(t.TempDir(), "second")
+				return fmt.Sprintf("if [ -f %q ]; then printf 'FAIL beta'; else printf 'FAIL alpha'; : > %q; fi; exit 1", marker, marker)
+			},
+			wantPhase:  RetryWait,
+			wantStreak: 1,
+		},
+		{
+			name: "different suffix beyond evidence truncation retries",
+			command: func(t *testing.T) string {
+				marker := filepath.Join(t.TempDir(), "second")
+				prefix := strings.Repeat("same-prefix-", 220)
+				return fmt.Sprintf("if [ -f %q ]; then printf '%sB'; else printf '%sA'; : > %q; fi; exit 1", marker, prefix, prefix, marker)
+			},
+			wantPhase:  RetryWait,
+			wantStreak: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := sgcGitWorkspace(t)
+			head, err := gitOutput(context.Background(), workspace, "rev-parse", "HEAD")
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := Store{ProjectRoot: t.TempDir()}
+			c := wltSubmit(t, store, "shell-product")
+			clock := time.Date(2026, 7, 30, 11, 0, 0, 0, time.UTC)
+			integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
+				return Speculation{SHA: head, BaseSHA: head, WorkspacePath: workspace}, nil
+			}}
+			worker := Worker{Store: store, Deps: ProcessDeps{
+				Integration: integration,
+				Gate:        ShellGate{Command: tc.command(t)},
+				GateVersion: "shell/v1",
+				MaxAttempts: 5,
+				RetryDelay:  time.Second,
+				Now:         func() time.Time { return clock },
+			}}
+			if _, err := worker.RunOnce(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			first := wltGet(t, store, c.ID)
+			clock = first.RetryAt.Add(time.Second)
+			if _, err := worker.RunOnce(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			second := wltGet(t, store, c.ID)
+			if second.Phase != tc.wantPhase || second.ProductRepeatStreak != tc.wantStreak {
+				t.Fatalf("phase=%s streak=%d signature=%q evidence=%v", second.Phase, second.ProductRepeatStreak, second.ProductFailureSignature, second.Evidence)
+			}
+		})
+	}
+}
+
+func TestWltSameGateVerdictOnDifferentSpecTreeResetsProductStreak(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "product-tree-change")
+	clock := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	attempt := 0
+	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
+		attempt++
+		return Speculation{
+			SHA:                 fmt.Sprintf("spec-tree-%d", attempt),
+			RuntimeConfigDigest: "runtime/v1",
+		}, nil
+	}}
+	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
+		return GateResult{Passed: false, Evidence: []string{"same deterministic failure"}, GateVersion: "unit/v1"}, nil
+	})
+	worker := Worker{Store: store, Deps: ProcessDeps{
+		Integration: integration,
+		Gate:        gate,
+		MaxAttempts: 5,
+		RetryDelay:  time.Second,
+		Now:         func() time.Time { return clock },
+	}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := wltGet(t, store, c.ID)
+	clock = first.RetryAt.Add(time.Second)
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := wltGet(t, store, c.ID)
+	if second.Phase != RetryWait || second.ProductRepeatStreak != 1 {
+		t.Fatalf("same text on a different attempted tree must retry with a fresh streak: phase=%s streak=%d", second.Phase, second.ProductRepeatStreak)
+	}
+	if second.ProductFailureSignature == first.ProductFailureSignature {
+		t.Fatalf("attempted tree identity was absent from signature: %q", second.ProductFailureSignature)
+	}
+}
+
+func TestWltConflictAndMedicDispatchClearProductFailureSignature(t *testing.T) {
+	t.Run("conflict park", func(t *testing.T) {
+		store := Store{ProjectRoot: t.TempDir()}
+		wltSubmit(t, store, "product-conflict-reset")
+		state, err := store.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cand := &state.Candidates[0]
+		cand.ProductFailureSignature, cand.ProductRepeatStreak = "old-gate-digest", 1
+		Worker{Store: store}.failPreparation(&state, cand, fmt.Errorf("continuation required for merge conflict"))
+		if cand.Phase != NeedsConflictInput || cand.ProductFailureSignature != "" || cand.ProductRepeatStreak != 0 {
+			t.Fatalf("conflict park retained product streak: %#v", cand)
+		}
+	})
+
+	t.Run("medic resolver dispatch", func(t *testing.T) {
+		state := State{Candidates: []Candidate{{
+			ID:                      "queue-medic-product-reset",
+			Phase:                   NeedsConflictInput,
+			Status:                  NeedsConflictInput,
+			ProductFailureSignature: "old-gate-digest",
+			ProductRepeatStreak:     1,
+		}}}
+		cand := &state.Candidates[0]
+		if _, changed := medicHandleConflict(cand, &state, MedicDeps{MedicID: "medic"}, time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)); !changed {
+			t.Fatal("medic did not dispatch conflict candidate")
+		}
+		if cand.Phase != Queued || cand.ProductFailureSignature != "" || cand.ProductRepeatStreak != 0 {
+			t.Fatalf("medic dispatch retained product streak: %#v", cand)
+		}
+	})
+}
+
+func TestWltSuccessfulPreparationClearsProductFailureSignature(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "product-reset-success")
+	wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.ProductFailureSignature = "gate_failed\x00old deterministic failure"
+		cand.ProductRepeatStreak = 1
+	})
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: specIntegration(), Gate: passingGate{}}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := wltGet(t, store, c.ID)
+	if got.Phase != ReadyToFinalize {
+		t.Fatalf("phase=%s, want ready_to_finalize", got.Phase)
+	}
+	if got.ProductFailureSignature != "" || got.ProductRepeatStreak != 0 {
+		t.Fatalf("successful preparation retained product signature=%q streak=%d", got.ProductFailureSignature, got.ProductRepeatStreak)
+	}
+}
+
+func TestWltResumeAndOverrideClearProductFailureSignature(t *testing.T) {
+	for _, operation := range []string{"resume", "override"} {
+		t.Run(operation, func(t *testing.T) {
+			store := Store{ProjectRoot: t.TempDir()}
+			c := wltSubmit(t, store, "product-reset-"+operation)
+			wltMutate(t, store, c.ID, func(cand *Candidate) {
+				cand.Phase, cand.Status = NeedsHuman, NeedsHuman
+				cand.RetryReason = "gate_failed_repeated_outcome"
+				cand.ProductFailureSignature = "gate_failed\x00old deterministic failure"
+				cand.ProductRepeatStreak = 2
+			})
+			var got Candidate
+			var err error
+			if operation == "resume" {
+				got, err = store.Resume(Op{ID: c.ID, Actor: "operator"})
+			} else {
+				got, err = store.Override(Op{ID: c.ID, Actor: "operator", Reason: "verified fix"})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ProductFailureSignature != "" || got.ProductRepeatStreak != 0 {
+				t.Fatalf("%s retained product signature=%q streak=%d", operation, got.ProductFailureSignature, got.ProductRepeatStreak)
+			}
+		})
 	}
 }
 

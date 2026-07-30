@@ -448,7 +448,7 @@ func queueWorkerCmd() *cobra.Command {
 	var once bool
 	var concurrency, capacity int
 	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration, gateTimeout time.Duration
-	var maxAttempts, maxEnvRepeat int
+	var maxAttempts, maxProductRepeat, maxEnvRepeat int
 	var medicEnabled bool
 	var medicMaxDispatches, medicGateFailureThreshold int
 	var medicDeadline time.Duration
@@ -488,6 +488,7 @@ func queueWorkerCmd() *cobra.Command {
 			deps.GateVersion = fmt.Sprintf("executor:%s:%s", executorName, pipeline)
 		}
 		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts
+		deps.MaxProductRepeat = maxProductRepeat
 		deps.EnvRetryDelay, deps.MaxEnvDuration = envRetryDelay, maxEnvDuration
 		deps.MaxEnvRepeat = maxEnvRepeat
 		n := concurrency
@@ -584,6 +585,7 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
 	cmd.Flags().DurationVar(&maxRetryDelay, "max-retry-delay", queue.DefaultMaxRetryDelay, "backoff ceiling for repeated failures")
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_human")
+	cmd.Flags().IntVar(&maxProductRepeat, "max-product-repeat", queue.DefaultMaxProductRepeat, "consecutive byte-identical product failure outcomes before parking as needs_human; a changed outcome resets the count")
 	cmd.Flags().DurationVar(&envRetryDelay, "env-retry-delay", queue.DefaultEnvRetryDelay, "fixed backoff before retrying an environmental failure (fetch/lock/workspace-create); does not consume the attempt budget")
 	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_human")
 	cmd.Flags().IntVar(&maxEnvRepeat, "max-env-repeat", queue.DefaultMaxEnvRepeat, "consecutive byte-identical environmental failure messages before parking as needs_human, regardless of --max-env-duration; a changed message resets the count")

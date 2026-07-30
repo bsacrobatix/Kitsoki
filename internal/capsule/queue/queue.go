@@ -177,6 +177,15 @@ type Candidate struct {
 	// parks the candidate well before MaxEnvDuration's wall-clock bound would.
 	EnvFailureSignature string `json:"env_failure_signature,omitempty"`
 	EnvRepeatStreak     int    `json:"env_repeat_streak,omitempty"`
+	// ProductFailureSignature is the deterministic digest of the most recent
+	// product outcome (stage, error class/message, and current gate verdict),
+	// and ProductRepeatStreak counts consecutive matches. A second identical
+	// product outcome parks immediately:
+	// rerunning unchanged code against an unchanged deterministic gate cannot
+	// produce new information. A changed outcome resets the streak and keeps
+	// the normal bounded MaxAttempts budget.
+	ProductFailureSignature string `json:"product_failure_signature,omitempty"`
+	ProductRepeatStreak     int    `json:"product_repeat_streak,omitempty"`
 	// Medic bookkeeping (P1.7 part 2 — see medic.go's MedicDeps doc). A
 	// bounded, medic-owned productive-retry budget distinct from the
 	// ordinary Attempt/RetryAt machinery: MedicDispatches and
@@ -267,11 +276,15 @@ type Gate interface {
 	Run(context.Context, Speculation) (GateResult, error)
 }
 type GateResult struct {
-	Passed                bool     `json:"passed"`
-	Evidence              []string `json:"evidence,omitempty"`
-	Log                   string   `json:"log,omitempty"`
-	GateVersion           string   `json:"gate_version,omitempty"`
-	DependencyFingerprint string   `json:"dependency_fingerprint,omitempty"`
+	Passed      bool     `json:"passed"`
+	Evidence    []string `json:"evidence,omitempty"`
+	Log         string   `json:"log,omitempty"`
+	GateVersion string   `json:"gate_version,omitempty"`
+	// OutcomeDigest binds the complete machine verdict before Log/Evidence
+	// are bounded for display. Repeat detection prefers it so two failures
+	// with the same truncated prefix cannot be mistaken for one outcome.
+	OutcomeDigest         string `json:"outcome_digest,omitempty"`
+	DependencyFingerprint string `json:"dependency_fingerprint,omitempty"`
 }
 type ProcessDeps struct {
 	Integration    Integration
@@ -309,6 +322,10 @@ type ProcessDeps struct {
 	RetryDelay    time.Duration // default 5m
 	MaxRetryDelay time.Duration // default 30m
 	MaxAttempts   int           // default 5
+	// MaxProductRepeat bounds consecutive byte-identical product outcomes.
+	// It is deliberately independent of MaxAttempts: a changed failure keeps
+	// the normal attempt budget, while a deterministic repeat parks early.
+	MaxProductRepeat int // default 2
 
 	// Environmental retry policy (queue.EnvError, see Environmental). A
 	// short fixed backoff, bounded two ways: wall-clock time elapsed since
@@ -337,13 +354,14 @@ type ProcessDeps struct {
 }
 
 const (
-	DefaultRetryDelay     = 5 * time.Minute
-	DefaultMaxRetryDelay  = 30 * time.Minute
-	DefaultMaxAttempts    = 5
-	DefaultEnvRetryDelay  = 30 * time.Second
-	DefaultMaxEnvDuration = 2 * time.Hour
-	DefaultMaxEnvRepeat   = 2
-	DefaultStageTimeout   = 30 * time.Minute
+	DefaultRetryDelay       = 5 * time.Minute
+	DefaultMaxRetryDelay    = 30 * time.Minute
+	DefaultMaxAttempts      = 5
+	DefaultMaxProductRepeat = 2
+	DefaultEnvRetryDelay    = 30 * time.Second
+	DefaultMaxEnvDuration   = 2 * time.Hour
+	DefaultMaxEnvRepeat     = 2
+	DefaultStageTimeout     = 30 * time.Minute
 )
 
 func (d ProcessDeps) stageTimeout() time.Duration {
@@ -364,6 +382,12 @@ func (d ProcessDeps) maxAttempts() int {
 		return d.MaxAttempts
 	}
 	return DefaultMaxAttempts
+}
+func (d ProcessDeps) maxProductRepeat() int {
+	if d.MaxProductRepeat > 0 {
+		return d.MaxProductRepeat
+	}
+	return DefaultMaxProductRepeat
 }
 func (d ProcessDeps) envRetryDelay() time.Duration {
 	return firstDuration(d.EnvRetryDelay, DefaultEnvRetryDelay)

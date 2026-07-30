@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -138,9 +139,10 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 	})
 
 	evidence := executorGateEvidence(pipelineName, g.Executor, result)
+	outcomeDigest := executorGateOutcomeDigest(result)
 
 	if after, headErr := gitOutput(ctx, spec.WorkspacePath, "rev-parse", "HEAD"); headErr == nil && after != before {
-		return GateResult{Passed: false, Evidence: evidence}, fmt.Errorf("queue: executor gate moved speculative HEAD (%s -> %s)", before, after)
+		return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: outcomeDigest}, fmt.Errorf("queue: executor gate moved speculative HEAD (%s -> %s)", before, after)
 	}
 
 	if runErr != nil {
@@ -153,29 +155,62 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 		// This is the harness failing to reach or trust a verdict, so it
 		// gets the lenient environmental retry budget rather than the
 		// candidate's bounded product-failure attempts.
-		return GateResult{Passed: false, Evidence: evidence}, Environmental(runErr)
+		return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: outcomeDigest}, Environmental(runErr)
 	}
 
 	switch result.Verdict.Outcome {
 	case "passed":
 		return GateResult{
-			Passed:      true,
-			Evidence:    evidence,
-			Log:         result.Verdict.Summary,
-			GateVersion: fmt.Sprintf("executor-gate/v1:%s:%s", g.Executor, pipelineName),
+			Passed:        true,
+			Evidence:      evidence,
+			Log:           result.Verdict.Summary,
+			GateVersion:   fmt.Sprintf("executor-gate/v1:%s:%s", g.Executor, pipelineName),
+			OutcomeDigest: outcomeDigest,
 		}, nil
 	case "failed":
 		// The pipeline genuinely ran against this candidate's exact tree and
 		// reported it red: a real product failure, consuming the bounded
 		// attempt budget like any other gate result.
-		return GateResult{Passed: false, Evidence: evidence, Log: result.Verdict.Summary}, fmt.Errorf("queue: executor gate: pipeline %q reported outcome %q: %s", pipelineName, result.Verdict.Outcome, first(result.Verdict.Summary, "no summary"))
+		return GateResult{Passed: false, Evidence: evidence, Log: result.Verdict.Summary, OutcomeDigest: outcomeDigest}, fmt.Errorf("queue: executor gate: pipeline %q reported outcome %q: %s", pipelineName, result.Verdict.Outcome, first(result.Verdict.Summary, "no summary"))
 	default:
 		// infra_failed / cancelled / needs_input / any future result-contract
 		// outcome: the pipeline did not produce a genuine pass-or-fail
 		// assessment of this candidate's tree, so this does not consume the
 		// candidate's bounded product-failure attempt budget either.
-		return GateResult{Passed: false, Evidence: evidence, Log: result.Verdict.Summary}, Environmental(fmt.Errorf("queue: executor gate: pipeline %q reported outcome %q: %s", pipelineName, result.Verdict.Outcome, first(result.Verdict.Summary, "no summary")))
+		return GateResult{Passed: false, Evidence: evidence, Log: result.Verdict.Summary, OutcomeDigest: outcomeDigest}, Environmental(fmt.Errorf("queue: executor gate: pipeline %q reported outcome %q: %s", pipelineName, result.Verdict.Outcome, first(result.Verdict.Summary, "no summary")))
 	}
+}
+
+// executorGateOutcomeDigest is a stable semantic verdict digest. It excludes
+// per-dispatch job/execution ids and the envelope digest, which may change on
+// a retry, while retaining the complete unbounded checks and outputs that say
+// what the pipeline actually concluded.
+func executorGateOutcomeDigest(result ci.RunResult) string {
+	stable := struct {
+		Schema            string            `json:"schema"`
+		Pipeline          string            `json:"pipeline"`
+		Outcome           string            `json:"outcome"`
+		Summary           string            `json:"summary"`
+		Checks            []ci.Check        `json:"checks"`
+		PromotionEligible bool              `json:"promotion_eligible"`
+		SourceDigest      string            `json:"source_digest"`
+		StoryDigest       string            `json:"story_digest"`
+		EnvironmentDigest string            `json:"environment_digest"`
+		Outputs           map[string]string `json:"outputs"`
+	}{
+		Schema:            result.Verdict.Schema,
+		Pipeline:          result.Verdict.Pipeline,
+		Outcome:           result.Verdict.Outcome,
+		Summary:           result.Verdict.Summary,
+		Checks:            result.Verdict.Checks,
+		PromotionEligible: result.Verdict.PromotionEligible,
+		SourceDigest:      result.Verdict.SourceDigest,
+		StoryDigest:       result.Verdict.StoryDigest,
+		EnvironmentDigest: result.Verdict.EnvironmentDigest,
+		Outputs:           result.Verdict.Outputs,
+	}
+	payload, _ := json.Marshal(stable)
+	return fingerprint("executor-gate-outcome/v1", string(payload))
 }
 
 // executorGateWorkspaceHandle synthesizes a control.Handle identifying this

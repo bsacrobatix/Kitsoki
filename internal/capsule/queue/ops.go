@@ -181,6 +181,7 @@ func (s Store) Resume(op Op) (Candidate, error) {
 		c.ReasonCode, c.NeedsHumanEvidenceRef = "", ""
 		c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
 		c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
+		c.ProductFailureSignature, c.ProductRepeatStreak = "", 0
 		resetMedicBudget(c)
 		return nil
 	})
@@ -232,6 +233,7 @@ func (s Store) Override(op Op) (Candidate, error) {
 			// against an unrelated later failure.
 			c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
 			c.EnvFailureSignature, c.EnvRepeatStreak = "", 0
+			c.ProductFailureSignature, c.ProductRepeatStreak = "", 0
 			resetMedicBudget(c)
 		}
 		// Override remains the explicit human emergency/waiver path. It is

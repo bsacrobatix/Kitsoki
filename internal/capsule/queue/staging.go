@@ -1168,25 +1168,39 @@ func (g ShellGate) Run(ctx context.Context, spec Speculation) (GateResult, error
 	if runErr != nil {
 		wrapped := fmt.Errorf("queue: deterministic gate: %w", runErr)
 		evidence = append(evidence, shellGateExitEvidence(wrapped))
-		return GateResult{Passed: false, Evidence: evidence}, classifyShellGateFailure(wrapped)
+		classified := classifyShellGateFailure(wrapped)
+		return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: shellGateOutcomeDigest(output, classified)}, classified
 	}
 	after, err := gitOutput(ctx, spec.WorkspacePath, "rev-parse", "HEAD")
 	if err != nil {
-		return GateResult{Passed: false, Evidence: evidence}, err
+		return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: shellGateOutcomeDigest(output, err)}, err
 	}
 	if before != after {
-		return GateResult{Passed: false, Evidence: evidence}, fmt.Errorf("queue: deterministic gate moved speculative HEAD (%s -> %s)", before, after)
+		err := fmt.Errorf("queue: deterministic gate moved speculative HEAD (%s -> %s)", before, after)
+		return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: shellGateOutcomeDigest(output, err)}, err
 	}
 	dirty, err := gitOutput(ctx, spec.WorkspacePath, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
-		return GateResult{Passed: false, Evidence: evidence}, err
+		return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: shellGateOutcomeDigest(output, err)}, err
 	}
 	for _, line := range strings.Split(dirty, "\n") {
 		if line != "" && !strings.HasSuffix(line, ".kitsoki-capsule") && !strings.HasSuffix(line, ".kitsoki-clone") && !strings.HasSuffix(line, "capsule-manifest.json") && !strings.HasSuffix(line, ".kitsoki-dev-workspace.json") && !strings.HasSuffix(line, ".kitsoki-owner") {
-			return GateResult{Passed: false, Evidence: evidence}, fmt.Errorf("queue: deterministic gate left speculative workspace dirty: %s", line)
+			err := fmt.Errorf("queue: deterministic gate left speculative workspace dirty: %s", line)
+			return GateResult{Passed: false, Evidence: evidence, OutcomeDigest: shellGateOutcomeDigest(output, err)}, err
 		}
 	}
 	return GateResult{Passed: true, Evidence: evidence}, nil
+}
+
+// shellGateOutcomeDigest signs the complete command output before
+// commandEvidence truncates it for human display. The error's concrete class
+// and message distinguish product exit 1 from an environmental/harness shape.
+func shellGateOutcomeDigest(output []byte, err error) string {
+	errType, errText := "", ""
+	if err != nil {
+		errType, errText = fmt.Sprintf("%T", err), err.Error()
+	}
+	return fingerprint("shell-gate-outcome/v1", errType, errText, string(output))
 }
 
 func (s StagingIntegration) root() (string, error) {
