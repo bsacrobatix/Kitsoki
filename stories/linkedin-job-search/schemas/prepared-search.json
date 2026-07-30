@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["keywords", "location"],
+  "properties": {
+    "keywords": {"type": "string", "minLength": 1},
+    "location": {"type": "string"}
+  }
+}

@@ -23,7 +23,7 @@ states:
                 - label: "look"
     on:
       prepare:
-        - target: review
+        - target: preparing
           effects:
             - set:
                 keywords: "{{ slots.keywords }}"
@@ -32,10 +32,55 @@ states:
                 confirmed: false
                 results_url: ""
                 used_parameters: {}
+                prepared_parameters: {}
                 search_result: {}
                 error_detail: ""
       cancel:
         - target: cancelled
+      look:
+        - target: .
+
+  preparing:
+    description: "Navigate to LinkedIn Jobs and fill the reviewed parameters without submitting."
+    relevant_world: [keywords, location, search_status, prepared_parameters, error_detail]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Preparing the LinkedIn Jobs form through the configured bridge. This phase may navigate, snapshot, and fill only; it never presses a search control."
+          - kv:
+              pairs:
+                Keywords: "{{ world.keywords }}"
+                Location: "{{ world.location|default:'(any location)' }}"
+                Status: "{{ world.search_status }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "look"
+    on_enter:
+      - invoke: host.agent.task
+        id: prepare_linkedin_jobs_form
+        once: true
+        with:
+          agent: linkedin_searcher
+          acceptance:
+            schema: schemas/prepared-search.json
+          context:
+            prompt: prompts/prepare-search.md
+            args:
+              keywords: "{{ world.keywords }}"
+              location: "{{ world.location }}"
+        bind:
+          prepared_parameters: submitted
+        on_error: failed
+      - when: "world.prepared_parameters.keywords != ''"
+        emit_intent: ready_to_confirm
+    on:
+      ready_to_confirm:
+        - target: review
+          effects:
+            - set: { search_status: "awaiting_confirmation" }
       look:
         - target: .
 
@@ -46,7 +91,7 @@ states:
       extends: "base"
       blocks:
         body:
-          - prose: "Ready to submit exactly one LinkedIn Jobs search. Confirmation will navigate, fill these fields, and press the Jobs search control; it will not open jobs, apply, message, save, paginate, or bulk-scrape."
+          - prose: "The LinkedIn Jobs form is filled but not submitted. Confirm to press exactly one Jobs search control; it will not open jobs, apply, message, save, paginate, or bulk-scrape."
           - kv:
               pairs:
                 Keywords: "{{ world.keywords }}"

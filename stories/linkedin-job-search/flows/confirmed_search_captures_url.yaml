@@ -4,6 +4,12 @@ initial_state: parameters
 host_handlers:
   host.agent.task:
     by_call:
+      prepare_linkedin_jobs_form:
+        data:
+          ok: true
+          submitted:
+            keywords: "Product Manager"
+            location: "Bangkok"
       submit_confirmed_linkedin_jobs_search:
         data:
           ok: true
@@ -20,6 +26,10 @@ turns:
     expect_world:
       search_status: "awaiting_confirmation"
       confirmed: false
+      prepared_parameters: { keywords: "Product Manager", location: "Bangkok" }
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "prepare_linkedin_jobs_form" }
   - intent: { name: confirm_search }
     expect_state: complete
     expect_world:

@@ -1,9 +1,10 @@
 # Attended LinkedIn job search
 
-This story makes exactly one LinkedIn **Jobs** search after an operator reviews
-the keywords/location and explicitly chooses `confirm_search`. It records the
-submitted parameters and final results URL in world state. It does not open job
-details, apply, message, save, follow, paginate, or bulk-scrape.
+This story first navigates, snapshots, and fills the LinkedIn **Jobs** form.
+Only after the operator explicitly chooses `confirm_search` does it press one
+search control. It records the submitted parameters and final results URL in
+world state. It does not open job details, apply, message, save, follow,
+paginate, or bulk-scrape.
 
 ## Sassfully bridge binding
 

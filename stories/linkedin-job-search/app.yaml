@@ -49,6 +49,7 @@ world:
   confirmed:       { type: bool, default: false }
   results_url:     { type: string, default: "" }
   used_parameters: { type: object, default: {} }
+  prepared_parameters: { type: object, default: {} }
   search_result:   { type: object, default: {} }
   error_detail:    { type: string, default: "" }
 
@@ -68,6 +69,10 @@ intents:
     description: "Record the returned LinkedIn Jobs results URL."
     examples: ["finish"]
     priority: 84
+  ready_to_confirm:
+    description: "Show the prepared LinkedIn Jobs form for the required submission confirmation."
+    examples: ["ready to confirm"]
+    priority: 83
   revise:
     description: "Return to the parameters without submitting a search."
     examples: ["revise", "change search"]
