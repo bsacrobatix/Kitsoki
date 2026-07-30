@@ -201,19 +201,20 @@ invites, and events onto Postgres before cutting the host over:
    exactly what a successful migration produced, not a fresh empty postgres
    backend.
 4. Verify with the checks already documented under "Operations and
-   verification" below; `--verify` is backend-agnostic and exercises the same
-   auth/portal/health surfaces regardless of which store is behind them.
+   verification" below. On a Postgres host, both activation and `--verify`
+   run `kitsoki db verify`: it independently observes the live daemon's
+   Postgres connection, performs a Postgres read/write proof, and establishes
+   that the legacy SQLite session file stayed inert. The durable JSON evidence
+   is `/var/lib/kitsoki-pog/postgres-verification.json` (owned `pog:pog`, mode
+   `0600`).
 
-**Known cross-repo gap.** POG's own Node portal reads `sessions.db` directly
-for two features — `/api/agent-runner/reaped-sessions` and the colony
-runner's `POG_AGENT_RUNNER_DB` environment variable — independent of the
-Kitsoki daemon. Flipping the backend to Postgres does not update those two
-read paths: they will keep reading (or fail to read) the now-stale SQLite
-file, since POG itself is not Postgres-aware. This is a POG-side gap, not a
-Kitsoki one; per this repo's "never edit a sibling repo" policy it should be
-filed as a typed requirement into POG's own catalog rather than patched here.
-Do not enable the postgres backend on a host that depends on either of those
-two features until POG's side of this gap is closed.
+POG's current runner ledger is Postgres-aware. The hosted installer therefore
+passes `KITSOKI_DB_BACKEND=postgres` and `KITSOKI_PG_DSN` to both the portal
+and colony runner when Postgres is selected, and deliberately omits
+`POG_AGENT_RUNNER_DB`; POG rejects that mixed SQLite override. SQLite installs
+receive the legacy runner-ledger path instead. Activation and `--verify` read
+the live process environments to fail closed if either service gets the wrong
+contract.
 
 ## Deploy or upgrade
 
@@ -363,6 +364,11 @@ ssh root@206.189.84.218 \
 ssh root@206.189.84.218 \
   'journalctl -u kitsoki-pog -u pog-portal -u caddy --since "30 minutes ago" --no-pager'
 ```
+
+For a Postgres-backed host, a passing `--verify` also refreshes the private
+`/var/lib/kitsoki-pog/postgres-verification.json` proof. Inspect it as root;
+do not copy the DSN from `/proc` or `/etc/kitsoki/hosted-pog.env` into a shell
+command or ticket.
 
 Expected anonymous probes (no session cookie):
 

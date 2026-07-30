@@ -213,6 +213,20 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7444/v1
 for unit in kitsoki-pog.service pog-portal.service pog-worker-finalizer.service; do
   systemctl show --property Environment --value "$unit" | grep -Fq "POG_KITSOKI_BIN=$hosted_engine"
 done
+kitsoki_pog_pid="$(systemctl show --property MainPID --value kitsoki-pog.service)"
+[[ "$kitsoki_pog_pid" =~ ^[1-9][0-9]*$ ]]
+kitsoki_pog_environ="$(tr '\0' '\n' <"/proc/$kitsoki_pog_pid/environ")"
+if grep -qx 'KITSOKI_DB_BACKEND=postgres' <<<"$kitsoki_pog_environ"; then
+  pg_dsn="$(sed -n 's/^KITSOKI_PG_DSN=//p' <<<"$kitsoki_pog_environ" | head -n 1)"
+  test -n "$pg_dsn"
+  postgres_verification=/var/lib/kitsoki-pog/postgres-verification.json
+  KITSOKI_PG_DSN="$pg_dsn" "$hosted_engine" db verify --sqlite-path /var/lib/kitsoki-pog/sessions.db --output "$postgres_verification"
+  chown pog:pog "$postgres_verification"
+  chmod 0600 "$postgres_verification"
+else
+  ! grep -q '^KITSOKI_PG_DSN=' <<<"$kitsoki_pog_environ"
+fi
+unset pg_dsn
 test -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
 colony_environment="$(systemctl show --property Environment --value pog-colony-runner.service)"
 colony_pid="$(systemctl show --property MainPID --value pog-colony-runner.service)"
@@ -223,6 +237,23 @@ grep -Fq "POG_MEMBER_ROOTS=$expected_member_roots" <<<"$colony_environment"
 grep -Fq "POG_PORTFOLIO_MEMBERS=$expected_portfolio_members" <<<"$colony_environment"
 grep -Fq "POG_KITSOKI_BIN=$hosted_engine" <<<"$colony_environment"
 grep -Fxq "KITSOKI_SOURCE_DIR=$hosted_source" <<<"$colony_process_environment"
+portal_pid="$(systemctl show --property MainPID --value pog-portal.service)"
+[[ "$portal_pid" =~ ^[1-9][0-9]*$ ]]
+portal_process_environment="$(tr '\0' '\n' <"/proc/$portal_pid/environ")"
+if grep -qx 'KITSOKI_DB_BACKEND=postgres' <<<"$kitsoki_pog_environ"; then
+  grep -Fxq 'KITSOKI_DB_BACKEND=postgres' <<<"$portal_process_environment"
+  grep -q '^KITSOKI_PG_DSN=' <<<"$portal_process_environment"
+  ! grep -q '^POG_AGENT_RUNNER_DB=' <<<"$portal_process_environment"
+  grep -Fxq 'KITSOKI_DB_BACKEND=postgres' <<<"$colony_process_environment"
+  grep -q '^KITSOKI_PG_DSN=' <<<"$colony_process_environment"
+  ! grep -q '^POG_AGENT_RUNNER_DB=' <<<"$colony_process_environment"
+else
+  ! grep -q '^KITSOKI_DB_BACKEND=' <<<"$portal_process_environment"
+  grep -Fxq 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db' <<<"$portal_process_environment"
+  ! grep -q '^KITSOKI_DB_BACKEND=' <<<"$colony_process_environment"
+  grep -Fxq 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db' <<<"$colony_process_environment"
+fi
+unset kitsoki_pog_environ portal_process_environment colony_process_environment
 test -f /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 grep -Fq "Environment=POG_KITSOKI_BIN=$hosted_engine" /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf

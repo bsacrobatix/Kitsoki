@@ -30,6 +30,7 @@ state_release_root="/opt/kitsoki-hosted-pog/state-releases"
 runtime_release_root="/var/lib/pog/runtime-releases"
 runtime_current="/var/lib/pog/runtime"
 capsule_state_root=/var/lib/pog/capsules
+runtime_db_env=/etc/kitsoki/pog-runtime-db.env
 # Remote worker bundles are admitted into this external queue authority.  It
 # stays outside /opt/pog/current so admission never writes the protected
 # checkout; the hosted queue worker consumes its queue/ child explicitly.
@@ -509,6 +510,7 @@ previous_queue_admission_env="$stage/queue-admission.env.previous"
 previous_integration_worker="$stage/kitsoki-pog-integration-current-worker.service.previous"
 previous_colony_portfolio="$stage/pog-colony-runner.portfolio-authority.conf.previous"
 previous_colony_env="$stage/pog-colony-runner.env.previous"
+previous_runtime_db_env="$stage/pog-runtime-db.env.previous"
 previous_postgres_dropin="$stage/kitsoki-pog.zz-postgres.conf.previous"
 previous_hosted_pog_env="$stage/hosted-pog.env.previous"
 had_previous_kitsoki_service=0
@@ -522,6 +524,7 @@ had_previous_queue_admission_env=0
 had_previous_integration_worker=0
 had_previous_colony_portfolio=0
 had_previous_colony_env=0
+had_previous_runtime_db_env=0
 had_previous_postgres_dropin=0
 had_previous_hosted_pog_env=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
@@ -567,6 +570,11 @@ fi
 if [ -f /etc/kitsoki/pog-colony-runner.env ]; then
 	cp /etc/kitsoki/pog-colony-runner.env "$previous_colony_env"
 	had_previous_colony_env=1
+fi
+if [ -f "$runtime_db_env" ]; then
+	cp "$runtime_db_env" "$previous_runtime_db_env"
+	chmod 0600 "$previous_runtime_db_env"
+	had_previous_runtime_db_env=1
 fi
 if [ -f /etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf ]; then
 	cp /etc/systemd/system/kitsoki-pog.service.d/zz-postgres.conf "$previous_postgres_dropin"
@@ -688,6 +696,11 @@ rollback() {
 				install -m 0600 "$previous_colony_env" /etc/kitsoki/pog-colony-runner.env
 			else
 				rm -f /etc/kitsoki/pog-colony-runner.env
+			fi
+			if [ "$had_previous_runtime_db_env" -eq 1 ]; then
+				install -m 0600 "$previous_runtime_db_env" "$runtime_db_env"
+			else
+				rm -f "$runtime_db_env"
 			fi
 			if [ "$had_previous_postgres_dropin" -eq 1 ]; then
 				install -d -m 0755 /etc/systemd/system/kitsoki-pog.service.d
@@ -829,6 +842,13 @@ install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 	fi
 } >"$stage/hosted-pog.env"
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
+runtime_db_stage="$stage/pog-runtime-db.env"
+if [ "$db_backend" = postgres ]; then
+	printf 'KITSOKI_DB_BACKEND=postgres\nKITSOKI_PG_DSN=%s\n' "$pg_dsn" >"$runtime_db_stage"
+else
+	printf 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db\n' >"$runtime_db_stage"
+fi
+install -m 0600 "$runtime_db_stage" "$runtime_db_env"
 # `queue-worker.env` is intentionally shared with the portal and finalizer
 # for worker credentials.  It must not also choose their engine: a stale
 # selector there used to override the versioned service contract during a
@@ -962,6 +982,11 @@ if [ "$db_backend" = postgres ]; then
 		|| die "kitsoki-pog did not activate with the postgres backend"
 	grep -q '^KITSOKI_PG_DSN=' <<<"$kitsoki_pog_environ" \
 		|| die "kitsoki-pog did not receive a Postgres DSN"
+	postgres_verification=/var/lib/kitsoki-pog/postgres-verification.json
+	rm -f "$postgres_verification"
+	KITSOKI_PG_DSN="$pg_dsn" "$hosted_engine" db verify --sqlite-path /var/lib/kitsoki-pog/sessions.db --output "$postgres_verification" || die "Postgres backend verification did not pass"
+	chown pog:pog "$postgres_verification"
+	chmod 0600 "$postgres_verification"
 else
 	if grep -q '^KITSOKI_DB_BACKEND=' <<<"$kitsoki_pog_environ"; then
 		die "kitsoki-pog unexpectedly has a db backend override for a sqlite install"
@@ -998,7 +1023,9 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	{
 		printf 'POG_RUNNER_TOKEN=%s\n' "$colony_token"
 		printf 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust\n'
-		printf 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db\n'
+		if [ "$db_backend" = sqlite ]; then
+			printf 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db\n'
+		fi
 		# POG's compatibility bridge delegates lifecycle operations to the
 		# helper shipped beside the exact-revision hosted binary. Pointing at
 		# the activated immutable release removes the former dependency on the
@@ -1013,7 +1040,7 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	} >"$stage/pog-colony-runner.env"
 	install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-runner.env
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
-	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf
+	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\nEnvironmentFile=-/etc/kitsoki/pog-runtime-db.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf
 	systemctl daemon-reload
 	# A successful hosted activation owns returning the colony to service even
 	# when an operator deliberately held it before deployment. Rollback still
@@ -1033,6 +1060,11 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 		|| die "colony runner lacks the activated hosted Kitsoki engine"
 	grep -Fxq 'KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' <<<"$colony_process_environment" \
 		|| die "colony runner still depends on a mutable Kitsoki source checkout"
+	if [ "$db_backend" = postgres ]; then
+		grep -Fxq 'KITSOKI_DB_BACKEND=postgres' <<<"$colony_process_environment" || die "colony runner did not receive the Postgres backend"
+		grep -q '^KITSOKI_PG_DSN=' <<<"$colony_process_environment" || die "colony runner did not receive a Postgres DSN"
+		! grep -q '^POG_AGENT_RUNNER_DB=' <<<"$colony_process_environment" || die "colony runner retained a forbidden SQLite runner ledger override"
+	fi
 fi
 
 [ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service
@@ -1046,6 +1078,14 @@ for _ in $(seq 1 60); do
 	sleep 1
 done
 [ "${portal_ready:-0}" = "1" ] || die "POG production portal did not become ready on port 7777"
+portal_pid="$(systemctl show --property MainPID --value pog-portal.service)"
+[[ "$portal_pid" =~ ^[1-9][0-9]*$ ]] || die "POG production portal has no live process"
+portal_process_environment="$(tr '\0' '\n' <"/proc/$portal_pid/environ")"
+if [ "$db_backend" = postgres ]; then
+	grep -Fxq 'KITSOKI_DB_BACKEND=postgres' <<<"$portal_process_environment" || die "POG portal did not receive the Postgres backend"
+	grep -q '^KITSOKI_PG_DSN=' <<<"$portal_process_environment" || die "POG portal did not receive a Postgres DSN"
+	! grep -q '^POG_AGENT_RUNNER_DB=' <<<"$portal_process_environment" || die "POG portal retained a forbidden SQLite runner ledger override"
+fi
 
 if [ -n "$previous_fixed_autonomously" ]; then
 	current_fixed_autonomously="$(curl -fsS http://127.0.0.1:7777/api/feedback-autonomy/scoreboard | "$node_release/bin/node" -e '
