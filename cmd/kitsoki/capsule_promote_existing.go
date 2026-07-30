@@ -27,6 +27,8 @@ import (
 
 func capsulePromoteExistingCmd() *cobra.Command {
 	var project, queueRoot, sourceTarget, sha, destinationTarget, pipeline, gate, definition string
+	var capacityRoot, capacityPool string
+	var capacity int
 	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:          "promote-existing",
@@ -47,7 +49,9 @@ func capsulePromoteExistingCmd() *cobra.Command {
 				ProjectRoot: root,
 				QueueRoot:   queueRoot,
 				Certifier: queue.ExistingSHACertifierFunc(func(ctx context.Context, in queue.ExistingSHACertification) (record.Stored, error) {
-					return runPromoteExistingCI(ctx, root, definition, in)
+					return runPromoteExistingCIWithCapacity(ctx, root, definition, in, queue.FileGateCapacity{
+						Root: capacityRoot, Pool: capacityPool, Max: capacity,
+					})
 				}),
 			}
 			result, err := authority.Promote(cmd.Context(), request)
@@ -65,6 +69,9 @@ func capsulePromoteExistingCmd() *cobra.Command {
 	cmd.Flags().StringVar(&pipeline, "pipeline", "change", "Capsule CI pipeline to run against the exact SHA")
 	cmd.Flags().StringVar(&gate, "gate", "git diff --check", "deterministic gate the destination queue worker must run")
 	cmd.Flags().StringVar(&definition, "definition", "development", "Capsule definition identity for exact-source CI")
+	cmd.Flags().StringVar(&capacityRoot, "capacity-root", queue.DefaultGateCapacityRoot(), "absolute shared gate-capacity authority root")
+	cmd.Flags().StringVar(&capacityPool, "capacity-pool", "default", "operator-owned physical resource pool shared across repositories")
+	cmd.Flags().IntVar(&capacity, "capacity", 1, "maximum concurrent gates in the physical capacity pool")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("source-target")
 	_ = cmd.MarkFlagRequired("sha")
@@ -72,12 +79,26 @@ func capsulePromoteExistingCmd() *cobra.Command {
 }
 
 func runPromoteExistingCI(ctx context.Context, project, definitionID string, in queue.ExistingSHACertification) (record.Stored, error) {
-	if stored, ok, err := recoverPromoteExistingCI(ctx, project, in); err != nil {
+	return runPromoteExistingCIWithCapacity(ctx, project, definitionID, in, queue.DefaultFileGateCapacity())
+}
+
+func runPromoteExistingCIWithCapacity(ctx context.Context, project, definitionID string, in queue.ExistingSHACertification, capacity queue.FileGateCapacity) (record.Stored, error) {
+	if stored, ok, err := recoverPromoteExistingCI(ctx, project, in, capacity); err != nil {
 		return record.Stored{}, err
 	} else if ok {
 		return stored, nil
 	}
+	return runWithPromotionCapacity(ctx, capacity, queue.GateAdmissionRequest{
+		ProjectID: project,
+		TargetRef: in.Request.DestinationTarget,
+		Tier:      in.Request.Pipeline,
+		WorkerID:  "capsule-promote-existing-ci:" + in.JobID,
+	}, "capsule promote-existing", func(runCtx context.Context) (record.Stored, error) {
+		return runPromoteExistingCIFresh(runCtx, project, definitionID, in)
+	})
+}
 
+func runPromoteExistingCIFresh(ctx context.Context, project, definitionID string, in queue.ExistingSHACertification) (record.Stored, error) {
 	checkout, err := os.MkdirTemp("", "kitsoki-promote-existing-")
 	if err != nil {
 		return record.Stored{}, err
@@ -128,7 +149,7 @@ func runPromoteExistingCI(ctx context.Context, project, definitionID string, in 
 		StoryPath: filepath.Join(workspacePath, pipeline.Story), ProjectRoot: workspacePath,
 		AgentLaunchPolicy: host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{workspacePath}},
 		ConfigureHosts: func(reg *host.Registry) error {
-			if ok := reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(nil, host.CapsuleCIEvidenceDestination{
+			if ok := reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(promotionCICommandRunner{}, host.CapsuleCIEvidenceDestination{
 				Root:            filepath.Join(project, ".capsules", "ci", "evidence"),
 				ReferencePrefix: "file:.capsules/ci/evidence",
 			})); !ok {
@@ -172,7 +193,7 @@ func runPromoteExistingCI(ctx context.Context, project, definitionID string, in 
 	return stored, nil
 }
 
-func recoverPromoteExistingCI(ctx context.Context, project string, in queue.ExistingSHACertification) (record.Stored, bool, error) {
+func recoverPromoteExistingCI(ctx context.Context, project string, in queue.ExistingSHACertification, capacity queue.FileGateCapacity) (record.Stored, bool, error) {
 	store := ci.FileRunStore{ProjectRoot: project}
 	run, err := store.Get(in.JobID)
 	if err != nil {
@@ -193,8 +214,17 @@ func recoverPromoteExistingCI(ctx context.Context, project string, in queue.Exis
 		command.SetContext(ctx)
 		command.SetOut(io.Discard)
 		command.SetErr(io.Discard)
-		run, err = capsuleCIRefreshJob(command, project, in.JobID, store, run)
-		if err != nil {
+		if err := withPromotionCapacity(ctx, capacity, queue.GateAdmissionRequest{
+			ProjectID: project,
+			TargetRef: in.Request.DestinationTarget,
+			Tier:      in.Request.Pipeline,
+			WorkerID:  "capsule-promote-existing-reconcile:" + in.JobID,
+		}, "capsule promote-existing reconcile", func(runCtx context.Context) error {
+			var refreshErr error
+			command.SetContext(runCtx)
+			run, refreshErr = capsuleCIRefreshJob(command, project, in.JobID, store, run)
+			return refreshErr
+		}); err != nil {
 			return record.Stored{}, false, fmt.Errorf("capsule promote-existing: reconcile existing exact-source CI job %s: %w", in.JobID, err)
 		}
 		if !run.Result.Terminal {

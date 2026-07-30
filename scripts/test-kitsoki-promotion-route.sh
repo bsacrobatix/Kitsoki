@@ -40,16 +40,31 @@ chmod +x "$tmp/kitsoki"
 
 KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
   KITSOKI_GATE_CAPACITY_ROOT="$tmp/capacity-root" KITSOKI_GATE_CAPACITY_POOL="local-fast" KITSOKI_GATE_CAPACITY=3 \
+  KITSOKI_QUEUE_REPAIR="repair candidate" KITSOKI_QUEUE_REPAIR_REVIEW="review repair" \
+  KITSOKI_QUEUE_REPAIRER_ID="repairer-1" KITSOKI_QUEUE_REVIEWER_ID="reviewer-1" \
+  KITSOKI_QUEUE_REVIEW_POLICY_DIGEST="sha256:review-policy" \
   "$root/scripts/kitsoki-promotion-route.sh" workspace-to-staging \
   --repo "$repo" --workspace agent-1 --gate "make capsule-ci-quick" >/dev/null
 [ "$(wc -l <"$log" | tr -d ' ')" = 2 ] || {
   echo "workspace route did not use exactly one policy resolution and one promotion" >&2
   exit 1
 }
-grep -F -- "capsule promote --project $repo --queue-root $queue_root --workspace agent-1 --target staging/local --pipeline change --gate make capsule-ci-quick --wait --json --capacity-pool local-fast --capacity 3 --capacity-root $tmp/capacity-root" "$log" >/dev/null
+grep -F -- "capsule promote --project $repo --queue-root $queue_root --workspace agent-1 --target staging/local --pipeline change --gate make capsule-ci-quick --wait --json --capacity-pool local-fast --capacity 3 --capacity-root $tmp/capacity-root --repair repair candidate --repair-review review repair --repairer-id repairer-1 --reviewer-id reviewer-1 --review-policy-digest sha256:review-policy" "$log" >/dev/null
+
+if KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
+  KITSOKI_QUEUE_REPAIR="repair candidate" \
+  "$root/scripts/kitsoki-promotion-route.sh" workspace-to-staging \
+  --repo "$repo" --workspace agent-1 >"$tmp/partial-repair.out" 2>&1; then
+  echo "workspace route accepted partial repair configuration" >&2
+  exit 1
+fi
+grep -F "queue repair configuration requires" "$tmp/partial-repair.out" >/dev/null
 
 : >"$log"
 KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
+  KITSOKI_QUEUE_REPAIR="repair candidate" KITSOKI_QUEUE_REPAIR_REVIEW="review repair" \
+  KITSOKI_QUEUE_REPAIRER_ID="repairer-1" KITSOKI_QUEUE_REVIEWER_ID="reviewer-1" \
+  KITSOKI_QUEUE_REVIEW_POLICY_DIGEST="sha256:review-policy" \
   "$root/scripts/kitsoki-promotion-route.sh" staging-to-main \
   --repo "$repo" --sha 0123456789012345678901234567890123456789 \
   --gate "make test-full" >/dev/null
@@ -58,8 +73,8 @@ KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_Q
   exit 1
 }
 grep -F -- "--queue-root $queue_root" "$log" >/dev/null
-grep -F -- "--pipeline change --gate make test-full" "$log" >/dev/null
-grep -F -- "queue process --project $repo --queue-root $queue_root --candidate queue-main --target main --gate make test-full --capacity-pool default --capacity 1" "$log" >/dev/null
+grep -F -- "--pipeline change --gate make test-full --json --capacity-pool default --capacity 1" "$log" >/dev/null
+grep -F -- "queue process --project $repo --queue-root $queue_root --candidate queue-main --target main --gate make test-full --capacity-pool default --capacity 1 --repair repair candidate --repair-review review repair --repairer-id repairer-1 --reviewer-id reviewer-1 --review-policy-digest sha256:review-policy" "$log" >/dev/null
 [ ! -e "$repo/.capsules/queue" ] || {
   echo "external authority route forked project-local queue state" >&2
   exit 1
@@ -83,7 +98,7 @@ KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_Q
   echo "refresh route did not use exactly one policy resolution, admission, and candidate-scoped drain" >&2
   exit 1
 }
-grep -F -- "--source-target main --sha 0123456789012345678901234567890123456789 --target staging/local --pipeline change" "$log" >/dev/null
+grep -F -- "--source-target main --sha 0123456789012345678901234567890123456789 --target staging/local --pipeline change --gate make capsule-ci-quick --json --capacity-pool local-fast --capacity 3 --capacity-root $tmp/capacity-root" "$log" >/dev/null
 grep -F -- "--candidate queue-main --target staging/local --gate make capsule-ci-quick --capacity-pool local-fast --capacity 3 --capacity-root $tmp/capacity-root" "$log" >/dev/null
 
 # A Kitsoki source checkout must bootstrap through its own combined source,
@@ -224,6 +239,7 @@ grep -F "refuses direct branch-to-main mutation" "$tmp/explicit-main.out" >/dev/
 
 mkdir -p "$surface/.capsules/staging"
 git clone --quiet --branch staging/local "$surface" "$surface/.capsules/staging/local"
+git -C "$surface/.capsules/staging/local" remote rename origin source
 touch "$surface/.capsules/staging/local/.kitsoki-capsule"
 mkdir -p "$surface/.capsules/locks/staging-local-promotion"
 printf 'pid=stale\n' >"$surface/.capsules/locks/staging-local-promotion/owner"
@@ -259,8 +275,9 @@ fi
 grep -F "requires the tracked full gate 'make test-full'" "$tmp/custom-main-gate.out" >/dev/null
 [ "$(git -C "$surface" rev-parse main)" = "$main_before" ] &&
   [ "$(git -C "$surface" rev-parse staging/local)" = "$staging_before" ] &&
-  [ ! -s "$surface_log" ] || {
-  echo "rejected custom main gate mutated refs or entered the native route" >&2
+  [ "$(wc -l <"$surface_log" | tr -d ' ')" = 1 ] &&
+  grep -F "staging-to-main --repo $surface --sha $staging_before --gate true" "$surface_log" >/dev/null || {
+  echo "rejected custom main gate mutated refs or escaped the single native route" >&2
   exit 1
 }
 

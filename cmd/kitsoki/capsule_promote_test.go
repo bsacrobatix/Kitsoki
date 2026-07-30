@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +71,60 @@ func TestCapsulePromoteRepairRequiresIndependentReviewAndBoundedStages(t *testin
 	opts.RepairReviewCommand, opts.RepairerID, opts.ReviewerID, opts.ReviewPolicyDigest = "review", "repairer", "reviewer", "sha256:policy"
 	if _, err := runCapsulePromote(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "--wait") {
 		t.Fatalf("repair without wait err=%v", err)
+	}
+}
+
+func TestPromotionCapacitySerializesFreshCIAndReleases(t *testing.T) {
+	capacity := queue.FileGateCapacity{Root: t.TempDir(), Pool: "promotion-ci", Max: 1, PollInterval: time.Millisecond}
+	blocker, err := capacity.AcquireLease(context.Background(), queue.GateAdmissionRequest{WorkerID: "blocker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err = runWithPromotionCapacity(waitCtx, capacity, queue.GateAdmissionRequest{WorkerID: "fresh-ci"}, "test promotion", func(context.Context) (record.Stored, error) {
+		called = true
+		return record.Stored{}, nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || called {
+		t.Fatalf("contending CI was not serialized: err=%v called=%t", err, called)
+	}
+	blocker.Release()
+
+	called = false
+	if _, err := runWithPromotionCapacity(context.Background(), capacity, queue.GateAdmissionRequest{WorkerID: "fresh-ci"}, "test promotion", func(context.Context) (record.Stored, error) {
+		called = true
+		return record.Stored{}, nil
+	}); err != nil || !called {
+		t.Fatalf("released capacity did not admit fresh CI: err=%v called=%t", err, called)
+	}
+	reacquired, err := capacity.AcquireLease(context.Background(), queue.GateAdmissionRequest{WorkerID: "after-ci"})
+	if err != nil {
+		t.Fatalf("fresh CI did not release capacity: %v", err)
+	}
+	reacquired.Release()
+}
+
+func TestPromotionCICommandRunnerBorrowsCapacityWithoutNestedDeadlock(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "kitsoki")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/kitsoki")
+	build.Dir = filepath.Clean(filepath.Join("..", ".."))
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build nested CLI: %v\n%s", err, out)
+	}
+	project := t.TempDir()
+	capacity := queue.FileGateCapacity{Root: t.TempDir(), Pool: "promotion-nested", Max: 1}
+	_, err := runWithPromotionCapacity(context.Background(), capacity, queue.GateAdmissionRequest{WorkerID: "promotion-ci"}, "test promotion", func(ctx context.Context) (record.Stored, error) {
+		command := strconv.Quote(bin) + ` queue gate-run --project . --capacity-root "$KITSOKI_GATE_CAPACITY_ROOT" --capacity-pool "$KITSOKI_GATE_CAPACITY_POOL" --gate-tier change -- sh -c true`
+		output, code, err := (promotionCICommandRunner{}).Run(ctx, project, command)
+		if err != nil || code != 0 {
+			return record.Stored{}, fmt.Errorf("nested gate-run code=%d err=%v output=%s", code, err, output)
+		}
+		return record.Stored{}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

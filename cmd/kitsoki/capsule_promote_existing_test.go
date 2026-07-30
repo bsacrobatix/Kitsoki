@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/capsule/ci"
+	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/queue"
 )
 
@@ -22,10 +23,66 @@ func TestCapsulePromoteExistingExposesNoWaiverOrDirectFinalizationFlags(t *testi
 			t.Fatalf("promote-existing unexpectedly exposes --%s", forbidden)
 		}
 	}
-	for _, required := range []string{"project", "queue-root", "source-target", "sha", "target", "pipeline", "gate", "definition"} {
+	for _, required := range []string{"project", "queue-root", "source-target", "sha", "target", "pipeline", "gate", "definition", "capacity-root", "capacity-pool", "capacity"} {
 		if command.Flags().Lookup(required) == nil {
 			t.Fatalf("promote-existing is missing --%s", required)
 		}
+	}
+}
+
+func TestRunPromoteExistingCIReuseDoesNotAcquireCapacity(t *testing.T) {
+	project := t.TempDir()
+	sha := strings.Repeat("a", 40)
+	jobID := "promote-existing-reused"
+	instance := control.Instance{ID: "promote-existing-reused", Generation: 1, Head: sha}
+	stored := promoteReuseStoredWithEligibility(t, project, instance, "change", jobID, true)
+	in := queue.ExistingSHACertification{
+		Key:   "sha256:reused",
+		JobID: jobID,
+		Request: queue.PromoteExistingRequest{
+			SourceTarget: "staging/local", LandedSHA: sha, DestinationTarget: "main", Pipeline: "change", GateCommand: "make test",
+		},
+	}
+	got, err := runPromoteExistingCIWithCapacity(context.Background(), project, "development", in, queue.FileGateCapacity{
+		Root: "relative-root-that-must-fail-if-acquired", Pool: "reuse", Max: 1,
+	})
+	if err != nil {
+		t.Fatalf("exact receipt reuse attempted to acquire capacity: %v", err)
+	}
+	if got.Receipt.ReceiptID != stored.Receipt.ReceiptID {
+		t.Fatalf("reused receipt=%s, want %s", got.Receipt.ReceiptID, stored.Receipt.ReceiptID)
+	}
+}
+
+func TestRunPromoteExistingCIReconciliationAcquiresCapacity(t *testing.T) {
+	project := t.TempDir()
+	sha := strings.Repeat("b", 40)
+	jobID := "promote-existing-reconcile"
+	instance := control.Instance{ID: "promote-existing-reconcile", Generation: 1, Head: sha}
+	_ = promoteReuseStoredWithEligibility(t, project, instance, "change", jobID, true)
+	store := ci.FileRunStore{ProjectRoot: project}
+	run, err := store.Get(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Result.Terminal = false
+	run.Result.Execution.ExecutionID = "still-running"
+	run.Result.ExecutorControl = &ci.ExecutorControlAuthority{}
+	if err := store.Write(run); err != nil {
+		t.Fatal(err)
+	}
+	in := queue.ExistingSHACertification{
+		Key:   "sha256:reconcile",
+		JobID: jobID,
+		Request: queue.PromoteExistingRequest{
+			SourceTarget: "staging/local", LandedSHA: sha, DestinationTarget: "main", Pipeline: "change", GateCommand: "make test",
+		},
+	}
+	_, err = runPromoteExistingCIWithCapacity(context.Background(), project, "development", in, queue.FileGateCapacity{
+		Root: "relative-root-that-must-fail-before-refresh", Pool: "reconcile", Max: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "acquire CI capacity") {
+		t.Fatalf("nonterminal recovery reached refresh without capacity: %v", err)
 	}
 }
 

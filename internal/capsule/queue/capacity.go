@@ -99,6 +99,24 @@ type FileGateLease struct {
 	once        sync.Once
 }
 
+// Context propagates this lease to lease-aware in-process command runners.
+// Those runners supervise child process groups through RunCommand and export
+// only the authenticated borrow marker, never the capacity lock descriptor.
+func (l *FileGateLease) Context(ctx context.Context) context.Context {
+	return withGateCapacityLease(ctx, l)
+}
+
+// RunGateCapacityCommand runs cmd under the lease carried by ctx. The boolean
+// reports whether a lease was present; callers may use their ordinary command
+// path when it is false.
+func RunGateCapacityCommand(ctx context.Context, cmd *exec.Cmd) (bool, error) {
+	lease := gateCapacityLeaseFromContext(ctx)
+	if lease == nil {
+		return false, nil
+	}
+	return true, lease.RunCommand(ctx, cmd)
+}
+
 // Release relinquishes an owned slot. A borrowed lease never owns a kernel
 // capacity lock.
 func (l *FileGateLease) Release() {

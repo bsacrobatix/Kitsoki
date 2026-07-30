@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,6 +137,63 @@ func TestShellGateInheritsTierAndCapacityWithoutNestedDeadlock(t *testing.T) {
 	lease, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{ProjectID: "repo-b"})
 	if err != nil {
 		t.Fatalf("completed ShellGate stranded capacity: %v", err)
+	}
+	lease.Release()
+}
+
+func TestRepairAndReviewStagesBlockOnSharedCapacity(t *testing.T) {
+	for _, stage := range []string{"repair", "repair-review"} {
+		t.Run(stage, func(t *testing.T) {
+			capacity := FileGateCapacity{Root: t.TempDir(), Pool: "repair-block", Max: 1, PollInterval: time.Millisecond}
+			blocker, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{WorkerID: "blocker"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Release()
+			called := false
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+			defer cancel()
+			err = (Worker{Deps: ProcessDeps{GateAdmission: capacity}}).withGateCapacity(ctx, Candidate{ProjectID: "repo", TargetRef: "main"}, stage, func(context.Context) {
+				called = true
+			})
+			if !errors.Is(err, context.DeadlineExceeded) || called {
+				t.Fatalf("%s was not serialized: err=%v called=%t", stage, err, called)
+			}
+		})
+	}
+}
+
+func TestShellRepairAndReviewBorrowCapacityWithoutNestedDeadlock(t *testing.T) {
+	root := wipRepo(t)
+	capacity := FileGateCapacity{Root: t.TempDir(), Pool: "repair-nested", Max: 1}
+	bin := filepath.Join(t.TempDir(), "kitsoki")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/kitsoki")
+	build.Dir = filepath.Clean(filepath.Join("..", "..", ".."))
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build nested CLI: %v\n%s", err, out)
+	}
+	command := strconv.Quote(bin) + ` queue gate-run --project . --capacity-root "$KITSOKI_GATE_CAPACITY_ROOT" --capacity-pool "$KITSOKI_GATE_CAPACITY_POOL" --gate-tier "$KITSOKI_GATE_TIER" -- sh -c true`
+	worker := Worker{Deps: ProcessDeps{GateAdmission: capacity, GateTier: "full"}}
+	candidate := Candidate{ProjectID: "repo", TargetRef: "main"}
+	spec := Speculation{WorkspacePath: root}
+	if err := worker.withGateCapacity(context.Background(), candidate, "repair", func(ctx context.Context) {
+		if _, repairErr := (ShellRepairer{Command: command}).Repair(ctx, spec, errors.New("red")); repairErr != nil {
+			t.Errorf("nested repair: %v", repairErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.withGateCapacity(context.Background(), candidate, "repair-review", func(ctx context.Context) {
+		review, reviewErr := (ShellRepairReviewer{Command: command, ReviewerID: "reviewer"}).Review(ctx, RepairReview{Before: spec, After: spec})
+		if reviewErr != nil || !review.Passed {
+			t.Errorf("nested review=%#v err=%v", review, reviewErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := capacity.AcquireLease(context.Background(), GateAdmissionRequest{WorkerID: "after"})
+	if err != nil {
+		t.Fatalf("repair/review stranded capacity: %v", err)
 	}
 	lease.Release()
 }

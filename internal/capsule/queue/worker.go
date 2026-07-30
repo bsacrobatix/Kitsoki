@@ -157,7 +157,11 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			var repairEvidence []string
 			var repairErr error
 			w.heartbeat(ctx, c.ID, func() {
-				repairEvidence, repairErr = w.Deps.Repairer.Repair(repairCtx, spec, firstGateError(gateErr))
+				if admissionErr := w.withGateCapacity(repairCtx, c, "repair", func(runCtx context.Context) {
+					repairEvidence, repairErr = w.Deps.Repairer.Repair(runCtx, spec, firstGateError(gateErr))
+				}); admissionErr != nil {
+					repairErr = admissionErr
+				}
 			})
 			if repairCtx.Err() != nil {
 				repairErr = fmt.Errorf("queue: repair timed out after %s: %w", stageTimeout, repairCtx.Err())
@@ -196,7 +200,11 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 				stageTimeout := w.Deps.stageTimeout()
 				reviewCtx, cancelReview := context.WithTimeout(ctx, stageTimeout)
 				w.heartbeat(ctx, c.ID, func() {
-					review, reviewErr = w.Deps.RepairReviewer.Review(reviewCtx, RepairReview{Before: beforeRepair, After: spec, Gate: result})
+					if admissionErr := w.withGateCapacity(reviewCtx, c, "repair-review", func(runCtx context.Context) {
+						review, reviewErr = w.Deps.RepairReviewer.Review(runCtx, RepairReview{Before: beforeRepair, After: spec, Gate: result})
+					}); admissionErr != nil {
+						reviewErr = admissionErr
+					}
 				})
 				if reviewCtx.Err() != nil {
 					reviewErr = fmt.Errorf("queue: repair review timed out after %s: %w", stageTimeout, reviewCtx.Err())
@@ -280,6 +288,17 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 func (w Worker) runGate(ctx context.Context, c Candidate, spec Speculation) (GateResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, w.Deps.stageTimeout())
 	defer cancel()
+	var result GateResult
+	var runErr error
+	if err := w.withGateCapacity(ctx, c, "gate", func(runCtx context.Context) {
+		result, runErr = w.Deps.Gate.Run(runCtx, spec)
+	}); err != nil {
+		return GateResult{}, err
+	}
+	return result, runErr
+}
+
+func (w Worker) withGateCapacity(ctx context.Context, c Candidate, stage string, run func(context.Context)) error {
 	admission := w.Deps.GateAdmission
 	if admission == nil {
 		admission = DefaultFileGateCapacity()
@@ -288,7 +307,7 @@ func (w Worker) runGate(ctx context.Context, c Candidate, spec Speculation) (Gat
 		ProjectID: c.ProjectID,
 		TargetRef: c.TargetRef,
 		Tier:      w.gateTier(c.TargetRef),
-		WorkerID:  first(w.Deps.WorkerID, "queue-worker"),
+		WorkerID:  first(w.Deps.WorkerID, "queue-worker") + ":" + stage,
 	}
 	type leaseAdmission interface {
 		AcquireLease(context.Context, GateAdmissionRequest) (*FileGateLease, error)
@@ -296,19 +315,20 @@ func (w Worker) runGate(ctx context.Context, c Candidate, spec Speculation) (Gat
 	if capacity, ok := admission.(leaseAdmission); ok {
 		lease, err := capacity.AcquireLease(ctx, request)
 		if err != nil {
-			return GateResult{}, Environmental(fmt.Errorf("queue: acquire gate capacity: %w", err))
+			return Environmental(fmt.Errorf("queue: acquire %s capacity: %w", stage, err))
 		}
 		defer lease.Release()
-		ctx = withGateCapacityLease(ctx, lease)
+		ctx = lease.Context(ctx)
 	} else {
 		release, err := admission.Acquire(ctx, request)
 		if err != nil {
-			return GateResult{}, Environmental(fmt.Errorf("queue: acquire gate capacity: %w", err))
+			return Environmental(fmt.Errorf("queue: acquire %s capacity: %w", stage, err))
 		}
 		defer release()
 	}
 	ctx = context.WithValue(ctx, gateTierContextKey{}, request.Tier)
-	return w.Deps.Gate.Run(ctx, spec)
+	run(ctx)
+	return nil
 }
 
 // operatorIntervened reports whether the candidate was parked or rejected by an

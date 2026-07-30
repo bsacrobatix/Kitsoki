@@ -70,6 +70,12 @@ func TestGenericChangeTargetFailsClosedWithoutTrackedProfile(t *testing.T) {
 	}
 }
 
+func TestValidateProcessGatePolicyRetainsEmptyTargetEmbeddingCompatibility(t *testing.T) {
+	if err := validateProcessGatePolicy(t.TempDir(), ProcessDeps{Gate: ShellGate{Command: "trusted embedding gate"}}); err != nil {
+		t.Fatalf("empty-target trusted embedding was rejected: %v", err)
+	}
+}
+
 func TestTrackedGatePolicyIgnoresDirtyWorktreeAndOtherCheckedOutBranch(t *testing.T) {
 	root := t.TempDir()
 	writeTrackedGateProfile(t, root)

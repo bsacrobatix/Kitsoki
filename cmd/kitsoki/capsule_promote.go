@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -326,11 +327,19 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	if err != nil {
 		return capsulePromoteResult{}, err
 	}
+	gateCapacity := capsulePromoteGateCapacity(opts)
 	var stored record.Stored
 	candidateSHA := instance.Head
 	if !opts.SkipTests {
 		stored, _, err = promoteReceiptForAttempt(ctx, root, instance, branch, opts, func(ctx context.Context) (record.Stored, error) {
-			return runPromoteCI(ctx, root, instance, opts.Pipeline)
+			return runWithPromotionCapacity(ctx, gateCapacity, queue.GateAdmissionRequest{
+				ProjectID: root,
+				TargetRef: opts.TargetRef,
+				Tier:      opts.Pipeline,
+				WorkerID:  "capsule-promote-ci:" + instance.ID,
+			}, "capsule promote", func(runCtx context.Context) (record.Stored, error) {
+				return runPromoteCI(runCtx, root, instance, opts.Pipeline)
+			})
 		})
 		if err != nil {
 			return capsulePromoteResult{}, err
@@ -383,16 +392,6 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		repairer = queue.ShellRepairer{Command: opts.RepairCommand}
 		reviewer = queue.ShellRepairReviewer{Command: opts.RepairReviewCommand, ReviewerID: opts.ReviewerID}
 	}
-	gateCapacity := queue.DefaultFileGateCapacity()
-	if strings.TrimSpace(opts.CapacityRoot) != "" {
-		gateCapacity.Root = opts.CapacityRoot
-	}
-	if strings.TrimSpace(opts.CapacityPool) != "" {
-		gateCapacity.Pool = opts.CapacityPool
-	}
-	if opts.Capacity > 0 {
-		gateCapacity.Max = opts.Capacity
-	}
 	state, err := qstore.Process(ctx, queue.ProcessDeps{
 		Integration:        queue.ProtectedIntegration{ProjectRoot: root, QueueRoot: opts.QueueRoot, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
 		Gate:               queue.ShellGate{Command: opts.GateCommand},
@@ -427,6 +426,62 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	out.ProtectedMainSHA = queued.ResultMainSHA
 	out.Status = PromoteStatusPromoted
 	return out, nil
+}
+
+func capsulePromoteGateCapacity(opts capsulePromoteOptions) queue.FileGateCapacity {
+	capacity := queue.DefaultFileGateCapacity()
+	if strings.TrimSpace(opts.CapacityRoot) != "" {
+		capacity.Root = opts.CapacityRoot
+	}
+	if strings.TrimSpace(opts.CapacityPool) != "" {
+		capacity.Pool = opts.CapacityPool
+	}
+	if opts.Capacity > 0 {
+		capacity.Max = opts.Capacity
+	}
+	return capacity
+}
+
+func runWithPromotionCapacity(ctx context.Context, capacity queue.FileGateCapacity, request queue.GateAdmissionRequest, operation string, run func(context.Context) (record.Stored, error)) (record.Stored, error) {
+	var stored record.Stored
+	err := withPromotionCapacity(ctx, capacity, request, operation, func(runCtx context.Context) error {
+		var err error
+		stored, err = run(runCtx)
+		return err
+	})
+	return stored, err
+}
+
+func withPromotionCapacity(ctx context.Context, capacity queue.FileGateCapacity, request queue.GateAdmissionRequest, operation string, run func(context.Context) error) error {
+	lease, err := capacity.AcquireLease(ctx, request)
+	if err != nil {
+		return fmt.Errorf("%s: acquire CI capacity: %w", operation, err)
+	}
+	defer lease.Release()
+	return run(lease.Context(ctx))
+}
+
+type promotionCICommandRunner struct{}
+
+func (promotionCICommandRunner) Run(ctx context.Context, workdir, command string) (string, int, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = workdir
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	leased, err := queue.RunGateCapacityCommand(ctx, cmd)
+	if !leased {
+		err = cmd.Run()
+	}
+	if err == nil {
+		return output.String(), 0, nil
+	}
+	if ctx.Err() != nil {
+		return output.String(), -1, ctx.Err()
+	}
+	if exit, ok := err.(*exec.ExitError); ok {
+		return output.String(), exit.ExitCode(), nil
+	}
+	return output.String(), -1, err
 }
 
 // capsulePromoteReconcileHead adopts a workspace head that advanced through
@@ -500,7 +555,7 @@ func runPromoteCI(ctx context.Context, project string, instance control.Instance
 		StoryPath: filepath.Join(instance.Path, p.Story), ProjectRoot: instance.Path,
 		AgentLaunchPolicy: host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{instance.Path}},
 		ConfigureHosts: func(reg *host.Registry) error {
-			if ok := reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(nil, host.CapsuleCIEvidenceDestination{
+			if ok := reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(promotionCICommandRunner{}, host.CapsuleCIEvidenceDestination{
 				Root: filepath.Join(project, ".capsules", "ci", "evidence"), ReferencePrefix: "file:.capsules/ci/evidence",
 			})); !ok {
 				return fmt.Errorf("capsule promote: project check host is not registered")

@@ -32,6 +32,22 @@ case "$capacity" in
 esac
 process_capacity_args=(--capacity-pool "$capacity_pool" --capacity "$capacity")
 [ -z "$capacity_root" ] || process_capacity_args+=(--capacity-root "$capacity_root")
+repair="${KITSOKI_QUEUE_REPAIR:-}"
+repair_review="${KITSOKI_QUEUE_REPAIR_REVIEW:-}"
+repairer_id="${KITSOKI_QUEUE_REPAIRER_ID:-}"
+reviewer_id="${KITSOKI_QUEUE_REVIEWER_ID:-}"
+review_policy_digest="${KITSOKI_QUEUE_REVIEW_POLICY_DIGEST:-}"
+repair_args=()
+if [ -n "$repair$repair_review$repairer_id$reviewer_id$review_policy_digest" ]; then
+  [ -n "$repair" ] && [ -n "$repair_review" ] && [ -n "$repairer_id" ] &&
+    [ -n "$reviewer_id" ] && [ -n "$review_policy_digest" ] || {
+      echo "error: queue repair configuration requires KITSOKI_QUEUE_REPAIR, KITSOKI_QUEUE_REPAIR_REVIEW, KITSOKI_QUEUE_REPAIRER_ID, KITSOKI_QUEUE_REVIEWER_ID, and KITSOKI_QUEUE_REVIEW_POLICY_DIGEST together" >&2
+      exit 2
+    }
+  repair_args=(--repair "$repair" --repair-review "$repair_review" \
+    --repairer-id "$repairer_id" --reviewer-id "$reviewer_id" \
+    --review-policy-digest "$review_policy_digest")
+fi
 
 run_kitsoki() {
   if [ -n "${KITSOKI_PROMOTION_KITSOKI:-}" ]; then
@@ -63,7 +79,7 @@ case "$action" in
     result="$(run_kitsoki capsule promote \
       --project "$repo" --queue-root "$queue_root" --workspace "$workspace" \
       --target staging/local --pipeline change --gate "$gate" \
-      --wait --json "${process_capacity_args[@]}")"
+      --wait --json "${process_capacity_args[@]}" "${repair_args[@]}")"
     status="$(printf '%s' "$result" | json_field status)"
     [ "$status" = promoted ] || {
       printf '%s\n' "$result"
@@ -84,7 +100,7 @@ case "$action" in
     admission="$(run_kitsoki capsule promote-existing \
       --project "$repo" --queue-root "$queue_root" \
       --source-target staging/local --sha "$sha" --target main \
-      --pipeline change --gate "$gate" --json)"
+      --pipeline change --gate "$gate" --json "${process_capacity_args[@]}")"
     candidate_id="$(printf '%s' "$admission" |
       python3 -c 'import json,sys; print(json.load(sys.stdin).get("candidate", {}).get("id", ""))')"
     [ -n "$candidate_id" ] || {
@@ -93,7 +109,7 @@ case "$action" in
       exit 1
     }
     state="$(run_kitsoki queue process --project "$repo" --queue-root "$queue_root" \
-      --candidate "$candidate_id" --target main --gate "$gate" "${process_capacity_args[@]}")"
+      --candidate "$candidate_id" --target main --gate "$gate" "${process_capacity_args[@]}" "${repair_args[@]}")"
     printf '%s' "$state" | python3 -c '
 import json,sys
 candidate_id=sys.argv[1]
@@ -116,7 +132,7 @@ if len(matches)!=1 or (matches[0].get("phase") or matches[0].get("status"))!="la
     admission="$(run_kitsoki capsule promote-existing \
       --project "$repo" --queue-root "$queue_root" \
       --source-target main --sha "$sha" --target staging/local \
-      --pipeline change --gate "$gate" --json)"
+      --pipeline change --gate "$gate" --json "${process_capacity_args[@]}")"
     candidate_id="$(printf '%s' "$admission" |
       python3 -c 'import json,sys; print(json.load(sys.stdin).get("candidate", {}).get("id", ""))')"
     [ -n "$candidate_id" ] || {
@@ -125,7 +141,7 @@ if len(matches)!=1 or (matches[0].get("phase") or matches[0].get("status"))!="la
       exit 1
     }
     state="$(run_kitsoki queue process --project "$repo" --queue-root "$queue_root" \
-      --candidate "$candidate_id" --target staging/local --gate "$gate" "${process_capacity_args[@]}")"
+      --candidate "$candidate_id" --target staging/local --gate "$gate" "${process_capacity_args[@]}" "${repair_args[@]}")"
     printf '%s' "$state" | python3 -c '
 import json,sys
 candidate_id=sys.argv[1]

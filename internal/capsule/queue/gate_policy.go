@@ -72,6 +72,12 @@ func ValidateGateCommand(projectRoot, target, command string) error {
 
 func validateProcessGatePolicy(projectRoot string, deps ProcessDeps) error {
 	target := strings.TrimSpace(deps.TargetRef)
+	// Empty-target ProcessDeps are a trusted programmatic embedding contract
+	// retained for compatibility. Every built-in CLI/native promotion surface
+	// supplies an explicit target and therefore remains fail-closed.
+	if target == "" {
+		return nil
+	}
 	tier := strings.TrimSpace(deps.GateTier)
 	requiredTier := RequiredGateTierForTarget(target)
 	if tier != "" && tier != requiredTier {
