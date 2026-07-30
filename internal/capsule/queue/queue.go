@@ -956,10 +956,11 @@ func mustAbs(path string) string {
 func write(path string, state State) error {
 	state = normalize(state)
 	// Every durable persist compacts terminal (landed/rejected) history down
-	// to DefaultTerminalHistoryLimit per status first — bounded retention
-	// runs on every save automatically, never as an operator command. Parked
-	// and actively-worked candidates are untouched: compactTerminalHistory
-	// only ever removes Landed or Rejected records.
+	// to DefaultTerminalHistoryLimit per terminal status per target ref first
+	// — bounded retention runs on every save automatically, never as an
+	// operator command. Parked and actively-worked candidates are untouched
+	// (compactTerminalHistory only ever removes Landed or Rejected records),
+	// as are Landed records a live candidate still depends on.
 	state = compactTerminalHistory(state, DefaultTerminalHistoryLimit)
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {

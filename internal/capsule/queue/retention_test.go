@@ -322,3 +322,229 @@ func TestStoreSubmitCompactsOnSave(t *testing.T) {
 		t.Fatalf("rejected count after Submit=%d, want cap %d", rejectedCount, limit)
 	}
 }
+
+// retentionLanding builds a Landed candidate on an explicit target ref with
+// the receipt-bearing landed tuple the durable consumers of Landed records
+// require: PromoteExistingAuthority.sourceLanding matches on
+// TargetRef + phase + ResultMainSHA + a non-empty ReceiptID, and
+// Store.ReconcileLanding refuses a candidate missing any of them.
+func retentionLanding(id, targetRef string, seq uint64, completed time.Time) Candidate {
+	c := retentionCandidate(id, seq, Landed, completed)
+	c.TargetRef = targetRef
+	c.ReceiptID = "sha256:receipt-" + id
+	c.BaseSHA = fmt.Sprintf("%040d", seq+900000)
+	c.TreeSHA = fmt.Sprintf("%040d", seq+800000)
+	c.ValidatedSHA = c.TreeSHA
+	c.ResultMainSHA = fmt.Sprintf("%040d", seq+700000)
+	return c
+}
+
+// sourceLandingResolves replays the exact predicate
+// PromoteExistingAuthority.sourceLanding scans state.json with
+// (internal/capsule/queue/promote_existing.go) so these tests fail if
+// retention ever prunes a record that promotion still needs.
+func sourceLandingResolves(state State, sourceTarget, landedSHA string) bool {
+	for _, c := range state.Candidates {
+		if c.TargetRef == sourceTarget && c.phase() == Landed && c.ResultMainSHA == landedSHA && c.ReceiptID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCompactTerminalHistoryBudgetsPerTargetRef proves the terminal-history
+// cap is per target ref, not one shared budget across every target: a flood
+// of landings on the busy target must never evict the quiet target's
+// landings. That is the promotion path of the integration train — the
+// staging landing is the source record `capsule promote-existing` proves the
+// staging->main promotion against, and staging landings are vastly
+// outnumbered by main landings in a real queue (a 2026-07 production
+// state.json held 201 landed candidates, every one of them on main).
+func TestCompactTerminalHistoryBudgetsPerTargetRef(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const limit = 5
+	var candidates []Candidate
+	// Three staging landings first, so they are the *oldest* terminal
+	// records in the state and would be the first evicted under a single
+	// shared per-status budget.
+	for i := 0; i < 3; i++ {
+		candidates = append(candidates, retentionLanding(fmt.Sprintf("staging-%d", i), "staging/local", uint64(i+1), base.Add(time.Duration(i)*time.Minute)))
+	}
+	for i := 0; i < 4*limit; i++ {
+		candidates = append(candidates, retentionLanding(fmt.Sprintf("main-%d", i), "main", uint64(i+100), base.Add(time.Duration(i+10)*time.Minute)))
+	}
+	state := State{Schema: Schema, Candidates: candidates}
+
+	out := compactTerminalHistory(state, limit)
+
+	byTarget := map[string]int{}
+	kept := map[string]bool{}
+	for _, c := range out.Candidates {
+		byTarget[c.TargetRef]++
+		kept[c.ID] = true
+	}
+	if byTarget["main"] != limit {
+		t.Fatalf("main landings kept=%d, want the cap %d", byTarget["main"], limit)
+	}
+	if byTarget["staging/local"] != 3 {
+		t.Fatalf("staging/local landings kept=%d, want all 3 (a busy target must not consume the quiet target's budget)", byTarget["staging/local"])
+	}
+	for i := 0; i < 3; i++ {
+		id := fmt.Sprintf("staging-%d", i)
+		if !kept[id] {
+			t.Fatalf("staging landing %s was evicted by a flood of main landings", id)
+		}
+	}
+	// And the record is not merely present but still *resolvable* by the
+	// promotion authority's own lookup.
+	for i := 0; i < 3; i++ {
+		landedSHA := fmt.Sprintf("%040d", uint64(i+1)+700000)
+		if !sourceLandingResolves(out, "staging/local", landedSHA) {
+			t.Fatalf("promote-existing source landing for staging/local@%s no longer resolves after compaction", landedSHA)
+		}
+	}
+}
+
+// TestCompactTerminalHistoryKeepsReconcileLandingCandidate covers
+// Store.ReconcileLanding, which repairs a *historical* managed staging
+// finalization and requires its candidate to still be present and Landed with
+// a complete receipt-bearing tuple. It only ever addresses "staging/local",
+// so a main-target flood must not make the repair unreachable.
+func TestCompactTerminalHistoryKeepsReconcileLandingCandidate(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const limit = 4
+	target := retentionLanding("reconcile-target", "staging/local", 1, base)
+	candidates := []Candidate{target}
+	for i := 0; i < 10*limit; i++ {
+		candidates = append(candidates, retentionLanding(fmt.Sprintf("main-%d", i), "main", uint64(i+100), base.Add(time.Duration(i+1)*time.Minute)))
+	}
+
+	out := compactTerminalHistory(State{Schema: Schema, Candidates: candidates}, limit)
+
+	var got *Candidate
+	for i := range out.Candidates {
+		if out.Candidates[i].ID == target.ID {
+			got = &out.Candidates[i]
+		}
+	}
+	if got == nil {
+		t.Fatal("reconcile-landing target was pruned; `queue reconcile-landing` would become unresolvable")
+	}
+	// Replay ReconcileLanding's own completeness precondition (ops.go).
+	if got.phase() != Landed || got.ReceiptID == "" || got.BaseSHA == "" || got.TreeSHA == "" || got.ValidatedSHA != got.TreeSHA || got.ResultMainSHA == "" {
+		t.Fatalf("surviving reconcile-landing target lost its receipt-bearing landed tuple: %#v", *got)
+	}
+}
+
+// TestCompactTerminalHistoryPinsLandedTwinOfParkedCandidate proves the parked
+// pin end to end through the real Store: Sweep classifies a parked candidate
+// as SweepSuperseded — the only classification ApplySweep acts on — solely
+// because another candidate for the identical SHA is still present as Landed.
+// Parked candidates are never pruned and can sit for months, so pruning their
+// landed twin would silently downgrade them to "unclassified" and stop them
+// being auto-rejected.
+func TestCompactTerminalHistoryPinsLandedTwinOfParkedCandidate(t *testing.T) {
+	root := t.TempDir()
+	store := Store{ProjectRoot: root}
+	_, path, err := store.paths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const limit = DefaultTerminalHistoryLimit
+	duplicateSHA := fmt.Sprintf("%040d", 424242)
+
+	twin := retentionLanding("landed-twin", "main", 1, base)
+	twin.SHA = duplicateSHA
+	parked := retentionCandidate("parked-duplicate", 2, NeedsInput, time.Time{})
+	parked.SHA = duplicateSHA
+	parked.ParkedAt = base.Add(time.Hour)
+
+	candidates := []Candidate{twin, parked}
+	// Far more than the cap of newer landings on the same target, so the
+	// twin is well past the count budget and survives only because it is
+	// pinned.
+	for i := 0; i < limit+25; i++ {
+		candidates = append(candidates, retentionLanding(fmt.Sprintf("main-%d", i), "main", uint64(i+100), base.Add(time.Duration(i+2)*time.Hour)))
+	}
+	if err := write(path, State{Schema: Schema, Candidates: candidates}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawTwin bool
+	for _, c := range state.Candidates {
+		if c.ID == twin.ID {
+			sawTwin = true
+		}
+	}
+	if !sawTwin {
+		t.Fatal("landed twin of a parked candidate was pruned; Sweep's superseded classification depends on it")
+	}
+
+	plan, err := store.Sweep(base.Add(48*time.Hour), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry *SweepEntry
+	for i := range plan.Entries {
+		if plan.Entries[i].Candidate.ID == parked.ID {
+			entry = &plan.Entries[i]
+		}
+	}
+	if entry == nil {
+		t.Fatalf("parked candidate missing from sweep plan: %#v", plan.Entries)
+	}
+	if entry.Classification != SweepSuperseded {
+		t.Fatalf("classification=%q, want %q (the landed twin must survive retention)", entry.Classification, SweepSuperseded)
+	}
+	if entry.ProposedAction != "reject" {
+		t.Fatalf("proposed action=%q, want reject", entry.ProposedAction)
+	}
+}
+
+// TestCompactTerminalHistoryPinsPromotionSourceLanding proves the in-flight
+// promotion pin: once `capsule promote-existing` has admitted the destination
+// candidate, that candidate's SHA *is* the source target's landed result, and
+// a restart re-verifies the source landing. Retention must therefore keep the
+// source landing for as long as the destination candidate is live, even when
+// the source target itself has since landed far more than the cap.
+func TestCompactTerminalHistoryPinsPromotionSourceLanding(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const limit = 3
+	source := retentionLanding("promotion-source", "staging/local", 1, base)
+	destination := retentionCandidate("promotion-destination", 2, Queued, time.Time{})
+	destination.TargetRef = "main"
+	destination.SHA = source.ResultMainSHA
+
+	candidates := []Candidate{source, destination}
+	for i := 0; i < 10*limit; i++ {
+		candidates = append(candidates, retentionLanding(fmt.Sprintf("staging-%d", i), "staging/local", uint64(i+100), base.Add(time.Duration(i+1)*time.Minute)))
+	}
+
+	out := compactTerminalHistory(State{Schema: Schema, Candidates: candidates}, limit)
+
+	if !sourceLandingResolves(out, "staging/local", source.ResultMainSHA) {
+		t.Fatal("source landing of an in-flight promotion was pruned; a resumed promote-existing would fail source_landing_unproven")
+	}
+	// The pin is scoped: it survives because the destination candidate is
+	// live, not because retention stopped pruning. Once that candidate is
+	// terminal, the ordinary cap applies again.
+	for i := range candidates {
+		if candidates[i].ID == destination.ID {
+			candidates[i].Status, candidates[i].Phase = Landed, Landed
+			candidates[i].Completed = base.Add(24 * time.Hour)
+		}
+	}
+	after := compactTerminalHistory(State{Schema: Schema, Candidates: candidates}, limit)
+	if sourceLandingResolves(after, "staging/local", source.ResultMainSHA) {
+		t.Fatal("source landing survived past the cap with no live candidate depending on it; the pin must be scoped to in-flight promotions")
+	}
+}
