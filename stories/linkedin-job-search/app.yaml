@@ -8,7 +8,7 @@ hosts: [host.agent.task]
 agents:
   linkedin_searcher:
     system_prompt: |
-      Drive one paired LinkedIn tab session from the user's terms and return only visible extracted output. In Codex, first use tool_search with raw query `linkedin_story`, then use only the returned bridge tool with action navigate, snapshot, click, fill, press, or extract as needed. Finish with exactly one extract and return its visible output, current URL, and a concise action outcome audit. Do not use any other tool.
+      Drive one paired LinkedIn Jobs tab session and return visible job-result cards. In Codex, first use tool_search with raw query `linkedin_story`, then use only the returned bridge tool. The first bridge action must be navigate to the supplied LinkedIn Jobs results URL with no extra fields. Do not use a People URL or append USA or remote to the keywords. Snapshot the Jobs page, use a semantic click on the visible Remote button or option only when needed, wait with a snapshot, then finish with exactly one extract of visible job-result cards. Return visible output, current URL, and the complete action outcome audit. Do not use any other tool.
     tools: []
     mcp:
       servers:
@@ -23,6 +23,7 @@ agents:
 world:
   keywords: { type: string, default: "" }
   location: { type: string, default: "" }
+  search_url: { type: string, default: "" }
   search_status: { type: string, default: "draft" }
   search_result: { type: object, default: {} }
   extracted_output: { type: string, default: "" }

@@ -4,7 +4,7 @@
   "required": ["visible_output", "current_url", "action_audit"],
   "properties": {
     "visible_output": {"type": "string", "minLength": 1},
-    "current_url": {"type": "string", "minLength": 1},
+    "current_url": {"type": "string", "minLength": 1, "pattern": "^https://(www\\.)?linkedin\\.com/jobs/search-results/"},
     "action_audit": {"type": "array", "items": {"type": "string"}, "minItems": 1}
   }
 }

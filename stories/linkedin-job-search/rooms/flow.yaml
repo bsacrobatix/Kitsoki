@@ -1,13 +1,13 @@
 states:
   parameters:
     description: "Collect paired-tab search terms."
-    relevant_world: [keywords, search_status]
+    relevant_world: [keywords, search_url, search_status]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "Give me LinkedIn search terms. The paired-tab agent will return visible extracted output."
-          - kv: { pairs: { Terms: "{{ world.keywords|default:'(not yet chosen)' }}", Status: "{{ world.search_status }}" } }
+          - prose: "Give me LinkedIn Jobs search terms. The paired-tab agent will start from the exact US Jobs URL and return visible job-result cards."
+          - kv: { pairs: { Terms: "{{ world.keywords|default:'(not yet chosen)' }}", Jobs_URL: "{{ world.search_url|default:'(created after prepare)' }}", Status: "{{ world.search_status }}" } }
         choices:
           - heading: "Actions"
           - list: { items: [{ label: "prepare keywords=…", hint: "run the paired-tab search" }, { label: "cancel" }, { label: "look" }] }
@@ -18,6 +18,7 @@ states:
             - set:
                 keywords: "{{ slots.keywords }}"
                 location: "{{ slots.location }}"
+                search_url: "https://www.linkedin.com/jobs/search-results/?keywords={{ urlqueryescape(slots.keywords) }}&geoId=103644278"
                 search_status: "running"
                 search_result: {}
                 extracted_output: ""
@@ -27,14 +28,14 @@ states:
       cancel: [{ target: cancelled }]
       look: [{ target: . }]
   searching:
-    description: "Drive the paired tab and capture visible output."
-    relevant_world: [keywords, search_status, extracted_output, current_url]
+    description: "Drive the paired Jobs tab and capture visible job-result cards."
+    relevant_world: [keywords, search_url, search_status, extracted_output, current_url]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The paired-tab agent is running the requested search and will capture visible output."
-          - kv: { pairs: { Terms: "{{ world.keywords }}", Status: "{{ world.search_status }}", Current_URL: "{{ world.current_url|default:'(pending)' }}" } }
+          - prose: "The paired-tab agent is running the requested Jobs search and will capture visible job-result cards."
+          - kv: { pairs: { Terms: "{{ world.keywords }}", Jobs_URL: "{{ world.search_url }}", Status: "{{ world.search_status }}", Current_URL: "{{ world.current_url|default:'(pending)' }}" } }
         choices:
           - heading: "Actions"
           - list: { items: [{ label: "look" }] }
@@ -47,7 +48,7 @@ states:
           acceptance: { schema: schemas/search-result.json }
           context:
             prompt: prompts/submit-search.md
-            args: { keywords: "{{ world.keywords }}", location: "{{ world.location }}" }
+            args: { keywords: "{{ world.keywords }}", location: "{{ world.location }}", search_url: "{{ world.search_url }}" }
         bind:
           search_result: submitted
           extracted_output: submitted.visible_output

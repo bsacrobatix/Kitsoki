@@ -9,7 +9,7 @@ host_handlers:
           submitted:
             visible_output: "Principal Engineer, Go — visible LinkedIn Jobs output"
             current_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang"
-            action_audit: ["navigate", "fill", "press", "extract"]
+            action_audit: ["navigate jobs URL", "snapshot", "click Remote", "snapshot", "extract"]
 turns:
   - intent:
       name: prepare
@@ -17,6 +17,7 @@ turns:
     expect_state: complete
     expect_world:
       search_status: "complete"
+      search_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang&geoId=103644278"
       extracted_output: "Principal Engineer, Go — visible LinkedIn Jobs output"
       current_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang"
     expect_host_calls:
