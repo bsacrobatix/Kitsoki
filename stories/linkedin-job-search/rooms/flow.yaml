@@ -1,204 +1,88 @@
 states:
   parameters:
-    description: "Collect LinkedIn Jobs keywords without browser activity."
-    relevant_world: [keywords, location, search_status]
+    description: "Collect paired-tab search terms."
+    relevant_world: [keywords, search_status]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "I will prepare one US Remote LinkedIn Jobs search. No browser action happens until you review it and explicitly confirm."
-          - kv:
-              pairs:
-                Keywords: "{{ world.keywords|default:'(not yet chosen)' }}"
-                Location: "United States; Remote"
-                Status: "{{ world.search_status }}"
+          - prose: "Give me LinkedIn search terms. The paired-tab agent will return visible extracted output."
+          - kv: { pairs: { Terms: "{{ world.keywords|default:'(not yet chosen)' }}", Status: "{{ world.search_status }}" } }
         choices:
           - heading: "Actions"
-          - list:
-              items:
-                - label: "prepare keywords=…"
-                  hint: "review the one confirmed US Remote search"
-                - label: "cancel"
-                  hint: "end without opening or searching LinkedIn"
-                - label: "look"
+          - list: { items: [{ label: "prepare keywords=…", hint: "run the paired-tab search" }, { label: "cancel" }, { label: "look" }] }
     on:
       prepare:
-        - target: review
-          effects:
-            - set:
-                keywords: "{{ slots.keywords }}"
-                location: "United States; Remote"
-                search_status: "awaiting_confirmation"
-                confirmed: false
-                results_url: ""
-                used_parameters: {}
-                prepared_parameters: { keywords: "{{ slots.keywords }}", location: "United States; Remote" }
-                search_result: {}
-                remote_selected: false
-                remote_already_selected: false
-                error_detail: ""
-      cancel:
-        - target: cancelled
-      look:
-        - target: .
-
-  review:
-    description: "Require explicit confirmation immediately before the bounded LinkedIn Jobs search."
-    relevant_world: [keywords, location, search_status, confirmed]
-    view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "Confirm one bounded US Remote LinkedIn Jobs search. Chrome will show one Allow confirmation for the bridge's navigation, Remote selection, and readiness wait."
-          - kv:
-              pairs:
-                Keywords: "{{ world.keywords }}"
-                Location: "{{ world.location|default:'(any location)' }}"
-                Status: "{{ world.search_status }}"
-        choices:
-          - heading: "Required decision"
-          - list:
-              items:
-                - label: "confirm_search"
-                  hint: "run the one confirmed US Remote search"
-                - label: "revise"
-                  hint: "return without submitting"
-                - label: "cancel"
-                  hint: "end without submitting"
-                - label: "look"
-    on:
-      confirm_search:
         - target: searching
           effects:
             - set:
-                confirmed: true
-                search_status: "submitting_confirmed_search"
-      revise:
-        - target: parameters
-          effects:
-            - set: { search_status: "draft", confirmed: false }
-      cancel:
-        - target: cancelled
-      look:
-        - target: .
-
+                keywords: "{{ slots.keywords }}"
+                location: "{{ slots.location }}"
+                search_status: "running"
+                search_result: {}
+                extracted_output: ""
+                current_url: ""
+                action_audit: []
+                error_detail: ""
+      cancel: [{ target: cancelled }]
+      look: [{ target: . }]
   searching:
-    description: "Run the one confirmed atomic US Remote search and capture its ready URL."
-    relevant_world: [keywords, location, search_status, results_url, used_parameters, remote_selected, remote_already_selected, error_detail]
+    description: "Drive the paired tab and capture visible output."
+    relevant_world: [keywords, search_status, extracted_output, current_url]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The confirmed browser action is running through the configured local Sassfully bridge. It is limited to one atomic Jobs search with Remote selected and a ready results URL."
-          - kv:
-              pairs:
-                Status: "{{ world.search_status }}"
-                Keywords: "{{ world.keywords }}"
-                Location: "{{ world.location|default:'(any location)' }}"
-                Results URL: "{{ world.results_url|default:'(pending)' }}"
-                Remote selected: "{{ world.remote_selected }}"
-                Remote was already selected: "{{ world.remote_already_selected }}"
-                Error: "{{ world.error_detail|default:'(none)' }}"
+          - prose: "The paired-tab agent is running the requested search and will capture visible output."
+          - kv: { pairs: { Terms: "{{ world.keywords }}", Status: "{{ world.search_status }}", Current_URL: "{{ world.current_url|default:'(pending)' }}" } }
         choices:
           - heading: "Actions"
-          - list:
-              items:
-                - label: "look"
+          - list: { items: [{ label: "look" }] }
     on_enter:
       - invoke: host.agent.task
-        id: search_confirmed_linkedin_jobs
+        id: drive_paired_linkedin_session
         once: true
         with:
           agent: linkedin_searcher
-          acceptance:
-            schema: schemas/search-result.json
+          acceptance: { schema: schemas/search-result.json }
           context:
             prompt: prompts/submit-search.md
-            args:
-              keywords: "{{ world.keywords }}"
-              location: "{{ world.location }}"
-              confirmation: "{{ world.confirmed }}"
+            args: { keywords: "{{ world.keywords }}", location: "{{ world.location }}" }
         bind:
           search_result: submitted
-          results_url: submitted.finalUrl
-          used_parameters: submitted.parameters
-          remote_selected: submitted.remoteSelected
-          remote_already_selected: submitted.alreadySelected
+          extracted_output: submitted.visible_output
+          current_url: submitted.current_url
+          action_audit: submitted.action_audit
         on_error: failed
-      - when: "world.results_url != '' && world.remote_selected == true"
+      - when: "world.extracted_output != ''"
         emit_intent: finish
-      - when: "world.results_url != '' && world.remote_selected == false"
-        emit_intent: verification_failed
     on:
-      finish:
-        - target: complete
-          effects:
-            - set: { search_status: "complete" }
-      verification_failed:
-        - target: failed
-          effects:
-            - set:
-                search_status: "failed"
-                error_detail: "The atomic bridge result did not prove Remote was selected."
-                results_url: ""
-                used_parameters: {}
-      look:
-        - target: .
-
+      finish: [{ target: complete, effects: [{ set: { search_status: "complete" } }] }]
+      look: [{ target: . }]
   complete:
-    description: "Confirmed atomic LinkedIn Jobs search completed with its ready URL captured."
+    description: "Paired-tab search completed with visible output captured."
     terminal: true
-    relevant_world: [keywords, location, search_status, results_url, used_parameters, remote_selected, remote_already_selected]
+    relevant_world: [keywords, search_status, current_url, extracted_output]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "The attended LinkedIn Jobs search completed. The story captured the requested parameters and ready URL; it did not inspect job details or collect result rows."
-          - kv:
-              pairs:
-                Status: "{{ world.search_status }}"
-                Keywords: "{{ world.used_parameters.keywords|default:world.keywords }}"
-                Location: "{{ world.used_parameters.location|default:world.location }}"
-                Results URL: "{{ world.results_url }}"
-                Remote selected: "{{ world.remote_selected }}"
-                Remote was already selected: "{{ world.remote_already_selected }}"
-
+          - prose: "The paired-tab search completed and captured visible output."
+          - kv: { pairs: { Status: "{{ world.search_status }}", Terms: "{{ world.keywords }}", Current_URL: "{{ world.current_url }}" } }
+          - code: "{{ world.extracted_output }}"
   failed:
-    description: "Configured bridge or search operation failed without a retrying side effect."
-    relevant_world: [keywords, location, error_detail, last_error, host_error]
+    description: "Paired-tab session failed."
+    relevant_world: [error_detail, last_error, host_error]
     view:
       extends: "base"
       blocks:
         body:
-          - prose: "No additional browser action will be attempted automatically. Check the local Sassfully bridge configuration, then prepare the search again if you still want to submit it."
-          - kv:
-              pairs:
-                Error: "{{ world.error_detail|default:world.host_error.message|default:world.last_error|default:'(bridge did not return a result)' }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "revise"
-                  hint: "return without retrying"
-                - label: "cancel"
-                  hint: "end"
-                - label: "look"
-    on:
-      revise:
-        - target: parameters
-          effects:
-            - set: { search_status: "draft", confirmed: false }
-      cancel:
-        - target: cancelled
-      look:
-        - target: .
-
+          - prose: "The paired-tab session failed."
+          - kv: { pairs: { Error: "{{ world.error_detail|default:world.host_error.message|default:world.last_error|default:'(no result)' }}" } }
+    on: { look: [{ target: . }], cancel: [{ target: cancelled }] }
   cancelled:
-    description: "Search cancelled before submission."
+    description: "Search cancelled."
     terminal: true
-    relevant_world: [keywords, location]
     view:
       extends: "base"
-      blocks:
-        body:
-          - prose: "Cancelled. No LinkedIn Jobs search was submitted by this story."
+      blocks: { body: [{ prose: "Cancelled." }] }

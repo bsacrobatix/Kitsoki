@@ -1,95 +1,44 @@
 app:
   id: linkedin-job-search
   version: 0.1.0
-  title: "Attended LinkedIn job search"
+  title: "LinkedIn paired-tab search"
   author: "Kitsoki"
   license: "CC0"
-
-hosts:
-  - host.agent.task
-
-# This agent intentionally has no native tools. The only browser surface is the
-# local Sassfully bridge declared below. The pairing code is an environment
-# interpolation token, never a checked-in credential.
+hosts: [host.agent.task]
 agents:
   linkedin_searcher:
     system_prompt: |
-      You perform one attended LinkedIn Jobs readiness search and nothing else.
-      Use only the Sassfully browser bridge's LinkedIn tool. In Codex, MCP tools
-      are deferred: first use tool_search with the raw query `linkedin_story`,
-      then invoke the returned tool. Do not search for or assume the Claude-only
-      qualified alias `mcp__sassfully_browser__linkedin_story`; it is the
-      allowlist identifier, not Codex's discovery name. Call the discovered tool
-      only with action `search_jobs`. After the story's explicit confirmation,
-      call it exactly once with the supplied keywords, `geoId: "103644278"`,
-      and `remote: true`; await its one Chrome Allow confirmation. Report
-      success only when its returned `remoteSelected` is true. Never call
-      fill, press, click, submit, search, open a job detail, apply, message,
-      save a job, follow anyone, alter account settings, paginate, bulk-scrape,
-      export, or collect result rows.
+      Drive one paired LinkedIn tab session from the user's terms and return only visible extracted output. In Codex, first use tool_search with raw query `linkedin_story`, then use only the returned bridge tool with action navigate, snapshot, click, fill, press, or extract as needed. Finish with exactly one extract and return its visible output, current URL, and a concise action outcome audit. Do not use any other tool.
     tools: []
     mcp:
       servers:
         sassfully_browser:
           command: "node"
-          args:
-            - "/Users/brad/code/studio-sassfully/.capsules/workspaces/extension-local-test-20260730/packages/feedback-extension/story-bridge/stdio-server.mjs"
-            - "--pairing-code"
-            - "${SASSFULLY_LINKEDIN_PAIRING_CODE}"
-      tools:
-        - mcp__sassfully_browser__linkedin_story
+          args: ["/Users/brad/code/studio-sassfully/.capsules/workspaces/extension-local-test-20260730/packages/feedback-extension/story-bridge/stdio-server.mjs", "--pairing-code", "${SASSFULLY_LINKEDIN_PAIRING_CODE}"]
+      tools: [mcp__sassfully_browser__linkedin_story]
     permissions:
       mode: ask
       disallowed_tools: [Read, Grep, Glob, LS, NotebookRead, TodoRead, TodoWrite, Write, Edit, MultiEdit, NotebookEdit, Bash, WebFetch, WebSearch]
     effect: external
-
 world:
-  keywords:        { type: string, default: "" }
-  location:        { type: string, default: "" }
-  search_status:   { type: string, default: "draft" }
-  confirmed:       { type: bool, default: false }
-  results_url:     { type: string, default: "" }
-  used_parameters: { type: object, default: {} }
-  prepared_parameters: { type: object, default: {} }
-  search_result:   { type: object, default: {} }
-  remote_selected: { type: bool, default: false }
-  remote_already_selected: { type: bool, default: false }
-  error_detail:    { type: string, default: "" }
-
+  keywords: { type: string, default: "" }
+  location: { type: string, default: "" }
+  search_status: { type: string, default: "draft" }
+  search_result: { type: object, default: {} }
+  extracted_output: { type: string, default: "" }
+  current_url: { type: string, default: "" }
+  action_audit: { type: array, default: [] }
+  error_detail: { type: string, default: "" }
 intents:
   prepare:
-    description: "Set the LinkedIn Jobs keywords and location for review."
+    description: "Run a paired-tab LinkedIn search from terms."
     examples: ["search jobs", "prepare a job search"]
     priority: 90
     slots:
       keywords: { type: string, required: true }
       location: { type: string, required: false }
-  confirm_search:
-    description: "Confirm the displayed parameters and submit exactly one LinkedIn Jobs search."
-    examples: ["confirm search", "submit search"]
-    priority: 85
-  finish:
-    description: "Record the returned LinkedIn Jobs results URL."
-    examples: ["finish"]
-    priority: 84
-  verification_failed:
-    description: "Record that the atomic bridge result did not prove Remote was selected."
-    examples: ["verification failed"]
-    priority: 83
-  revise:
-    description: "Return to the parameters without submitting a search."
-    examples: ["revise", "change search"]
-    priority: 80
-  cancel:
-    description: "Cancel without submitting a search."
-    examples: ["cancel", "stop"]
-    priority: 75
-  look:
-    description: "Re-render the current state."
-    examples: ["look", "status"]
-    priority: 10
-
+  finish: { description: "Record extracted visible output.", examples: ["finish"], priority: 84 }
+  cancel: { description: "Cancel the search.", examples: ["cancel", "stop"], priority: 75 }
+  look: { description: "Re-render the current state.", examples: ["look", "status"], priority: 10 }
 root: parameters
-
-include:
-  - rooms/*.yaml
+include: [rooms/*.yaml]

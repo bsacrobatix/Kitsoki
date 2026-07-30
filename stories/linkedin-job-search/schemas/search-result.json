@@ -1,19 +1,10 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["finalUrl", "remoteSelected", "alreadySelected", "parameters"],
+  "required": ["visible_output", "current_url", "action_audit"],
   "properties": {
-    "finalUrl": {"type": "string", "minLength": 1, "pattern": "^https://(www\\.)?linkedin\\.com/jobs/search-results/"},
-    "remoteSelected": {"const": true},
-    "alreadySelected": {"type": "boolean"},
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["keywords", "location"],
-      "properties": {
-        "keywords": {"type": "string", "minLength": 1},
-        "location": {"type": "string"}
-      }
-    }
+    "visible_output": {"type": "string", "minLength": 1},
+    "current_url": {"type": "string", "minLength": 1},
+    "action_audit": {"type": "array", "items": {"type": "string"}, "minItems": 1}
   }
 }

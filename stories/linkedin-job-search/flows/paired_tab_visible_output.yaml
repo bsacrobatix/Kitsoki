@@ -1,0 +1,25 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: parameters
+host_handlers:
+  host.agent.task:
+    by_call:
+      drive_paired_linkedin_session:
+        data:
+          submitted:
+            visible_output: "Principal Engineer, Go — visible LinkedIn Jobs output"
+            current_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang"
+            action_audit: ["navigate", "fill", "press", "extract"]
+turns:
+  - intent:
+      name: prepare
+      slots: { keywords: "principal engineer golang", location: "United States" }
+    expect_state: complete
+    expect_world:
+      search_status: "complete"
+      extracted_output: "Principal Engineer, Go — visible LinkedIn Jobs output"
+      current_url: "https://www.linkedin.com/jobs/search-results/?keywords=principal+engineer+golang"
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "drive_paired_linkedin_session" }
+        times: 1
