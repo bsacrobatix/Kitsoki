@@ -51,6 +51,19 @@ copy_scripts() {
   chmod +x "$repo/scripts/"*.sh
 }
 
+# A second helper must stop before inspecting or mutating a shared staging
+# capsule. This is the concurrency guard that keeps a promotion gate from
+# racing a refresh/import transaction.
+lease_repo="$tmp/lease-refusal"
+git_init "$lease_repo"
+copy_scripts "$lease_repo"
+mkdir -p "$lease_repo/.capsules/locks/staging-local-promotion"
+printf 'pid=other\n' >"$lease_repo/.capsules/locks/staging-local-promotion/owner"
+if (cd "$lease_repo" && scripts/refresh-staging-local.sh --skip-remote) >"$tmp/lease-refusal.out" 2>&1; then
+  fail "refresh proceeded while a staging/local lease was held"
+fi
+assert_contains "$tmp/lease-refusal.out" "already active"
+
 # A staging patch may already be embodied in main by a different patch
 # sequence. Git then drops the staging commit as empty during rebase. The
 # refresh must accept the preserved tree delta instead of treating the absent
@@ -697,7 +710,7 @@ preserve_snapshot_ref="$(sed -n 's/^  snapshot ref: //p' "$preserve_out" | tail 
   fail "preserve did not clean the untracked file"
 [ -f "$local_repo/.capsules/staging/local/.kitsoki-capsule" ] ||
   fail "preserve dropped the managed capsule sentinel"
-preserve_patch="$(ls "$local_repo/.artifacts/staging-local-preserved"/staging-capsule-dirty-*.patch | tail -1)"
+preserve_patch="$(find "$local_repo/.artifacts/staging-local" -path '*/preserved/staging-capsule-dirty-*.patch' -type f | sort | tail -1)"
 assert_contains "$preserve_patch" "scratch.txt"
 remaining_dirty="$(git -C "$local_repo/.capsules/staging/local" status --porcelain --untracked-files=all |
   grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' ||

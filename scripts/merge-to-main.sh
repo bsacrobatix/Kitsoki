@@ -288,6 +288,20 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Refresh and promotion both mutate the managed staging capsule and its
+# primary ref.  A source-tip CAS alone cannot prevent another helper from
+# changing the capsule/artifact state between the gate and import.  Serialize
+# the complete transaction with an atomic directory lease.
+staging_lease_dir="$repo_root/.capsules/locks/staging-local-promotion"
+mkdir -p "$(dirname "$staging_lease_dir")"
+if ! mkdir "$staging_lease_dir" 2>/dev/null; then
+  echo "error: staging/local promotion is already active ($staging_lease_dir); wait for its receipt or recovery" >&2
+  exit 1
+fi
+printf '%s\n' "pid=$$ started=$(date -u +%Y-%m-%dT%H:%M:%SZ) command=merge-to-main" >"$staging_lease_dir/owner"
+release_staging_lease() { rm -rf "$staging_lease_dir"; }
+trap release_staging_lease EXIT
+
 if [ -n "$source_dir" ]; then
   if [ "${source_dir#/}" = "$source_dir" ]; then
     source_dir="$repo_root/$source_dir"
@@ -621,6 +635,7 @@ restore_guard() {
     fi
   fi
   rm -f "$changed_files_file" "$dirs_file" "$guard_paths_file"
+  release_staging_lease
 }
 
 trap restore_guard EXIT

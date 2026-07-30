@@ -306,7 +306,7 @@ preserve_dirty_staging_capsule() {
   local patch_dir patch stamp status_file output stash_oid primary_snapshot_ref
 
   stamp="$(date +%Y%m%dT%H%M%S)"
-  patch_dir="$repo_root/.artifacts/staging-local-preserved"
+  patch_dir="$staging_artifact_run/preserved"
   mkdir -p "$patch_dir"
   patch="$patch_dir/staging-capsule-dirty-$stamp-$$.patch"
   status_file="$patch_dir/staging-capsule-dirty-$stamp-$$.status.txt"
@@ -374,7 +374,7 @@ move_dirty_staging_capsule() {
   recovery_id="staging-dirty-recovery-$stamp-$$"
   recovery_branch="agent/$recovery_id"
   recovery_dir="$repo_root/.capsules/workspaces/$recovery_id"
-  patch_dir="$repo_root/.artifacts/staging-local-recovery"
+  patch_dir="$staging_artifact_run/recovery"
   mkdir -p "$patch_dir"
   status_file="$patch_dir/$recovery_id.status.txt"
   untracked_file="$patch_dir/$recovery_id.untracked"
@@ -677,6 +677,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 repo_root="$(git rev-parse --show-toplevel)"
+staging_lease_dir="$repo_root/.capsules/locks/staging-local-promotion"
+mkdir -p "$(dirname "$staging_lease_dir")"
+if ! mkdir "$staging_lease_dir" 2>/dev/null; then
+  die "staging/local promotion or refresh is already active ($staging_lease_dir); wait for its receipt or recovery"
+fi
+printf '%s\n' "pid=$$ started=$(date -u +%Y-%m-%dT%H:%M:%SZ) command=refresh-staging-local" >"$staging_lease_dir/owner"
+staging_artifact_run="$repo_root/.artifacts/staging-local/$(date -u +%Y%m%dT%H%M%S)-$$"
+release_staging_lease() { rm -rf "$staging_lease_dir"; }
+trap release_staging_lease EXIT
 cd "$repo_root"
 
 case "$rebase_replay_limit" in
@@ -926,6 +935,7 @@ restore_failed_capsule_branch() {
   fi
 }
 cleanup_refresh_refs() {
+  release_staging_lease
   git -C "$staging_capsule" update-ref -d "$snapshot_ref" >/dev/null 2>&1 || true
   git -C "$staging_capsule" update-ref -d "$base_snapshot_ref" >/dev/null 2>&1 || true
   if [ "$refresh_succeeded" -eq 1 ]; then
