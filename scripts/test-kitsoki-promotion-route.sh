@@ -39,13 +39,14 @@ SH
 chmod +x "$tmp/kitsoki"
 
 KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
+  KITSOKI_GATE_CAPACITY_ROOT="$tmp/capacity-root" KITSOKI_GATE_CAPACITY_POOL="local-fast" KITSOKI_GATE_CAPACITY=3 \
   "$root/scripts/kitsoki-promotion-route.sh" workspace-to-staging \
   --repo "$repo" --workspace agent-1 --gate "make capsule-ci-quick" >/dev/null
 [ "$(wc -l <"$log" | tr -d ' ')" = 2 ] || {
   echo "workspace route did not use exactly one policy resolution and one promotion" >&2
   exit 1
 }
-grep -F -- "capsule promote --project $repo --queue-root $queue_root --workspace agent-1 --target staging/local --pipeline change --gate make capsule-ci-quick --wait --json" "$log" >/dev/null
+grep -F -- "capsule promote --project $repo --queue-root $queue_root --workspace agent-1 --target staging/local --pipeline change --gate make capsule-ci-quick --wait --json --capacity-pool local-fast --capacity 3 --capacity-root $tmp/capacity-root" "$log" >/dev/null
 
 : >"$log"
 KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \

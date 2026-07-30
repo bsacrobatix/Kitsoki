@@ -45,7 +45,7 @@ func TestCapsulePromoteRemoteAdmissionFlagsAreExplicit(t *testing.T) {
 
 func TestCapsulePromoteRepairRequiresIndependentReviewAndBoundedStages(t *testing.T) {
 	cmd := capsulePromoteCmd()
-	for _, name := range []string{"repair-review", "repairer-id", "reviewer-id", "review-policy-digest", "gate-timeout"} {
+	for _, name := range []string{"repair-review", "repairer-id", "reviewer-id", "review-policy-digest", "gate-timeout", "capacity-root", "capacity-pool", "capacity"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("capsule promote is missing --%s", name)
 		}

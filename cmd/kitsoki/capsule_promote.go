@@ -66,6 +66,8 @@ type capsulePromoteResult struct {
 
 func capsulePromoteCmd() *cobra.Command {
 	var project, queueRoot, workspace, pipeline, target, gate, message, resolver, repair, repairReview, repairerID, reviewerID, reviewPolicyDigest string
+	var capacityRoot, capacityPool string
+	var capacity int
 	var remoteURL, remoteTokenEnv, remoteBucketURL, remoteKeyEnv, remoteSecretEnv, remoteTargetBaseSHA, remoteTrain, remoteStatusCommand string
 	var gateTimeout time.Duration
 	var current, wait, jsonOut, skipTests bool
@@ -97,6 +99,9 @@ func capsulePromoteCmd() *cobra.Command {
 				ReviewerID:          reviewerID,
 				ReviewPolicyDigest:  reviewPolicyDigest,
 				GateTimeout:         gateTimeout,
+				CapacityRoot:        capacityRoot,
+				CapacityPool:        capacityPool,
+				Capacity:            capacity,
 				SkipTests:           skipTests,
 				Wait:                wait,
 				RemoteAdmission:     remoteAdmissionOptions{URL: remoteURL, TokenEnv: remoteTokenEnv, BucketURL: remoteBucketURL, KeyEnv: remoteKeyEnv, SecretEnv: remoteSecretEnv, TargetBaseSHA: remoteTargetBaseSHA, TrainID: remoteTrain, StatusCommand: remoteStatusCommand},
@@ -122,6 +127,9 @@ func capsulePromoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&reviewerID, "reviewer-id", "", "stable independent reviewer identity required with --repair")
 	cmd.Flags().StringVar(&reviewPolicyDigest, "review-policy-digest", "", "deterministic anti-weakening policy digest required with --repair")
 	cmd.Flags().DurationVar(&gateTimeout, "gate-timeout", queue.DefaultStageTimeout, "hard timeout applied independently to gate, repair, and anti-weakening review stages")
+	cmd.Flags().StringVar(&capacityRoot, "capacity-root", queue.DefaultGateCapacityRoot(), "absolute shared gate-capacity authority root")
+	cmd.Flags().StringVar(&capacityPool, "capacity-pool", "default", "operator-owned physical resource pool shared across repositories")
+	cmd.Flags().IntVar(&capacity, "capacity", 1, "maximum concurrent gates in the physical capacity pool")
 	cmd.Flags().BoolVar(&skipTests, "skip-tests", false, "emergency override: bypass Capsule CI receipt admission; recorded in the durable queue candidate")
 	cmd.Flags().BoolVar(&wait, "wait", false, "process the local queue and apply protected-main CAS before returning")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
@@ -151,6 +159,9 @@ type capsulePromoteOptions struct {
 	ReviewerID          string
 	ReviewPolicyDigest  string
 	GateTimeout         time.Duration
+	CapacityRoot        string
+	CapacityPool        string
+	Capacity            int
 	SkipTests           bool
 	Wait                bool
 	RemoteAdmission     remoteAdmissionOptions
@@ -372,6 +383,16 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		repairer = queue.ShellRepairer{Command: opts.RepairCommand}
 		reviewer = queue.ShellRepairReviewer{Command: opts.RepairReviewCommand, ReviewerID: opts.ReviewerID}
 	}
+	gateCapacity := queue.DefaultFileGateCapacity()
+	if strings.TrimSpace(opts.CapacityRoot) != "" {
+		gateCapacity.Root = opts.CapacityRoot
+	}
+	if strings.TrimSpace(opts.CapacityPool) != "" {
+		gateCapacity.Pool = opts.CapacityPool
+	}
+	if opts.Capacity > 0 {
+		gateCapacity.Max = opts.Capacity
+	}
 	state, err := qstore.Process(ctx, queue.ProcessDeps{
 		Integration:        queue.ProtectedIntegration{ProjectRoot: root, QueueRoot: opts.QueueRoot, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand, Headroom: headroom.Default()},
 		Gate:               queue.ShellGate{Command: opts.GateCommand},
@@ -383,6 +404,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		GateVersion:        opts.Pipeline + ":" + opts.GateCommand,
 		GateTier:           queue.RequiredGateTierForTarget(opts.TargetRef),
 		GateTimeout:        opts.GateTimeout,
+		GateAdmission:      gateCapacity,
 		TargetRef:          opts.TargetRef,
 		GateMemo:           queue.FileGateMemo{ProjectRoot: root, QueueRoot: opts.QueueRoot},
 	})

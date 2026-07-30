@@ -62,7 +62,8 @@ case "$action" in
     gate="$required_gate"
     result="$(run_kitsoki capsule promote \
       --project "$repo" --queue-root "$queue_root" --workspace "$workspace" \
-      --target staging/local --pipeline change --gate "$gate" --wait --json)"
+      --target staging/local --pipeline change --gate "$gate" \
+      --wait --json "${process_capacity_args[@]}")"
     status="$(printf '%s' "$result" | json_field status)"
     [ "$status" = promoted ] || {
       printf '%s\n' "$result"

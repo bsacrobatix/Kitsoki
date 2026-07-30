@@ -32,11 +32,7 @@ func RequiredGateCommand(projectRoot, target string) (string, bool, error) {
 	raw, err := cmd.Output()
 	if err != nil {
 		tier := RequiredGateTierForTarget(target)
-		normalizedTarget := strings.ToLower(ref)
-		if tier == "full" || tier == "release" || normalizedTarget == "staging/local" {
-			return "", false, fmt.Errorf("queue: target %q requires tracked %s gate policy at %s: %w", target, tier, path, err)
-		}
-		return "", false, nil
+		return "", false, fmt.Errorf("queue: target %q requires tracked %s gate policy at %s: %w", target, tier, path, err)
 	}
 	var profile trackedGateProfile
 	if err := yaml.Unmarshal(raw, &profile); err != nil {

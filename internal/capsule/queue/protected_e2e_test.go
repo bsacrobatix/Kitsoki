@@ -49,6 +49,13 @@ func persistedReceipt(t *testing.T, root, sha string) receipt.Receipt {
 
 func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	root := protectedQueueRepo(t)
+	gate := "grep -qx 'default_profile: queue-test' .kitsoki.local.yaml && git diff --check"
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), []byte(
+		"schema: project-profile/v1\ncommands:\n  test: git diff --check\n  change: git diff --check\n  full: \""+gate+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".kitsoki/project-profile.yaml")
+	git(t, root, "commit", "-m", "track queue test gate")
 	commit(t, root, ".gitignore", ".kitsoki.local.yaml\n", "ignore machine-local config")
 	localConfig := []byte("default_profile: queue-test\n")
 	if err := os.WriteFile(filepath.Join(root, ".kitsoki.local.yaml"), localConfig, 0o440); err != nil {
@@ -69,7 +76,7 @@ func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	}
 	state, err := store.Process(context.Background(), ProcessDeps{
 		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
-		Gate:        ShellGate{Command: "grep -qx 'default_profile: queue-test' .kitsoki.local.yaml && git diff --check"},
+		Gate:        ShellGate{Command: gate},
 		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
 	})
 	if err != nil {

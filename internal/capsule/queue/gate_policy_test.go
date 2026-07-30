@@ -62,6 +62,14 @@ func TestStagingGatePolicyFailsClosedWithoutTrackedProfile(t *testing.T) {
 	}
 }
 
+func TestGenericChangeTargetFailsClosedWithoutTrackedProfile(t *testing.T) {
+	for _, target := range []string{"wave/beta", "integration/train-1", "staging/custom"} {
+		if err := ValidateGateCommand(t.TempDir(), target, "true"); err == nil || !strings.Contains(err.Error(), "requires tracked change gate policy") {
+			t.Fatalf("missing-profile target %q error=%v", target, err)
+		}
+	}
+}
+
 func TestTrackedGatePolicyIgnoresDirtyWorktreeAndOtherCheckedOutBranch(t *testing.T) {
 	root := t.TempDir()
 	writeTrackedGateProfile(t, root)
