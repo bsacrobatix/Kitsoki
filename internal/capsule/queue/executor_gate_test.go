@@ -46,7 +46,11 @@ func xgWriteFixtures(t *testing.T, root string) {
 			t.Fatal(err)
 		}
 	}
-	git(t, root, "add", ".")
+	git(t, root, "add",
+		".kitsoki/ci.yaml",
+		".kitsoki/environments/xg.yaml",
+		".kitsoki/stories/xg/app.yaml",
+	)
 	git(t, root, "commit", "-m", "xg fixtures")
 }
 
