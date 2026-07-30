@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"kitsoki/internal/artifactjob"
@@ -25,15 +26,15 @@ import (
 // ExecutorGate never invents its own transport or story-launch logic; it only
 // seals a RunRequest and calls ci.Service.Run.
 //
-// The pipeline catalog itself (executor endpoints, credentials, environment
-// locks) is deliberately read from ProjectRoot — the trusted managed project
-// — never from the speculative candidate workspace: an unreviewed candidate
-// must not be able to redirect its own gate to a different executor, or
-// change gate identity, by editing .kitsoki/ci.yaml in its own commit. Only
-// the source under test and its story content (hashed by storydigest.Compute)
-// come from the candidate's exact committed workspace tree.
+// Pipeline, executor, and environment policy is read from an immutable
+// checkout of Speculation.BaseSHA: neither dirty live-project files nor an
+// unlanded candidate can redirect its own gate. PoolStateRoot remains the live
+// ProjectRoot so configured executors retain their durable leases. Only the
+// source under test and story content (hashed by storydigest.Compute) come
+// from the speculative candidate workspace.
 type ExecutorGate struct {
 	ProjectRoot string
+	TargetRef   string
 	Executor    string
 	Pipeline    string
 	// Selector overrides executor catalog resolution for tests. Nil uses
@@ -68,6 +69,14 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 	if root == "" {
 		return GateResult{}, Harness(fmt.Errorf("queue: executor gate requires a project root"))
 	}
+	target := strings.TrimSpace(g.TargetRef)
+	if target == "" {
+		return GateResult{}, Harness(fmt.Errorf("queue: executor gate requires a protected target ref"))
+	}
+	policyBase := strings.TrimSpace(spec.BaseSHA)
+	if policyBase == "" {
+		return GateResult{}, fmt.Errorf("queue: executor gate requires a speculative policy base")
+	}
 	pipelineName := g.pipelineName()
 
 	before, err := gitOutput(ctx, spec.WorkspacePath, "rev-parse", "HEAD")
@@ -83,19 +92,25 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 		return GateResult{}, fmt.Errorf("queue: executor gate requires a clean speculative workspace: %s", dirty)
 	}
 
+	policyRoot, err := materializeExecutorGatePolicyRoot(ctx, root, policyBase)
+	if err != nil {
+		return GateResult{}, Harness(fmt.Errorf("queue: executor gate: materialize policy base %s for %s: %w", policyBase, target, err))
+	}
+	defer os.RemoveAll(policyRoot)
+
 	// Every check from here through selector.Select is a setup/config
 	// problem: an operator pointed the queue worker at a pipeline, executor,
 	// or trigger vocabulary the project's own trusted .kitsoki/ci.yaml does
 	// not support. That is never a signal about this candidate and never
 	// transient, so it parks immediately (HarnessError) instead of burning
 	// either retry budget.
-	cfg, err := ci.Load(root)
+	cfg, err := ci.Load(policyRoot)
 	if err != nil {
 		return GateResult{}, Harness(fmt.Errorf("queue: executor gate: load capsule ci config: %w", err))
 	}
 	p, ok := cfg.Pipelines[pipelineName]
 	if !ok {
-		return GateResult{}, Harness(fmt.Errorf("queue: executor gate: pipeline %q is not declared in %s/.kitsoki/ci.yaml", pipelineName, root))
+		return GateResult{}, Harness(fmt.Errorf("queue: executor gate: pipeline %q is not declared at policy base %s", pipelineName, policyBase))
 	}
 	if !triggerAllowed(p.Triggers, "local") {
 		return GateResult{}, Harness(fmt.Errorf("queue: executor gate: pipeline %q does not allow a local trigger", pipelineName))
@@ -103,7 +118,7 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 	selector := g.Selector
 	if selector == nil {
 		configured := ci.NewConfiguredExecutors(cfg)
-		configured.ProjectRoot = root
+		configured.ProjectRoot = policyRoot
 		configured.PoolStateRoot = root
 		configured.Source = executor.SourceBundlerFunc(func(ctx context.Context, envelope executor.Envelope) (executor.SourceBundle, error) {
 			return executor.GitBundle(ctx, spec.WorkspacePath, envelope.SourceDigest, 0)
@@ -123,9 +138,9 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 	}
 
 	service := ci.Service{
-		ProjectRoot: root,
+		ProjectRoot: policyRoot,
 		Jobs:        artifactjob.NewMemoryStore(),
-		Env:         environment.Resolver{ProjectRoot: root, Probe: environment.HostProbe()},
+		Env:         environment.Resolver{ProjectRoot: policyRoot, Probe: environment.HostProbe()},
 		Executors:   selector,
 	}
 	result, runErr := service.Run(ctx, ci.RunRequest{
@@ -138,7 +153,10 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 		ExecutorOverride: g.Executor,
 	})
 
-	evidence := executorGateEvidence(pipelineName, g.Executor, result)
+	evidence := append(
+		[]string{fmt.Sprintf("queue:executor-gate-policy target=%s base=%s", target, policyBase)},
+		executorGateEvidence(pipelineName, g.Executor, result)...,
+	)
 	outcomeDigest := executorGateOutcomeDigest(result)
 
 	if after, headErr := gitOutput(ctx, spec.WorkspacePath, "rev-parse", "HEAD"); headErr == nil && after != before {
@@ -164,7 +182,7 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 			Passed:        true,
 			Evidence:      evidence,
 			Log:           result.Verdict.Summary,
-			GateVersion:   fmt.Sprintf("executor-gate/v1:%s:%s", g.Executor, pipelineName),
+			GateVersion:   fmt.Sprintf("executor-gate/v2:%s:%s:%s", g.Executor, pipelineName, policyBase),
 			OutcomeDigest: outcomeDigest,
 		}, nil
 	case "failed":
@@ -211,6 +229,46 @@ func executorGateOutcomeDigest(result ci.RunResult) string {
 	}
 	payload, _ := json.Marshal(stable)
 	return fingerprint("executor-gate-outcome/v1", string(payload))
+}
+
+func materializeExecutorGatePolicyRoot(ctx context.Context, projectRoot, baseSHA string) (string, error) {
+	checkout, err := os.MkdirTemp("", "kitsoki-executor-gate-policy-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Remove(checkout); err != nil {
+		return "", err
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(checkout)
+		}
+	}()
+	if _, err := gitOutput(ctx, projectRoot, "clone", "--shared", "--no-checkout", projectRoot, checkout); err != nil {
+		return "", err
+	}
+	if _, err := gitOutput(ctx, checkout, "checkout", "--detach", baseSHA); err != nil {
+		return "", err
+	}
+	cleanup = false
+	return checkout, nil
+}
+
+func executorGatePolicyBase(version string) (string, bool) {
+	const prefix = "executor-gate/v2:"
+	if !strings.HasPrefix(version, prefix) {
+		return "", false
+	}
+	index := strings.LastIndex(version, ":")
+	if index < len(prefix) || index == len(version)-1 {
+		return "", false
+	}
+	base := version[index+1:]
+	if len(base) != 40 || strings.Trim(base, "0123456789abcdef") != "" {
+		return "", false
+	}
+	return base, true
 }
 
 // executorGateWorkspaceHandle synthesizes a control.Handle identifying this

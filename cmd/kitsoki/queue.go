@@ -507,7 +507,7 @@ func queueWorkerCmd() *cobra.Command {
 			if pipeline != deps.GateTier {
 				return fmt.Errorf("queue worker: --executor-pipeline %q must equal effective --gate-tier %q for target %q", pipeline, deps.GateTier, target)
 			}
-			deps.Gate = queue.ExecutorGate{ProjectRoot: project, Executor: executorName, Pipeline: pipeline}
+			deps.Gate = queue.ExecutorGate{ProjectRoot: project, TargetRef: target, Executor: executorName, Pipeline: pipeline}
 			deps.GateVersion = fmt.Sprintf("executor:%s:%s", executorName, pipeline)
 		}
 		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts

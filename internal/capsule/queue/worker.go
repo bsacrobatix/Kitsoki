@@ -608,16 +608,24 @@ func (w Worker) renewLease(id string) error {
 	})
 }
 func (w Worker) gateMemoLookup(targetRef, treeSHA, runtimeConfigDigest string) (GateResult, bool) {
-	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
+	if w.executorGate() || w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
 		return GateResult{}, false
 	}
 	return w.Deps.GateMemo.Lookup(treeSHA, w.Deps.GateVersion, w.gatePolicyDigest(targetRef, runtimeConfigDigest))
 }
 func (w Worker) gateMemoStore(targetRef, treeSHA, runtimeConfigDigest string, result GateResult) {
-	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
+	if w.executorGate() || w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
 		return
 	}
 	_ = w.Deps.GateMemo.Store(treeSHA, w.Deps.GateVersion, w.gatePolicyDigest(targetRef, runtimeConfigDigest), result)
+}
+func (w Worker) executorGate() bool {
+	switch w.Deps.Gate.(type) {
+	case ExecutorGate, *ExecutorGate:
+		return true
+	default:
+		return false
+	}
 }
 func (w Worker) gatePolicyDigest(targetRef, runtimeConfigDigest string) string {
 	return fingerprint(

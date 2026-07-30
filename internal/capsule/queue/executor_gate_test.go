@@ -66,6 +66,23 @@ func xgSetupRepo(t *testing.T) (root, head string) {
 	return root, head
 }
 
+func xgCloneAt(t *testing.T, root, sha string) string {
+	t.Helper()
+	clone := filepath.Join(t.TempDir(), "speculative")
+	run(t, root, "git", "clone", "--shared", "--no-checkout", root, clone)
+	git(t, clone, "checkout", "--detach", sha)
+	return clone
+}
+
+func xgSetStagingTarget(t *testing.T, root, sha string) {
+	t.Helper()
+	old := git(t, root, "rev-parse", "staging/local")
+	git(t, root, "update-ref", "refs/heads/staging/local", sha, old)
+	staging := filepath.Join(root, ".capsules", "staging", "local")
+	git(t, staging, "fetch", "source", "staging/local")
+	git(t, staging, "reset", "--hard", "FETCH_HEAD")
+}
+
 func xgCapabilities() executor.Capabilities {
 	return executor.Capabilities{ID: "xg-stub", Placements: []string{"xg-stub"}, Isolation: "supervised", Networks: []string{"none"}, Cancellable: false}
 }
@@ -142,16 +159,16 @@ func TestXgExecutorGatePassesOnGreenVerdict(t *testing.T) {
 	root, head := xgSetupRepo(t)
 	verdict := xgPassingVerdict()
 	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
 
-	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err != nil {
 		t.Fatalf("err=%v result=%#v", err, result)
 	}
 	if !result.Passed {
 		t.Fatalf("result=%#v", result)
 	}
-	if want := "executor-gate/v1:xg-remote:change"; result.GateVersion != want {
+	if want := "executor-gate/v2:xg-remote:change:" + head; result.GateVersion != want {
 		t.Fatalf("gate version=%q, want %q", result.GateVersion, want)
 	}
 	if len(result.Evidence) == 0 {
@@ -168,13 +185,78 @@ func TestXgExecutorGatePassesOnGreenVerdict(t *testing.T) {
 	}
 }
 
+func TestXgExecutorGateRequiresPolicyBase(t *testing.T) {
+	root, head := xgSetupRepo(t)
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change"}
+	if _, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head}); err == nil ||
+		!strings.Contains(err.Error(), "requires a speculative policy base") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestXgExecutorGateIgnoresDirtyPrimaryPolicyFiles(t *testing.T) {
+	root, head := xgSetupRepo(t)
+	specWorkspace := xgCloneAt(t, root, head)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), []byte("not: [valid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "environments", "xg.yaml"), []byte("also: [invalid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	verdict := xgPassingVerdict()
+	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: specWorkspace, SHA: head, BaseSHA: head})
+	if err != nil || !result.Passed {
+		t.Fatalf("dirty primary policy leaked into executor gate: result=%#v err=%v", result, err)
+	}
+}
+
+func TestXgExecutorGateCandidatePolicyActivatesOnlyAfterBaseAdvances(t *testing.T) {
+	root, base := xgSetupRepo(t)
+	ciPath := filepath.Join(root, ".kitsoki", "ci.yaml")
+	raw, err := os.ReadFile(ciPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte(
+		"  future:\n"+
+			"    story: .kitsoki/stories/xg/app.yaml\n"+
+			"    triggers: [local]\n"+
+			"    result:\n"+
+			"      schema: capsule-ci-verdict/v1\n")...)
+	if err := os.WriteFile(ciPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".kitsoki/ci.yaml")
+	git(t, root, "commit", "-m", "candidate adds future pipeline")
+	candidate := git(t, root, "rev-parse", "HEAD")
+
+	verdict := xgPassingVerdict()
+	verdict.Pipeline = "future"
+	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "future", Selector: xgSelector("xg-remote", provider, nil)}
+	spec := Speculation{WorkspacePath: root, SHA: candidate, BaseSHA: base}
+	if _, err := gate.Run(context.Background(), spec); err == nil || !strings.Contains(err.Error(), `pipeline "future" is not declared`) {
+		t.Fatalf("candidate policy activated before protected base advanced: %v", err)
+	}
+	spec.BaseSHA = candidate
+	result, err := gate.Run(context.Background(), spec)
+	if err != nil || !result.Passed {
+		t.Fatalf("candidate policy did not activate at new base: result=%#v err=%v", result, err)
+	}
+	if want := "executor-gate/v2:xg-remote:future:" + candidate; result.GateVersion != want {
+		t.Fatalf("gate version=%q want=%q", result.GateVersion, want)
+	}
+}
+
 func TestXgExecutorGateFailsOnRedVerdict(t *testing.T) {
 	root, head := xgSetupRepo(t)
 	verdict := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "failed", Summary: "tests failed", Checks: []ci.Check{{ID: "xg-check", Kind: "deterministic", Outcome: "failed"}}}
 	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
 
-	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil {
 		t.Fatal("expected error for a red verdict")
 	}
@@ -194,9 +276,9 @@ func TestXgExecutorGateFailsOnRedVerdict(t *testing.T) {
 func TestXgExecutorGateTransportErrorIsEnvironmental(t *testing.T) {
 	root, head := xgSetupRepo(t)
 	provider := xgProvider{cap: xgCapabilities(), runErr: fmt.Errorf("capsule executor: remote POST /v1/capsules/run failed kind=transport cause=dial tcp: connection refused")}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
 
-	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -217,9 +299,9 @@ func TestXgExecutorGateInfraFailedOutcomeIsEnvironmental(t *testing.T) {
 	root, head := xgSetupRepo(t)
 	verdict := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "infra_failed", Summary: "worker crashed mid-run"}
 	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
 
-	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	result, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -234,9 +316,9 @@ func TestXgExecutorGateInfraFailedOutcomeIsEnvironmental(t *testing.T) {
 
 func TestXgExecutorGateUnknownExecutorIsHarness(t *testing.T) {
 	root, head := xgSetupRepo(t)
-	gate := ExecutorGate{ProjectRoot: root, Executor: "does-not-exist", Pipeline: "change", Selector: xgSelector("xg-remote", xgProvider{}, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "does-not-exist", Pipeline: "change", Selector: xgSelector("xg-remote", xgProvider{}, nil)}
 
-	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -248,9 +330,9 @@ func TestXgExecutorGateUnknownExecutorIsHarness(t *testing.T) {
 
 func TestXgExecutorGateUnknownPipelineIsHarness(t *testing.T) {
 	root, head := xgSetupRepo(t)
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "does-not-exist", Selector: xgSelector("xg-remote", xgProvider{}, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "does-not-exist", Selector: xgSelector("xg-remote", xgProvider{}, nil)}
 
-	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -265,9 +347,9 @@ func TestXgExecutorGateRejectsDirtySpeculativeWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "leaked.txt"), []byte("leak\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", xgProvider{}, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", xgProvider{}, nil)}
 
-	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil || !strings.Contains(err.Error(), "clean speculative workspace") {
 		t.Fatalf("err=%v", err)
 	}
@@ -284,9 +366,9 @@ func TestXgExecutorGateDetectsHeadMoved(t *testing.T) {
 	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict, onRun: func(executor.Prepared) {
 		commit(t, root, "moved.txt", "moved\n", "moved head during dispatch")
 	}}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "main", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
 
-	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head})
+	_, err := gate.Run(context.Background(), Speculation{WorkspacePath: root, SHA: head, BaseSHA: head})
 	if err == nil || !strings.Contains(err.Error(), "moved speculative HEAD") {
 		t.Fatalf("err=%v", err)
 	}
@@ -301,23 +383,26 @@ func TestXgExecutorGateWiringLandsCandidateOnPassingRemoteVerdict(t *testing.T) 
 	root := protectedQueueRepo(t)
 	xgWriteFixtures(t, root)
 	base := git(t, root, "rev-parse", "HEAD")
+	xgSetStagingTarget(t, root, base)
 	commit(t, root, "candidate.txt", "candidate\n", "candidate")
 	sha := git(t, root, "rev-parse", "HEAD")
 	git(t, root, "branch", "agent/candidate", sha)
 	git(t, root, "reset", "--hard", base)
 
 	store := Store{ProjectRoot: root}
-	if _, err := store.Submit(Submit{Branch: "agent/candidate", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+	if _, err := store.Submit(Submit{Branch: "agent/candidate", SHA: sha, Receipt: testReceipt(t, sha), TargetRef: "staging/local"}); err != nil {
 		t.Fatal(err)
 	}
 
 	verdict := xgPassingVerdict()
 	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict}
-	gate := ExecutorGate{ProjectRoot: root, Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
+	gate := ExecutorGate{ProjectRoot: root, TargetRef: "staging/local", Executor: "xg-remote", Pipeline: "change", Selector: xgSelector("xg-remote", provider, nil)}
 
 	state, err := store.Process(context.Background(), ProcessDeps{
 		Integration: StagingIntegration{ProjectRoot: root, GateCommand: "git diff --check"},
 		Gate:        gate,
+		TargetRef:   "staging/local",
+		GateTier:    "change",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +413,93 @@ func TestXgExecutorGateWiringLandsCandidateOnPassingRemoteVerdict(t *testing.T) 
 	if got := git(t, root, "rev-parse", "staging/local"); got != sha {
 		t.Fatalf("staging=%s, want candidate %s", got, sha)
 	}
-	if !strings.Contains(state.Candidates[0].GateVersion, "executor-gate/v1") {
+	if !strings.Contains(state.Candidates[0].GateVersion, "executor-gate/v2") {
 		t.Fatalf("gate version=%q", state.Candidates[0].GateVersion)
+	}
+}
+
+type xgCountingMemo struct {
+	lookups int
+	stores  int
+}
+
+func (m *xgCountingMemo) Lookup(string, string, string) (GateResult, bool) {
+	m.lookups++
+	return GateResult{Passed: true}, true
+}
+
+func (m *xgCountingMemo) Store(string, string, string, GateResult) error {
+	m.stores++
+	return nil
+}
+
+func TestXgExecutorGateTargetMoveForcesRegateAndNeverUsesMemo(t *testing.T) {
+	root := protectedQueueRepo(t)
+	xgWriteFixtures(t, root)
+	base := git(t, root, "rev-parse", "HEAD")
+	xgSetStagingTarget(t, root, base)
+	commit(t, root, "candidate-regate.txt", "candidate\n", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/regate", sha)
+	git(t, root, "reset", "--hard", base)
+
+	store := Store{ProjectRoot: root}
+	submitted, err := store.Submit(Submit{
+		Branch: "agent/regate", SHA: sha, Receipt: testReceipt(t, sha), TargetRef: "staging/local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := 0
+	verdict := xgPassingVerdict()
+	provider := xgProvider{cap: xgCapabilities(), verdict: &verdict, onRun: func(executor.Prepared) { runs++ }}
+	memo := &xgCountingMemo{}
+	deps := ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "staging/local"},
+		Gate: ExecutorGate{
+			ProjectRoot: root, TargetRef: "staging/local", Executor: "xg-remote", Pipeline: "change",
+			Selector: xgSelector("xg-remote", provider, nil),
+		},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "staging/local"},
+		TargetRef:   "staging/local",
+		GateTier:    "change",
+		GateVersion: "executor:xg-remote:change",
+		GateMemo:    memo,
+	}
+	worker := Worker{Store: store, Deps: deps}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	green := mustGet(t, store, submitted.ID)
+	if green.phase() != ReadyToFinalize || runs != 1 {
+		t.Fatalf("first green=%#v runs=%d", green, runs)
+	}
+	if baseInVersion, ok := executorGatePolicyBase(green.GateVersion); !ok || baseInVersion != base {
+		t.Fatalf("first gate version=%q does not bind base %s", green.GateVersion, base)
+	}
+
+	// Another authority advances the protected target after green. Even
+	// though the selected candidate is now already at the target, the old
+	// policy snapshot cannot authorize CAS completion.
+	git(t, root, "update-ref", "refs/heads/staging/local", sha, base)
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stale := mustGet(t, store, submitted.ID)
+	if stale.phase() != Reprepare || runs != 1 {
+		t.Fatalf("target move did not force reprepare: candidate=%#v runs=%d", stale, runs)
+	}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	regated := mustGet(t, store, submitted.ID)
+	if regated.phase() != ReadyToFinalize || runs != 2 {
+		t.Fatalf("candidate was not regated on new policy base: %#v runs=%d", regated, runs)
+	}
+	if baseInVersion, ok := executorGatePolicyBase(regated.GateVersion); !ok || baseInVersion != sha {
+		t.Fatalf("regate version=%q does not bind live base %s", regated.GateVersion, sha)
+	}
+	if memo.lookups != 0 || memo.stores != 0 {
+		t.Fatalf("executor gate touched generic memo across policy bases: lookups=%d stores=%d", memo.lookups, memo.stores)
 	}
 }

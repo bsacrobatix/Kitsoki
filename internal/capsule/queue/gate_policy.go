@@ -93,6 +93,9 @@ func validateProcessGatePolicy(projectRoot string, deps ProcessDeps) error {
 		if err != nil {
 			return err
 		}
+		if strings.TrimSpace(gate.TargetRef) != target {
+			return fmt.Errorf("queue: executor gate target %q does not match worker target %q", gate.TargetRef, target)
+		}
 		if gate.pipelineName() != requiredTier {
 			return fmt.Errorf("queue: target %q requires executor pipeline %q, got %q", target, requiredTier, gate.pipelineName())
 		}
@@ -101,6 +104,9 @@ func validateProcessGatePolicy(projectRoot string, deps ProcessDeps) error {
 		_, _, err := RequiredGateCommand(projectRoot, target)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(gate.TargetRef) != target {
+			return fmt.Errorf("queue: executor gate target %q does not match worker target %q", gate.TargetRef, target)
 		}
 		if gate.pipelineName() != requiredTier {
 			return fmt.Errorf("queue: target %q requires executor pipeline %q, got %q", target, requiredTier, gate.pipelineName())

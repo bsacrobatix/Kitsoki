@@ -681,6 +681,13 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	if err != nil {
 		return FinalizeResult{}, Environmental(err)
 	}
+	if policyBase, ok := executorGatePolicyBase(c.GateVersion); ok && policyBase != plan.Expected.Target {
+		return FinalizeResult{
+			OldMainSHA: plan.Expected.Target,
+			Stale:      true,
+			Log:        fmt.Sprintf("executor gate policy base %s no longer matches live protected target %s; reprepare and regate required", policyBase, plan.Expected.Target),
+		}, nil
+	}
 	if plan.Expected.Target != c.BaseSHA {
 		// The protected target moved since this candidate's base was
 		// observed at speculation time. That is not automatically stale:
