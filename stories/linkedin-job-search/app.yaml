@@ -21,9 +21,10 @@ agents:
       qualified alias `mcp__sassfully_browser__linkedin_story`; it is the
       allowlist identifier, not Codex's discovery name. Call the discovered tool
       only with its documented action argument: navigate, snapshot, fill, or
-      press. First navigate to
-      LinkedIn Jobs, snapshot the page, and fill only the supplied keywords and
-      location. Do not press a search/submit control until the story has already
+      press. First navigate exactly to
+      https://www.linkedin.com/jobs/search, snapshot the page, and fill only
+      the supplied keywords and location. Do not press a search/submit control
+      until the story has already
       obtained the operator's explicit confirmation. The confirmation is the
       always-visible Chrome modal controlled by the story operator, not an MCP
       tool. After confirmation, press only the Jobs search submission control,
