@@ -1,0 +1,23 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: parameters
+host_handlers:
+  host.agent.task:
+    by_call:
+      navigate_confirmed_linkedin_jobs_url:
+        error: "The visible LinkedIn Remote filter is unavailable"
+turns:
+  - intent:
+      name: prepare
+      slots: { keywords: "Principal Engineer Go", location: "United States" }
+    expect_state: review
+    expect_no_host_calls: [host.agent.task]
+  - intent: { name: confirm_search }
+    expect_state: failed
+    expect_world:
+      confirmed: true
+      remote_selected: false
+      results_url: ""
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "navigate_confirmed_linkedin_jobs_url" }

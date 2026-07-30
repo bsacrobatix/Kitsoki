@@ -36,6 +36,7 @@ states:
                 used_parameters: {}
                 prepared_parameters: { keywords: "{{ slots.keywords }}", location: "United States; Remote" }
                 search_result: {}
+                remote_selected: false
                 error_detail: ""
       cancel:
         - target: cancelled
@@ -85,7 +86,7 @@ states:
 
   searching:
     description: "Navigate once to the confirmed direct LinkedIn Jobs URL and verify it."
-    relevant_world: [keywords, location, search_url, search_status, results_url, used_parameters, error_detail]
+    relevant_world: [keywords, location, search_url, search_status, results_url, used_parameters, remote_selected, error_detail]
     view:
       extends: "base"
       blocks:
@@ -98,6 +99,7 @@ states:
                 Location: "{{ world.location|default:'(any location)' }}"
                 Direct URL: "{{ world.search_url }}"
                 Results URL: "{{ world.results_url|default:'(pending)' }}"
+                Remote selected: "{{ world.remote_selected }}"
                 Error: "{{ world.error_detail|default:'(none)' }}"
         choices:
           - heading: "Actions"
@@ -123,6 +125,7 @@ states:
           search_result: submitted
           results_url: submitted.results_url
           used_parameters: submitted.parameters
+          remote_selected: submitted.remote_selected
         on_error: failed
       - when: "world.results_url != ''"
         emit_intent: finish
@@ -137,7 +140,7 @@ states:
   complete:
     description: "Confirmed LinkedIn Jobs direct URL navigation completed with its URL captured."
     terminal: true
-    relevant_world: [keywords, location, search_status, results_url, used_parameters]
+    relevant_world: [keywords, location, search_status, results_url, used_parameters, remote_selected]
     view:
       extends: "base"
       blocks:
@@ -149,10 +152,11 @@ states:
                 Keywords: "{{ world.used_parameters.keywords|default:world.keywords }}"
                 Location: "{{ world.used_parameters.location|default:world.location }}"
                 Results URL: "{{ world.results_url }}"
+                Remote selected: "{{ world.remote_selected }}"
 
   failed:
     description: "Configured bridge or search operation failed without a retrying side effect."
-    relevant_world: [keywords, location, error_detail]
+    relevant_world: [keywords, location, error_detail, last_error, host_error]
     view:
       extends: "base"
       blocks:
@@ -160,7 +164,7 @@ states:
           - prose: "No additional browser action will be attempted automatically. Check the local Sassfully bridge configuration, then prepare the search again if you still want to submit it."
           - kv:
               pairs:
-                Error: "{{ world.error_detail|default:$host_error.hint|default:'(bridge did not return a result)' }}"
+                Error: "{{ world.host_error.message|default:world.last_error|default:'(bridge did not return a result)' }}"
         choices:
           - heading: "Actions"
           - list:

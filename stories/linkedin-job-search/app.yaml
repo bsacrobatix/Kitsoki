@@ -24,7 +24,9 @@ agents:
       story's explicit confirmation, navigate exactly once to the supplied base
       US Jobs search URL, await Chrome Allow, then call `select_remote` exactly
       once and await its Chrome Allow confirmation. Finally snapshot once to
-      verify a safe LinkedIn Jobs URL with the remote filter active. Never call
+      verify a safe LinkedIn Jobs URL with the remote filter active. Report
+      success only when the bridge proves `remote_selected: true` and records
+      the exact action sequence `navigate`, `select_remote`, `snapshot`. Never call
       fill, press, click, submit, search, open a job detail, apply, message,
       save a job, follow anyone, alter account settings, paginate, bulk-scrape,
       export, or collect result rows.
@@ -54,6 +56,7 @@ world:
   used_parameters: { type: object, default: {} }
   prepared_parameters: { type: object, default: {} }
   search_result:   { type: object, default: {} }
+  remote_selected: { type: bool, default: false }
   error_detail:    { type: string, default: "" }
 
 intents:

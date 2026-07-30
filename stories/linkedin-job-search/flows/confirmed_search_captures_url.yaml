@@ -9,6 +9,8 @@ host_handlers:
           ok: true
           submitted:
             results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
+            remote_selected: true
+            bridge_actions: [navigate, select_remote, snapshot]
             parameters:
               keywords: "Product Manager"
               location: "United States; Remote"
@@ -29,6 +31,7 @@ turns:
       search_status: "complete"
       results_url: "https://www.linkedin.com/jobs/search-results/?keywords=Product+Manager&geoId=103644278&f_WT=2"
       used_parameters: { keywords: "Product Manager", location: "United States; Remote" }
+      remote_selected: true
     expect_host_calls:
       - handler: host.agent.task
         args: { call: "navigate_confirmed_linkedin_jobs_url" }
