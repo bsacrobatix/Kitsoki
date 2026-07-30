@@ -71,7 +71,9 @@ type Orchestrator struct {
 	// promptRenderer renders agent prompt files through the story's prompt
 	// search path (overlay → story) so a prompt can {% extends %} / {% include %}
 	// the story's base prompts and a project can extend a story without forking
-	// it. Built once from def.BaseDir + def.Prompts; nil when there's no
+	// it. Built from def.BaseDir + def.Prompts in New, and rebuilt in Reload
+	// (see reload.go) so it never serves a stale story dir's prompts once a
+	// revision swap points def.BaseDir somewhere new. nil when there's no
 	// on-disk story dir (LoadBytes / tests), in which case agent handlers use
 	// the legacy KITSOKI_APP_DIR + render.Pongo path. See docs/stories/prompts.md.
 	promptRenderer *render.AppRenderer
@@ -202,6 +204,15 @@ type Orchestrator struct {
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu      sync.Mutex
 	pending map[app.SessionID]*pendingClarify
+	// pendingDef is a one-shot definition override for the NEXT Reload call,
+	// armed by SetPendingDef (see appdef_binding.go) and always consumed —
+	// win or lose — by takePendingDef. It exists so a revision swap
+	// (appdef.SessionBinding.SwapDef calling Reload) can install a specific,
+	// already-compiled *app.AppDef instead of Reload silently falling through
+	// to its injected WithReloader closure or a disk read, which would look
+	// like it worked while quietly serving the wrong definition. Guarded by
+	// mu like every other mutable Orchestrator field.
+	pendingDef *app.AppDef
 	// cancelListeners holds the cancel funcs for per-session listener goroutines.
 	// Goroutines are torn down when the session is closed.
 	cancelListeners map[app.SessionID]context.CancelFunc

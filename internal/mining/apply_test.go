@@ -23,7 +23,7 @@ type fakeReloader struct {
 	failNext bool
 }
 
-func (f *fakeReloader) Reload(_ string, _ app.StatePath) error {
+func (f *fakeReloader) Reload(_ string, _ app.StatePath, _ app.SessionID) error {
 	f.reloads++
 	if f.failNext {
 		f.failNext = false

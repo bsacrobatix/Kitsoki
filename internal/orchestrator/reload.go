@@ -45,12 +45,30 @@ type ReloadResult struct {
 // so this rarely matters.
 //
 // Reload is **not** safe to call concurrently with Turn, SubmitDirect,
-// OneShot, or ContinueTurn. The TUI guards this by ensuring its
-// edit-mode and turn-in-flight modes are mutually exclusive.
+// OneShot, or ContinueTurn for the same session — it swaps o.def/o.machine
+// under o.mu, while those readers serialize amongst themselves (and against
+// the background handleJobTerminal listener) using a DIFFERENT, per-session
+// lock and mostly never take o.mu at all. Prefer [Orchestrator.ReloadForSession]
+// or [Orchestrator.ReloadWithDef], which take that same per-session lock
+// around this call and close the race. Callers with no session to
+// serialize against (tests, sessionless flows) may still call this
+// directly.
 func (o *Orchestrator) Reload(appPath string, prevState app.StatePath) (*ReloadResult, error) {
 	var def *app.AppDef
 	var err error
-	if o.reloader != nil {
+	// A one-shot pending def (armed by SetPendingDef — see appdef_binding.go's
+	// SessionBinding.SwapDef, the revision-reload seam) always wins over both
+	// the injected reloader closure and a disk read. takePendingDef clears the
+	// cell unconditionally, whether or not the rest of this call succeeds, so
+	// a failed revision swap can never leak into a later, unrelated
+	// disk/closure reload. Without this cell, a session with both a revision
+	// pin AND a WithReloader closure installed (every session, once the
+	// revision layer is fully wired) would silently reload from the closure
+	// instead of the intended revision — the most dangerous failure mode
+	// here, because it looks like it worked.
+	if pending := o.takePendingDef(); pending != nil {
+		def = pending
+	} else if o.reloader != nil {
 		def, err = o.reloader()
 		if err != nil {
 			return nil, fmt.Errorf("orchestrator.Reload: reloader: %w", err)
@@ -78,6 +96,18 @@ func (o *Orchestrator) Reload(appPath string, prevState app.StatePath) (*ReloadR
 	o.mu.Lock()
 	o.def = def
 	o.machine = m
+	// machine.New (above) already rebuilt the VIEW renderer, so views
+	// self-heal across a reload for free. o.promptRenderer did not: it was
+	// built exactly once, in New (see buildPromptRenderer's call site there),
+	// so without this line every reload after the first would keep rendering
+	// agent prompts from the ORIGINAL def's BaseDir. That was invisible as
+	// long as every reload re-read the same directory on disk — the old and
+	// "new" def shared a BaseDir. A revision reload breaks that assumption:
+	// it swaps BaseDir to a freshly materialised tree, which turns the stale
+	// promptRenderer into a live correctness bug (a session serving revision
+	// d1's def would keep rendering revision d0's prompts). Rebuild it here
+	// so it always tracks the just-installed def.
+	o.promptRenderer = buildPromptRenderer(def, o.promptOverlay)
 	// Push the new def into the harness too, so the LLM-router's system
 	// prompt reflects new states/intents on the very next turn.
 	// Harnesses that don't build their prompt from def (Replay, Recording)
@@ -95,6 +125,49 @@ func (o *Orchestrator) Reload(appPath string, prevState app.StatePath) (*ReloadR
 // Recording don't (they have no system prompt to rebuild).
 type defSetter interface {
 	SetAppDef(*app.AppDef)
+}
+
+// ReloadForSession is [Reload], serialized against every other operation for
+// sid via the same per-session lock Turn / SubmitDirect / ContinueTurn /
+// RerunOnEnter / the background handleJobTerminal listener already hold for
+// the whole duration of their o.def / o.machine reads (see
+// Orchestrator.sessionLocks). Reload's own doc says it is unsafe
+// concurrently with those; without this, a background job-completion turn
+// (handleJobTerminal, driven by an async scheduler listener goroutine with
+// no relationship to any RPC-level gate) or any other sid-scoped reader can
+// observe torn o.def/o.machine values mid-swap, or straddle two different
+// definitions across its own re-reads of o.machine. Any caller that knows
+// which session it is reloading should call this instead of the bare
+// Reload — the bare form stays as the low-level primitive for callers with
+// no sid to serialize against (tests, `kitsoki turn` one-shot flows).
+func (o *Orchestrator) ReloadForSession(appPath string, prevState app.StatePath, sid app.SessionID) (*ReloadResult, error) {
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	return o.Reload(appPath, prevState)
+}
+
+// ReloadWithDef is ReloadForSession plus atomically arming the one-shot
+// pending-def cell (SetPendingDef) before calling Reload, all under sid's
+// session lock. This closes a narrower race than ReloadForSession alone: if
+// SetPendingDef and Reload were two separate calls — as
+// SessionBinding.SwapDef used to make them — a concurrent
+// ReloadForSession/ReloadWithDef call for the SAME session (e.g. the mining
+// apply gate's own reload) could interleave between them and consume the
+// armed def via its own takePendingDef call, leaving the ORIGINAL caller's
+// Reload to silently fall through to the injected reloader closure or a
+// disk read instead of installing the revision it was meant to install —
+// the single most dangerous failure mode in the revision-reload design,
+// because the swap still "succeeds", just with the wrong definition.
+// Holding sid's lock across both SetPendingDef and Reload makes that
+// interleaving impossible for any other caller that also goes through
+// ReloadForSession/ReloadWithDef for the same sid.
+func (o *Orchestrator) ReloadWithDef(sid app.SessionID, def *app.AppDef, prevState app.StatePath) (*ReloadResult, error) {
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	o.SetPendingDef(def)
+	return o.Reload("", prevState)
 }
 
 // stateExists reports whether a (possibly dotted) state path resolves

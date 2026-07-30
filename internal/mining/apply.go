@@ -12,15 +12,20 @@ import (
 )
 
 // Reloader is the meta-mode reload seam, satisfied by *orchestrator.Orchestrator
-// in production (Reload + RerunOnEnter, world preserved) and a fake in tests.
-// The apply gate drives it after writing the staged delta and again after a
-// revert. Implementations MUST be safe against a concurrent turn only when the
-// caller holds the per-chat lock (see Apply's Lock).
+// in production (ReloadForSession + RerunOnEnter, world preserved) and a fake
+// in tests. The apply gate drives it after writing the staged delta and again
+// after a revert. Implementations MUST be safe against a concurrent turn only
+// when the caller holds the per-chat lock (see Apply's Lock) — in production
+// this is additionally backstopped by the orchestrator's own per-session lock
+// (see internal/orchestrator.Orchestrator.ReloadForSession), which serializes
+// Reload against any concurrent turn or background job-completion turn for
+// sid regardless of what mining-level locking is or isn't held.
 type Reloader interface {
-	// Reload re-reads the app at appPath, rebuilds the machine, and swaps it in.
-	// prevState lets the implementation report whether the operator's state
-	// survives the swap; the mining gate ignores that (the world is preserved).
-	Reload(appPath string, prevState app.StatePath) error
+	// Reload re-reads the app at appPath, rebuilds the machine, and swaps it
+	// in, serialized against any other reload/turn for sid. prevState lets
+	// the implementation report whether the operator's state survives the
+	// swap; the mining gate ignores that (the world is preserved).
+	Reload(appPath string, prevState app.StatePath, sid app.SessionID) error
 	// RerunOnEnter re-fires the entered state's on_enter chain against the live
 	// world so the reloaded structure takes effect without a re-typed intent.
 	RerunOnEnter(ctx context.Context, sid app.SessionID) error
@@ -223,7 +228,7 @@ func (a *Applier) revertAndHold(ctx context.Context, sink *SessionSink, recipeID
 }
 
 func (a *Applier) reload(ctx context.Context) error {
-	if err := a.Reloader.Reload(a.appPath(), a.State); err != nil {
+	if err := a.Reloader.Reload(a.appPath(), a.State, a.SID); err != nil {
 		return err
 	}
 	return a.Reloader.RerunOnEnter(ctx, a.SID)

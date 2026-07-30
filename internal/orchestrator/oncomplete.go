@@ -356,11 +356,26 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		return fmt.Errorf("handleJobTerminal: append events: %w", appendErr)
 	}
 
-	// AppendEvents committed.  Release the per-session lock now so the
-	// observer callback below (which the TUI uses to re-render its
-	// transcript) can safely re-enter the orchestrator without
-	// deadlocking against the foreground Turn path.
-	unlock()
+	// AppendEvents committed. The per-session lock (sessMu) stays held through
+	// the notification post AND the render-for-observers block below — both
+	// are pure orchestrator-internal work (o.def/o.machine reads, inbox/job
+	// store writes) with no observer re-entrancy risk. It is released just
+	// before the ACTUAL observer callback (o.notifyBackgroundTurn) further
+	// down, which is the one call that can re-enter the orchestrator (the TUI
+	// observer's re-render can call back into Turn/LoadJourney) and so is the
+	// only thing that must run unlocked.
+	//
+	// This used to unlock() here, before the render-for-observers block —
+	// which left o.loadJourney/o.machine.RenderStateTyped/o.def reads
+	// AFTER this point completely unguarded against a concurrent
+	// Reload/ReloadForSession swapping o.def/o.machine out from under them.
+	// `go test -race -run TestReloadForSession_NoRaceAgainstBackgroundJobCompletion
+	// -count=25` reliably caught this: a WARNING: DATA RACE between this
+	// block's o.machine.RenderStateTyped/o.def reads and a concurrent
+	// Reload's o.def/o.machine writes, even with ReloadForSession's
+	// sessMu-based serialization already in place — because THIS function had
+	// already released sessMu before reaching here. See the appdef-live-edit
+	// review's blocker finding on the reload-vs-turn race.
 
 	// Post a completion notification.
 	if o.jobStore != nil {
@@ -434,6 +449,13 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		slog.Int("on_complete_count", len(onComplete)),
 		slog.String("phase", "committed"),
 	)
+
+	// Release the per-session lock now, immediately before the ONE call
+	// below that can re-enter the orchestrator (the TUI observer's
+	// re-render may call back into Turn/LoadJourney) — see the comment
+	// above appendEventsAndJournal's caller for why everything above this
+	// point now stays inside the lock.
+	unlock()
 
 	// Fan out to observers (TUI re-render, audit log, etc.).  Done last
 	// so any panic inside an observer cannot prevent the notification or

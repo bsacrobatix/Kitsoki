@@ -4080,7 +4080,7 @@ func (m RootModel) handleReloadSlash(args []string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	res, err := m.orch.Reload(m.appPath, m.currentState)
+	res, err := m.orch.ReloadForSession(m.appPath, m.currentState, m.sid)
 	if err != nil {
 		m.transcript.AppendWarning("/reload",
 			fmt.Sprintf("Attempting to reload the story failed due to syntax errors — "+
@@ -4142,7 +4142,7 @@ func asyncRerunOnEnter(orch *orchestrator.Orchestrator, sid app.SessionID, force
 // agent touched so the user can see whether the change landed in
 // app.yaml, an include, a prompt, or a script.
 func (m RootModel) reloadOrchestratorAfterMetaWithFiles(changed []string) (tea.Model, tea.Cmd) {
-	res, err := m.orch.Reload(m.appPath, m.currentState)
+	res, err := m.orch.ReloadForSession(m.appPath, m.currentState, m.sid)
 	if err != nil {
 		m.transcript.AppendWarning("(meta)",
 			"Attempting to reload the story failed due to syntax errors — "+

@@ -21,14 +21,18 @@ import (
 // does not need (the world is preserved across the swap regardless).
 type reloaderAdapter struct{ orch *orchestrator.Orchestrator }
 
-// Reloader returns the mining.Reloader backed by orch. It is the same Reload +
-// RerunOnEnter path the TUI edit-mode drives.
+// Reloader returns the mining.Reloader backed by orch. It is the same
+// ReloadForSession + RerunOnEnter path the TUI edit-mode drives — routed
+// through ReloadForSession (not the bare Reload) so the miner's own reload
+// is serialized, via the orchestrator's per-session lock, against any
+// concurrent turn, background job-completion turn, or definition-control-
+// plane revision swap for the SAME session, instead of racing them.
 func Reloader(orch *orchestrator.Orchestrator) mining.Reloader {
 	return reloaderAdapter{orch: orch}
 }
 
-func (a reloaderAdapter) Reload(appPath string, prevState app.StatePath) error {
-	_, err := a.orch.Reload(appPath, prevState)
+func (a reloaderAdapter) Reload(appPath string, prevState app.StatePath, sid app.SessionID) error {
+	_, err := a.orch.ReloadForSession(appPath, prevState, sid)
 	return err
 }
 
