@@ -126,6 +126,9 @@ run_launch() {
       KITSOKI_BIN="$KITSOKI_BIN_PATH" \
       KITSOKI_AGENT_CLAUDE_BIN="$KITSOKI_AGENT_CLAUDE_BIN" \
       KITSOKI_AGENT_CODEX_BIN="$KITSOKI_AGENT_CODEX_BIN" \
+      KITSOKI_AGENT_MAIL_URL="${KITSOKI_AGENT_MAIL_URL:-}" \
+      KITSOKI_AGENT_MAIL_TOKEN="${KITSOKI_AGENT_MAIL_TOKEN:-}" \
+      KITSOKI_AGENT_MAIL_MCP_CONFIG="${KITSOKI_AGENT_MAIL_MCP_CONFIG:-}" \
       "$0" "$@"
   ' "$backend" "$workdir" "$@" < /dev/null
 }
@@ -198,6 +201,31 @@ run_launch codex "$workspace" -m fast '; rm -rf /' '`whoami`' \
 grep -qx 'ARG:; rm -rf /' "$log" || fail "codex argv injection payload was altered"
 grep -qx 'ARG:`whoami`' "$log" || fail "codex argv backtick payload was evaluated instead of passed through literally"
 echo "PASS: adversarial native argv (shell metacharacters, injection-shaped strings) survives unevaluated"
+
+# --- 4b: optional Agent Mail reaches both governed backend shims ------------
+agent_mail_config="$tmp/agent-mail.mcp.json"
+printf '%s\n' '{"mcpServers":{"agent-mail":{"type":"http","url":"http://127.0.0.1:8765/mcp/","headers":{"Authorization":"Bearer ${KITSOKI_AGENT_MAIL_TOKEN}"}}}}' > "$agent_mail_config"
+: > "$log"
+KITSOKI_AGENT_MAIL_URL="http://127.0.0.1:8765/mcp/" \
+  KITSOKI_AGENT_MAIL_TOKEN="test-agent-mail-token" \
+  KITSOKI_AGENT_MAIL_MCP_CONFIG="$agent_mail_config" \
+  run_launch claude "$workspace" --model mail-test \
+  || fail "Agent Mail Claude launch failed"
+grep -qx 'ARG:--mcp-config' "$log" || fail "Agent Mail Claude launch omitted --mcp-config"
+grep -qx "ARG:$agent_mail_config" "$log" || fail "Agent Mail Claude launch omitted its MCP config path"
+
+: > "$log"
+KITSOKI_AGENT_MAIL_URL="http://127.0.0.1:8765/mcp/" \
+  KITSOKI_AGENT_MAIL_TOKEN="test-agent-mail-token" \
+  run_launch codex "$workspace" -m mail-test \
+  || fail "Agent Mail Codex launch failed"
+grep -qx 'ARG:-c' "$log" || fail "Agent Mail Codex launch omitted config overrides"
+grep -qx 'ARG:mcp_servers.agent-mail.url=http://127.0.0.1:8765/mcp/' "$log" \
+  || fail "Agent Mail Codex launch omitted its MCP URL"
+grep -qx 'ARG:mcp_servers.agent-mail.bearer_token_env_var=KITSOKI_AGENT_MAIL_TOKEN' "$log" \
+  || fail "Agent Mail Codex launch omitted bearer token environment binding"
+grep -q 'test-agent-mail-token' "$log" && fail "Agent Mail token leaked into backend argv"
+echo "PASS: optional Agent Mail config reaches Claude and Codex launcher shims without leaking tokens"
 
 # --- 5: superagent creates a managed workspace before policy launch --------
 : > "$tmp/capsule-workspaces.log"

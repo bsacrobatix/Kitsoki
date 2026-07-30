@@ -144,5 +144,32 @@ if [ "${1:-}" = "unlimited" ]; then
 fi
 
 args=(agent launch --raw --interactive --backend "$backend" --working-dir "$working_dir" --config "$config_path")
+# Agent Mail is an opt-in, machine-local endpoint shared by all repositories
+# under a developer's orchestration root.  Keep its URL and bearer token out of
+# project configuration: launcher-env.sh loads them from agent-mail.env, and
+# the shim attaches the appropriate native transport only for governed launches.
+#
+# Claude consumes the portable MCP JSON file (which may contain ${VAR}
+# expansion); Codex consumes direct TOML overrides and reads the token from its
+# named environment variable.  Caller-supplied native args remain last so they
+# retain normal CLI precedence.
+if [ -n "${KITSOKI_AGENT_MAIL_URL:-}" ]; then
+  case "$backend" in
+    claude)
+      agent_mail_mcp_config="${KITSOKI_AGENT_MAIL_MCP_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/kitsoki/agent-mail.mcp.json}"
+      [ -r "$agent_mail_mcp_config" ] || {
+        echo "Kitsoki launcher shim: KITSOKI_AGENT_MAIL_URL is set but Agent Mail MCP config is unreadable: $agent_mail_mcp_config" >&2
+        exit 2
+      }
+      args+=(--raw-arg --mcp-config --raw-arg "$agent_mail_mcp_config")
+      ;;
+    codex)
+      args+=(--raw-arg -c --raw-arg "mcp_servers.agent-mail.url=${KITSOKI_AGENT_MAIL_URL}")
+      if [ -n "${KITSOKI_AGENT_MAIL_TOKEN:-}" ]; then
+        args+=(--raw-arg -c --raw-arg "mcp_servers.agent-mail.bearer_token_env_var=KITSOKI_AGENT_MAIL_TOKEN")
+      fi
+      ;;
+  esac
+fi
 for arg in "$@"; do args+=(--raw-arg "$arg"); done
 KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE=1 "$kitsoki_bin" "${args[@]}"
