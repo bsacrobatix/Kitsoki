@@ -166,17 +166,21 @@ func queueSweepCmd() *cobra.Command {
 // needs_human on exhaustion. It never touches needs_input or needs_human,
 // never calls `queue override`, and never skips a test — see
 // queue.MedicDeps's doc and docs/architecture/merge-queue.md. `queue worker
-// --medic` runs the identical pass once per worker cycle instead of as a
-// separate process; this standalone form exists for operators who run the
-// worker without --medic, or who want the medic on its own schedule.
+// --medic` runs the identical pass on the worker's own throttled schedule
+// (see defaultMedicInterval) instead of as a separate process; this
+// standalone form exists for operators who run the worker without --medic,
+// or who want the medic on its own schedule. Both forms accept --target to
+// scope every action to one protected target — required for a multi-target
+// store, since the medic must never un-park or escalate a candidate bound
+// to a target it has no authority over (see MedicDeps.TargetRef).
 func queueMedicCmd() *cobra.Command {
-	var project, queueRoot, medicID string
+	var project, queueRoot, medicID, target string
 	var maxDispatches, gateFailureThreshold int
 	var deadline time.Duration
 	var repairerConfigured, once bool
 	cmd := &cobra.Command{Use: "medic", Short: "Retry productively on stalled needs_conflict_input / repeated-gate-failure candidates via existing verbs; escalate honestly to needs_human on exhaustion", RunE: func(cmd *cobra.Command, _ []string) error {
 		store := queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: queueWorkerLockWait}
-		deps := queue.MedicDeps{MedicID: medicID, MaxDispatches: maxDispatches, Deadline: deadline, RepairerConfigured: repairerConfigured, GateFailureThreshold: gateFailureThreshold}
+		deps := queue.MedicDeps{MedicID: medicID, MaxDispatches: maxDispatches, Deadline: deadline, RepairerConfigured: repairerConfigured, GateFailureThreshold: gateFailureThreshold, TargetRef: target}
 		for {
 			result, err := store.MedicRunOnce(deps)
 			if err != nil {
@@ -197,6 +201,7 @@ func queueMedicCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&queueRoot, "queue-root", "", "exact external queue authority directory (default <project>/.capsules/queue)")
+	cmd.Flags().StringVar(&target, "target", "", "scope every medic action to candidates bound to this protected target ref (default: unscoped, matches every target — only safe for a single-target-per-store deployment; a multi-target store should pass the exact --target the corresponding `queue worker` uses)")
 	cmd.Flags().StringVar(&medicID, "medic-id", "", "durable medic identity recorded in evidence and needs_human parked_by (default queue-medic)")
 	cmd.Flags().IntVar(&maxDispatches, "max-dispatches", queue.DefaultMedicMaxDispatches, "productive retries (resolver dispatch / gate kick) per candidate before escalating to needs_human")
 	cmd.Flags().DurationVar(&deadline, "deadline", queue.DefaultMedicDeadline, "wall-clock bound since a candidate's first medic touch before escalating to needs_human, independent of the dispatch count")
@@ -502,6 +507,15 @@ func queueWorkerCmd() *cobra.Command {
 				MedicID: first(workerID, "queue-worker"), MaxDispatches: medicMaxDispatches,
 				Deadline: medicDeadline, RepairerConfigured: strings.TrimSpace(repair) != "",
 				GateFailureThreshold: medicGateFailureThreshold,
+				// TargetRef must mirror this worker's own scope: deps.TargetRef
+				// (queueProcessDepsWithRoot's normalized target, never the raw
+				// possibly-empty --target flag) is exactly what
+				// claimPreparation/finalize/update already refuse to cross (see
+				// Worker.matchesTarget). A store commonly holds candidates for
+				// more than one protected target at once, and a worker bound to
+				// one target has no authority to un-park or escalate another
+				// target's candidates.
+				TargetRef: deps.TargetRef,
 			}
 		}
 		if n == 1 {
@@ -586,26 +600,44 @@ func queueWorkerStore(project, queueRoot string) queue.Store {
 	return queue.Store{ProjectRoot: project, QueueRoot: queueRoot, LockWait: queueWorkerLockWait}
 }
 
+// defaultMedicInterval bounds how often runQueueWorkerLoop invokes
+// store.MedicRunOnce in its continuous (non---once) form. MedicRunOnce does
+// its own full state.lock acquisition and state.json decode — exactly the
+// cost the loop's idle 1s poll (below) already exists to avoid paying
+// several times a second — so a busy loop cycling every 250ms must not also
+// run a full medic pass every single cycle. The medic's own actions
+// (dispatching a stalled resolver, kicking a backoff) are not latency
+// sensitive the way admission is, so a several-second floor between passes
+// costs nothing productive while cutting an idle worker's lock contention
+// and decode volume back down to what it was before --medic existed.
+const defaultMedicInterval = 5 * time.Second
+
 // runQueueWorkerLoop drives one worker's claim/prepare/finalize loop to
 // completion (--once: exactly one step, plus exactly one medic pass when
 // medic is non-nil) or until ctx is cancelled. It never prints; the caller
 // decides when and how often to report state, so running several of these
 // concurrently under --concurrency does not interleave or duplicate output.
-// medic, when non-nil, runs one queue.Store.MedicRunOnce pass every outer
-// iteration — the "medic loop in the queue worker" this item asks for; nil
-// disables it entirely (the default, and every existing caller's behavior
-// before this item).
+// medic, when non-nil, runs its first queue.Store.MedicRunOnce pass on the
+// very first outer iteration (so --once always gets exactly one pass, as
+// every existing caller relies on) and thereafter at most once every
+// defaultMedicInterval — the "medic loop in the queue worker" this item
+// asks for, without turning every claim/prepare/finalize tick (as fast as
+// every 250ms while the train is progressing) into a second full state
+// lock+decode; nil disables it entirely (the default, and every existing
+// caller's behavior before this item).
 func runQueueWorkerLoop(ctx context.Context, store queue.Store, deps queue.ProcessDeps, once bool, medic *queue.MedicDeps) error {
 	worker := queue.Worker{Store: store, Deps: deps}
+	var lastMedic time.Time
 	for {
 		progressed, err := worker.RunOnce(ctx)
 		if err != nil {
 			return err
 		}
-		if medic != nil {
+		if medic != nil && (once || lastMedic.IsZero() || time.Since(lastMedic) >= defaultMedicInterval) {
 			if _, err := store.MedicRunOnce(*medic); err != nil {
 				return err
 			}
+			lastMedic = time.Now()
 		}
 		if once {
 			return nil

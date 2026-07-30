@@ -24,11 +24,16 @@ type StatusSummary struct {
 	NeedsHumanCount int    `json:"needs_human_count,omitempty"`
 	OldestParkedAge string `json:"oldest_parked_age,omitempty"`
 	// MedicActionCounts rolls up MedicLastAction (P1.7 part 2's medic — see
-	// medic.go) across every candidate the medic has ever touched:
+	// medic.go) across every non-terminal candidate the medic has touched:
 	// "dispatch_resolver", "kick_gate_retry", or "escalate:<reason>" —
 	// "what did the medic do last, and how often" at a glance, without
 	// eyeballing every candidate's StatusLine. A candidate the medic never
-	// touched contributes nothing.
+	// touched contributes nothing. Landed/Rejected candidates are excluded
+	// (matching terminal(phase), the same reason ReasonCodeCounts gates on
+	// RetryWait/parked) so this roll-up reflects the live queue rather than
+	// growing monotonically forever as compacted terminal history
+	// accumulates a MedicLastAction stamp from whenever the medic last
+	// touched a candidate that has since landed or was rejected.
 	MedicActionCounts map[string]int `json:"medic_action_counts,omitempty"`
 }
 
@@ -57,7 +62,7 @@ func Summarize(state State, at time.Time) StatusSummary {
 		if c.ReasonCode != "" && (phase == RetryWait || parked(phase)) {
 			summary.ReasonCodeCounts[c.ReasonCode]++
 		}
-		if c.MedicLastAction != "" {
+		if c.MedicLastAction != "" && !terminal(phase) {
 			if summary.MedicActionCounts == nil {
 				summary.MedicActionCounts = map[string]int{}
 			}

@@ -204,13 +204,49 @@ failing") and a dispatch-count ceiling (escalates with the specific
 `resume`/`override` reset this budget too — a human declaring the underlying
 cause fixed gets the medic a fresh budget, not a mid-exhaustion one.
 
+A third, reaper arm covers the case where the medic *has* dispatched a
+candidate back to `queued`/`reprepare` but nothing ever re-drives it into
+`needs_conflict_input`/`retry_wait` again before the deadline — no worker
+running for this target, the worker down, or a standalone `queue medic`
+running with no worker process at all. Without this arm such a candidate
+would sit forever with its medic budget already spent and nothing left in
+the scan able to revisit it (the switch only matches
+`needs_conflict_input`/`retry_wait`). This is what makes "every candidate the
+medic touches ends up progressing or in `needs_human`" hold unconditionally,
+not just in the common case of a live worker claiming its own dispatch
+promptly.
+
+**Caveat on `--medic-max-dispatches` vs `--max-attempts`:** the gate-retry arm
+can escalate a candidate to `repairer-exhausted` while it still has ordinary
+attempts left under `--max-attempts` — e.g. `--medic-max-dispatches 3` with
+`--max-attempts 10` escalates around attempt 5 (threshold 2 + 3 dispatches)
+even though `retryOrPark` would have kept retrying through attempt 10. The
+direction is conservative (nothing lands unverified), but it does mean a
+worker configured with a much larger `--max-attempts` than
+`--medic-max-dispatches` will see the medic reduce automation throughput
+rather than increase it for that population; size the two together.
+
 `needs_input` and `needs_human` are never touched. `needs_input` is exactly
 what an operator's own `queue park` verb produces; acting on it would mean
 silently overriding a human's explicit decision to leave a candidate alone.
 `needs_human` is the terminal that says automation is already out of
 options — the medic is part of "automation" for this purpose and must not
 re-litigate its own prior verdict outside the one exhaustion transition
-above.
+above. **This means `--medic` alone does not clear a `needs_input` backlog**:
+if most of a deployment's stalled population is operator-parked
+(`reason_code=operator_parked`) rather than `needs_conflict_input` or a
+repeated gate-failure streak, check `queue status`'s phase counts before
+assuming `--medic` will drain it — those candidates need a human `resume`,
+by design.
+
+A dispatched candidate's queue `position` is also reset to the back of the
+line (`nextPosition`, exactly what an ordinary `retryOrPark` failure already
+does), not left at whatever position it held when it parked. Finalization
+picks its head by position, so an un-parked known-stalled candidate that kept
+its old (often earliest) position would re-occupy the finalization head and
+block every healthy candidate behind it for up to
+`--medic-max-dispatches` full prepare cycles; resetting position means a
+medic-dispatched candidate can only ever delay itself, never the train.
 
 Every medic action is one lock-protected read-mutate-write, exactly like
 `Worker.claimPreparation`'s own lease-expiry sweep: there is no separate
@@ -218,7 +254,20 @@ medic lease to fence, because a candidate a prior (or concurrent, or
 pre-restart) pass already moved out of `needs_conflict_input`/`retry_wait`
 is simply not matched by the next pass. A worker restart between two medic
 passes cannot double-dispatch — the durable write is atomic, so a crash
-before it lands leaves the candidate exactly as if the pass never ran.
+before it lands leaves the candidate exactly as if the pass never ran. This
+also serializes genuinely concurrent callers (two medic-enabled workers, or a
+worker plus a standalone `queue medic`, racing on the same `state.lock`) down
+to exactly one dispatch, not just sequential restarts.
+
+**Multi-target stores:** a store commonly holds candidates for more than one
+protected target at once. `MedicDeps.TargetRef` scopes every medic action
+exactly like `Worker.Deps.TargetRef` scopes `claimPreparation`/`finalize`/
+`update` — a worker (or standalone medic) bound to one target has no
+authority to un-park, kick, or escalate a candidate bound to a different
+target, and must set `--target` to match. Left unset, the medic matches
+every candidate regardless of target, which is only safe for a
+single-target-per-store deployment or a deliberately unscoped standalone
+pass.
 
 `queue status` renders the medic's last action per candidate
 (`medic_last=<verb>@<time> medic_dispatches=<n>`, appended the same
@@ -229,13 +278,19 @@ append-never-insert way `reason_code=`/`needs_human_evidence=` are) and a
 
 Two equivalent surfaces, both wrapping `queue.Store.MedicRunOnce`:
 
-- **`kitsoki queue worker --medic`** runs one medic pass per outer worker
-  cycle, inside the same process (`runQueueWorkerLoop`'s `medic` parameter).
-  This is the intended production wiring: POG's worker invocation
+- **`kitsoki queue worker --medic`** runs the medic pass inside the same
+  process (`runQueueWorkerLoop`'s `medic` parameter). This is the intended
+  production wiring: POG's worker invocation
   (`scripts/kitsoki-queue-worker.sh` → `kitsoki queue worker`) should add
   `--medic` alongside its existing `--repair` (when configured — see below)
-  and `--resolver` flags. Under `--concurrency > 1` only the base
-  (`-1`-suffixed) loop runs the medic; the others do not duplicate the scan.
+  and `--resolver` flags. It runs on the very first outer iteration and
+  thereafter at most once every `defaultMedicInterval` (5s) — not on every
+  claim/prepare/finalize tick, which can be as fast as every 250ms while the
+  train is progressing — so a busy worker does not pay for a second full
+  `state.lock` acquisition and `state.json` decode several times a second;
+  `--once` always still gets exactly one pass. Under `--concurrency > 1` only
+  the base (`-1`-suffixed) loop runs the medic at all; the others do not
+  duplicate the scan.
 - **`kitsoki queue medic`** is the identical pass as a standalone,
   independently-scheduled process (`--once` for a single pass, otherwise a
   1s-polling loop), for an operator who runs the worker without `--medic`
@@ -246,18 +301,24 @@ Flags (both surfaces; the standalone command omits the `medic-` prefix):
 | `queue worker` flag                  | `queue medic` flag       | Default | Meaning |
 | ------------------------------------- | ------------------------ | ------- | ------- |
 | `--medic`                             | *(always on)*             | off     | enable the medic pass |
+| `--target` *(reused from the worker's own flag)* | `--target`     | unscoped | scope every medic action to this protected target ref — **required for a multi-target store**, must match the corresponding `queue worker --target` exactly |
 | `--medic-max-dispatches`               | `--max-dispatches`        | 3       | productive retries per candidate before escalating |
 | `--medic-deadline`                     | `--deadline`              | 2h      | wall-clock bound since a candidate's first medic touch |
 | `--medic-gate-failure-threshold`       | `--gate-failure-threshold`| 2       | consecutive gate-failed attempts before a `retry_wait` candidate is medic-actionable |
 | *(derived from `--repair`)*            | `--repairer-configured`   | false   | whether this worker actually has a repairer configured; the standalone command cannot see the worker's own `--repair`, so it must be told explicitly |
 
-`queue worker --medic` derives `RepairerConfigured` automatically from
-whether `--repair` is non-empty. The standalone `queue medic` process has no
-visibility into a separate worker process's flags, so if POG runs the medic
-standalone against a worker that has `--repair` configured, it must also
-pass `--repairer-configured` — otherwise the medic correctly, silently,
-leaves repeated-gate-failure candidates alone (the safe default) instead of
-accelerating them.
+`queue worker --medic` derives both `RepairerConfigured` (from whether
+`--repair` is non-empty) and `TargetRef` (from the worker's own, already
+normalized `--target`) automatically — POG does not need to pass either
+separately for the embedded form. The standalone `queue medic` process has
+no visibility into a separate worker process's flags, so if POG runs the
+medic standalone against a worker that has `--repair` and/or `--target`
+configured, it must pass `--repairer-configured` and the exact same
+`--target` itself — otherwise the medic correctly, silently, either leaves
+repeated-gate-failure candidates alone (the safe default for a missing
+`--repairer-configured`) or acts across every target in the store (the
+default for an unset `--target`, safe only for a single-target-per-store
+deployment).
 
 ## External worker results: verify privately, then admit
 

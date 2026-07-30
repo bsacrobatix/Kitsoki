@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -88,7 +89,14 @@ func TestMdConflictCandidateGetsExactlyOneResolverDispatch(t *testing.T) {
 // dying immediately after a medic dispatch lands durably, then restarting:
 // a brand-new Store value against the same directory (no shared in-memory
 // state at all) must not re-dispatch the candidate its predecessor already
-// moved out of needs_conflict_input.
+// moved out of needs_conflict_input. Store itself carries no in-process
+// cache (just ProjectRoot/QueueRoot/LockWait), so this mainly pins that the
+// durable state.json — not anything held in memory — is the single source
+// of truth a restarted process reads; see
+// TestMdConcurrentMedicRunOnceSingleFlightsDispatch below for the sharper
+// property (true concurrent access serialized through the same file lock,
+// racing for the actual crash window this test cannot construct because
+// MedicRunOnce's write is a single atomic operation).
 func TestMdRestartMidCycleDoesNotDoubleDispatch(t *testing.T) {
 	store, root, _ := conflictingCandidate(t)
 	deps := ProcessDeps{
@@ -414,6 +422,253 @@ func TestMdResumeResetsMedicBudget(t *testing.T) {
 	if got.MedicDispatches != 0 || !got.MedicFirstDispatchAt.IsZero() || got.MedicKickedAttempt != 0 ||
 		got.MedicLastAction != "" || !got.MedicLastAt.IsZero() || got.MedicLastBy != "" {
 		t.Fatalf("resume did not reset medic budget: %#v", got)
+	}
+}
+
+// TestMdTargetScopingIgnoresCandidatesForOtherTargets pins the target-scoping
+// fix: MedicDeps.TargetRef must gate every branch of the scan exactly like
+// Worker.matchesTarget gates claimPreparation/finalize/update (worker.go's
+// "worker target %q refuses candidate" guard), so `queue worker --target X
+// --medic` (or `queue medic --target X`) never un-parks, kicks the backoff
+// on, or escalates a candidate bound to a different protected target — a
+// target this medic instance has no authority over and no worker in this
+// process could ever claim, matchesTarget, or finalize.
+func TestMdTargetScopingIgnoresCandidatesForOtherTargets(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+
+	conflict := wltSubmit(t, store, "target-scope-conflict")
+	beforeConflict := wltMutate(t, store, conflict.ID, func(cand *Candidate) {
+		cand.TargetRef = "other-target"
+		cand.Phase, cand.Status = NeedsConflictInput, NeedsConflictInput
+		cand.ConflictContinuation = "cont-1"
+	})
+
+	gateRetry := wltSubmit(t, store, "target-scope-gate-retry")
+	beforeGateRetry := wltMutate(t, store, gateRetry.ID, func(cand *Candidate) {
+		cand.TargetRef = "other-target"
+		cand.Phase, cand.Status = RetryWait, RetryWait
+		cand.Attempt = 5
+		cand.ReasonCode = ReasonGateFailed
+		cand.RetryAt = time.Date(2026, 7, 30, 1, 0, 0, 0, time.UTC)
+	})
+
+	stranded := wltSubmit(t, store, "target-scope-stranded")
+	beforeStranded := wltMutate(t, store, stranded.ID, func(cand *Candidate) {
+		cand.TargetRef = "other-target"
+		cand.Phase, cand.Status = Queued, Queued
+		cand.MedicDispatches = 1
+		cand.MedicFirstDispatchAt = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	})
+
+	deps := MedicDeps{
+		Now: mdClock(time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)), TargetRef: "main",
+		RepairerConfigured: true, GateFailureThreshold: 1, MaxDispatches: 100, Deadline: time.Hour,
+	}
+	result, err := store.MedicRunOnce(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 0 {
+		t.Fatalf("medic acted on mismatched-target candidates: actions=%#v", result.Actions)
+	}
+	if after := mustGet(t, store, conflict.ID); !reflect.DeepEqual(beforeConflict, after) {
+		t.Fatalf("conflict candidate for other-target mutated:\nbefore=%#v\nafter=%#v", beforeConflict, after)
+	}
+	if after := mustGet(t, store, gateRetry.ID); !reflect.DeepEqual(beforeGateRetry, after) {
+		t.Fatalf("gate-retry candidate for other-target mutated:\nbefore=%#v\nafter=%#v", beforeGateRetry, after)
+	}
+	if after := mustGet(t, store, stranded.ID); !reflect.DeepEqual(beforeStranded, after) {
+		t.Fatalf("stranded candidate for other-target mutated:\nbefore=%#v\nafter=%#v", beforeStranded, after)
+	}
+
+	// Control: the same three candidates, unscoped (empty TargetRef matches
+	// every target), all get touched in one pass — proving the zero-actions
+	// result above is genuinely the target filter at work, not a broken
+	// fixture that would never match anything regardless.
+	deps.TargetRef = ""
+	result2, err := store.MedicRunOnce(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result2.Actions) != 3 {
+		t.Fatalf("unscoped medic pass should have acted on all three: actions=%#v", result2.Actions)
+	}
+}
+
+// TestMdConflictDispatchResetsPositionToBackOfLine pins that dispatching a
+// stalled needs_conflict_input candidate moves it to the back of the line
+// (nextPosition, exactly what Worker.retryOrPark does for an ordinary
+// failure) rather than leaving it at its old, often earliest, Position —
+// otherwise an un-parked known-stalled candidate would re-occupy the
+// finalization head (before() orders by Position) and block every healthy
+// candidate behind it.
+func TestMdConflictDispatchResetsPositionToBackOfLine(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	a := wltSubmit(t, store, "position-a")
+	b := wltSubmit(t, store, "position-b")
+	c := wltSubmit(t, store, "position-c")
+
+	// a is the one that stalled: park it as needs_conflict_input without
+	// touching its (lowest, head-of-line) Position, exactly like
+	// failPreparation actually leaves it.
+	wltMutate(t, store, a.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = NeedsConflictInput, NeedsConflictInput
+		cand.ConflictContinuation = "cont-1"
+	})
+
+	result, err := store.MedicRunOnce(MedicDeps{Now: mdClock(time.Now().UTC()), MaxDispatches: 3, Deadline: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Verb != "dispatch_resolver" {
+		t.Fatalf("actions=%#v", result.Actions)
+	}
+	got := mustGet(t, store, a.ID)
+	bAfter := mustGet(t, store, b.ID)
+	cAfter := mustGet(t, store, c.ID)
+	if got.Position <= bAfter.Position || got.Position <= cAfter.Position {
+		t.Fatalf("dispatched candidate did not move to the back of the line: dispatched.Position=%d b.Position=%d c.Position=%d", got.Position, bAfter.Position, cAfter.Position)
+	}
+}
+
+// TestMdStrandedDispatchPastDeadlineEscalates pins the reaper arm added
+// alongside target scoping: a candidate the medic already dispatched back to
+// Queued that nothing has re-driven (no worker claimed it before the
+// deadline — worker down, target mismatch, or a standalone `queue medic`
+// with no worker running at all) is escalated rather than left to sit
+// forever carrying an already-spent budget with nothing left in the switch
+// able to ever revisit it again.
+func TestMdStrandedDispatchPastDeadlineEscalates(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "stranded-past-deadline")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.MedicDispatches = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+		cand.MedicLastAction, cand.MedicLastBy = "dispatch_resolver", "medic-1"
+	})
+
+	now := dispatchedAt.Add(3 * time.Hour)
+	result, err := store.MedicRunOnce(MedicDeps{Now: mdClock(now), MedicID: "medic-1", MaxDispatches: 3, Deadline: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Verb != "escalate" {
+		t.Fatalf("actions=%#v", result.Actions)
+	}
+	got := mustGet(t, store, c.ID)
+	if got.phase() != NeedsHuman || got.ReasonCode != ReasonBudgetExhausted || got.RetryReason != "medic_deadline_exceeded" {
+		t.Fatalf("phase=%s code=%s reason=%s", got.phase(), got.ReasonCode, got.RetryReason)
+	}
+	if got.ParkedBy != "medic-1" || got.ParkedAt.IsZero() {
+		t.Fatalf("parked attribution: by=%q at=%v", got.ParkedBy, got.ParkedAt)
+	}
+	if got.NeedsHumanEvidenceRef == "" {
+		t.Fatalf("expected a needs_human evidence pointer")
+	}
+}
+
+// TestMdStrandedDispatchWithinDeadlineLeftAlone is the control: a
+// dispatched-but-not-yet-claimed candidate still within its budget is left
+// completely untouched, since it may still be claimed and land normally at
+// any moment — the reaper only ever fires once the deadline has actually
+// passed.
+func TestMdStrandedDispatchWithinDeadlineLeftAlone(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "stranded-within-deadline")
+	dispatchedAt := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	before := wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Queued, Queued
+		cand.MedicDispatches = 1
+		cand.MedicFirstDispatchAt = dispatchedAt
+	})
+
+	now := dispatchedAt.Add(5 * time.Minute)
+	result, err := store.MedicRunOnce(MedicDeps{Now: mdClock(now), MaxDispatches: 3, Deadline: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 0 {
+		t.Fatalf("medic acted on a dispatched candidate still within its deadline: actions=%#v", result.Actions)
+	}
+	after := mustGet(t, store, c.ID)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("candidate mutated while still within deadline:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
+// TestMdStrandedDispatchInReprepareEscalatesPastDeadline pins that the
+// reaper arm also covers Reprepare, the other claimable non-terminal phase a
+// dispatched candidate can land in (see worker.go's claim check), not just
+// Queued.
+func TestMdStrandedDispatchInReprepareEscalatesPastDeadline(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	c := wltSubmit(t, store, "stranded-reprepare")
+	dispatchedAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = Reprepare, Reprepare
+		cand.MedicDispatches = 2
+		cand.MedicFirstDispatchAt = dispatchedAt
+	})
+
+	now := dispatchedAt.Add(3 * time.Hour)
+	result, err := store.MedicRunOnce(MedicDeps{Now: mdClock(now), MaxDispatches: 3, Deadline: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Verb != "escalate" {
+		t.Fatalf("actions=%#v", result.Actions)
+	}
+	got := mustGet(t, store, c.ID)
+	if got.phase() != NeedsHuman || got.ReasonCode != ReasonBudgetExhausted {
+		t.Fatalf("phase=%s code=%s", got.phase(), got.ReasonCode)
+	}
+}
+
+// TestMdConcurrentMedicRunOnceSingleFlightsDispatch is the sharper
+// single-flight property TestMdRestartMidCycleDoesNotDoubleDispatch cannot
+// exercise on its own: several goroutines calling Store.MedicRunOnce
+// concurrently against the same durable state, genuinely racing for the
+// same state.lock file (not just two sequential Store values), must still
+// land exactly one dispatch — proving the lock-protected
+// read-mutate-write actually serializes concurrent medic passes rather than
+// merely tolerating sequential restarts with nothing actually contending.
+func TestMdConcurrentMedicRunOnceSingleFlightsDispatch(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir(), LockWait: 5 * time.Second}
+	c := wltSubmit(t, store, "concurrent-single-flight")
+	wltMutate(t, store, c.ID, func(cand *Candidate) {
+		cand.Phase, cand.Status = NeedsConflictInput, NeedsConflictInput
+		cand.ConflictContinuation = "cont-1"
+	})
+
+	deps := MedicDeps{Now: mdClock(time.Now().UTC()), MedicID: "medic-race", MaxDispatches: 3, Deadline: time.Hour}
+	const n = 8
+	var wg sync.WaitGroup
+	results := make([]MedicResult, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = store.MedicRunOnce(deps)
+		}(i)
+	}
+	wg.Wait()
+
+	totalActions := 0
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+		totalActions += len(results[i].Actions)
+	}
+	if totalActions != 1 {
+		t.Fatalf("want exactly one dispatch total across %d concurrent passes, got %d", n, totalActions)
+	}
+	got := mustGet(t, store, c.ID)
+	if got.MedicDispatches != 1 || got.phase() != Queued {
+		t.Fatalf("candidate double-dispatched or left in the wrong phase: %#v", got)
 	}
 }
 

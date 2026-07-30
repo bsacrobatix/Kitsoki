@@ -519,6 +519,80 @@ func TestQueueMedicCmdOnceDispatchesConflictCandidate(t *testing.T) {
 	require.Equal(t, 1, got.MedicDispatches)
 }
 
+// TestQueueWorkerMedicTargetScopingIgnoresMismatchedTarget pins the
+// target-scoping fix at the worker-loop wiring layer: a MedicDeps.TargetRef
+// that does not match a candidate's own TargetRef leaves it completely
+// untouched, exactly like the worker's own claim/finalize/update already
+// refuse a candidate bound to a different target.
+func TestQueueWorkerMedicTargetScopingIgnoresMismatchedTarget(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(project, ".capsules", "queue")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	state := queue.State{Schema: queue.Schema, Candidates: []queue.Candidate{{
+		ID: "queue-medic-target-mismatch-test", ProjectID: "p", TargetRef: "other-target", TargetPolicy: queue.WaveAutoPolicy,
+		Sequence: 1, Position: 1, Branch: "agent/conflict", SHA: strings.Repeat("d", 40),
+		Admission: queue.ReceiptAdmission, ReceiptID: "sha256:receipt",
+		Status: queue.NeedsConflictInput, Phase: queue.NeedsConflictInput,
+		ConflictContinuation: "cont-1",
+	}}}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600))
+
+	store := queueWorkerStore(project, "")
+	deps := queue.ProcessDeps{Integration: fakeCLIIntegration{}, Gate: fakeCLIGate{}, TargetRef: "main"}
+	medic := &queue.MedicDeps{MedicID: "cli-medic", MaxDispatches: 3, Deadline: time.Hour, TargetRef: "main"}
+	require.NoError(t, runQueueWorkerLoop(context.Background(), store, deps, true, medic))
+
+	got, err := store.Get("queue-medic-target-mismatch-test")
+	require.NoError(t, err)
+	require.Equal(t, queue.NeedsConflictInput, got.Phase, "a worker scoped to a different target must never dispatch a candidate it has no authority over")
+	require.Zero(t, got.MedicDispatches)
+}
+
+// TestQueueMedicCmdTargetFlagScopesActions exercises --target end to end on
+// the standalone `kitsoki queue medic` command: a candidate for a different
+// target is left alone, and the same candidate is dispatched once --target
+// is corrected to match.
+func TestQueueMedicCmdTargetFlagScopesActions(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(project, ".capsules", "queue")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	state := queue.State{Schema: queue.Schema, Candidates: []queue.Candidate{{
+		ID: "queue-medic-standalone-target-test", ProjectID: "p", TargetRef: "main", TargetPolicy: queue.WaveAutoPolicy,
+		Sequence: 1, Position: 1, Branch: "agent/conflict", SHA: strings.Repeat("a", 40),
+		Admission: queue.ReceiptAdmission, ReceiptID: "sha256:receipt",
+		Status: queue.NeedsConflictInput, Phase: queue.NeedsConflictInput,
+		ConflictContinuation: "cont-1",
+	}}}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600))
+
+	wrongTarget := queueMedicCmd()
+	wrongTarget.SetArgs([]string{"--project", project, "--once", "--target", "other-target"})
+	wrongTarget.SetOut(&strings.Builder{})
+	require.NoError(t, wrongTarget.Execute())
+
+	store := queue.Store{ProjectRoot: project}
+	got, err := store.Get("queue-medic-standalone-target-test")
+	require.NoError(t, err)
+	require.Equal(t, queue.NeedsConflictInput, got.Phase, "queue medic --target other-target must not touch a main-target candidate")
+	require.Zero(t, got.MedicDispatches)
+
+	rightTarget := queueMedicCmd()
+	rightTarget.SetArgs([]string{"--project", project, "--once", "--target", "main"})
+	var out strings.Builder
+	rightTarget.SetOut(&out)
+	require.NoError(t, rightTarget.Execute())
+	require.Contains(t, out.String(), "dispatch_resolver")
+
+	got, err = store.Get("queue-medic-standalone-target-test")
+	require.NoError(t, err)
+	require.Equal(t, queue.Queued, got.Phase)
+	require.Equal(t, 1, got.MedicDispatches)
+}
+
 func testCLIReceipt(t *testing.T, sha string) receipt.Receipt {
 	t.Helper()
 	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "definition", Toolchains: map[string]string{}, Network: "none", Sandbox: "process"})

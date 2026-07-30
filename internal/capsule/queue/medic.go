@@ -2,6 +2,7 @@ package queue
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,13 @@ import (
 // "automation" for this purpose and must not re-litigate its own prior
 // verdict, or another dispatch's, outside the one exhaustion transition
 // above.
+//
+// Operationally this means the medic only ever clears the needs_conflict_input
+// and repeated-gate-failure retry_wait slice of a stalled backlog. If most of
+// a deployment's stalled population is needs_input (an operator's own park,
+// ReasonOperatorParked), enabling --medic will not touch it — check the
+// actual phase distribution (`queue status`'s PhaseCounts) before assuming
+// --medic alone clears a backlog.
 type MedicDeps struct {
 	// Now, when set, replaces time.Now for deterministic tests.
 	Now func() time.Time
@@ -77,6 +85,29 @@ type MedicDeps struct {
 	// streak has reached this count on a gate-failed reason becomes
 	// medic-actionable. Zero takes DefaultMedicGateFailureThreshold.
 	GateFailureThreshold int
+	// TargetRef scopes every candidate this medic pass is willing to act on,
+	// exactly like Worker.Deps.TargetRef scopes claimPreparation/finalize/
+	// update (see worker.go's matchesTarget and its "worker target %q
+	// refuses candidate" guard). A store can and does hold candidates for
+	// multiple protected targets at once (worker_lifecycle_test.go,
+	// staging_repair_test.go); a worker bound to one target has no authority
+	// over another target's candidates — it did not admit them, does not
+	// know who (if anyone) owns them, and cannot itself ever claim or
+	// finalize them. Left empty, the medic matches every candidate
+	// regardless of target, which is only safe for a single-target-per-store
+	// deployment or the standalone `queue medic` run deliberately
+	// unscoped.
+	TargetRef string
+}
+
+// matchesTarget reports whether c is within this medic pass's authority: an
+// empty TargetRef matches everything (single-target deployments, or an
+// operator's deliberate unscoped standalone pass); otherwise c.TargetRef must
+// match exactly, mirroring Worker.matchesTarget precisely so `queue worker
+// --target X --medic` never touches a candidate bound to a different target.
+func (d MedicDeps) matchesTarget(c *Candidate) bool {
+	target := strings.TrimSpace(d.TargetRef)
+	return target == "" || c.TargetRef == target
 }
 
 const (
@@ -126,14 +157,19 @@ type MedicResult struct {
 }
 
 // MedicRunOnce performs exactly one bounded pass over every candidate this
-// store's queue currently holds: needs_conflict_input candidates get a
-// resolver dispatch (or an exhaustion escalation), and repairer-eligible
+// store's queue currently holds that matches deps.TargetRef (see
+// MedicDeps.matchesTarget): needs_conflict_input candidates get a resolver
+// dispatch (or an exhaustion escalation), repairer-eligible
 // repeated-gate-failure retry_wait candidates get an early kick (or an
-// exhaustion escalation). Every candidate touched either makes progress
-// (returned to queued, or has its backoff cleared) or is escalated to
-// needs_human with a typed reason and an evidence pointer — the medic never
-// leaves a candidate as it found it forever, and never spins one
-// unboundedly.
+// exhaustion escalation), and a candidate the medic itself already dispatched
+// back to queued/reprepare that nothing has re-driven within the deadline
+// (worker down, no worker claiming this target, or a standalone `queue
+// medic` running with no worker at all) is escalated rather than left to
+// carry a spent budget forever — see medicHandleStrandedDispatch. Every
+// candidate touched either makes progress (returned to queued, or has its
+// backoff cleared) or is escalated to needs_human with a typed reason and an
+// evidence pointer — the medic never leaves a candidate as it found it
+// forever, and never spins one unboundedly.
 //
 // Safe to call repeatedly and from multiple processes without any separate
 // medic lease: the scan and every mutation happen inside one
@@ -154,14 +190,19 @@ func (s Store) MedicRunOnce(deps MedicDeps) (MedicResult, error) {
 		n := deps.now()
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
+			if !deps.matchesTarget(c) {
+				continue
+			}
 			var act MedicAction
 			var touched bool
 			switch {
 			case c.phase() == NeedsConflictInput:
-				act, touched = medicHandleConflict(c, deps, n)
+				act, touched = medicHandleConflict(c, &state, deps, n)
 			case c.phase() == RetryWait && deps.RepairerConfigured && c.ReasonCode == ReasonGateFailed &&
 				c.Attempt >= deps.gateFailureThreshold() && c.MedicKickedAttempt != c.Attempt:
 				act, touched = medicHandleGateRetry(c, deps, n)
+			case (c.phase() == Queued || c.phase() == Reprepare) && c.MedicDispatches > 0:
+				act, touched = medicHandleStrandedDispatch(c, deps, n)
 			}
 			if touched {
 				result.Actions = append(result.Actions, act)
@@ -176,6 +217,13 @@ func (s Store) MedicRunOnce(deps MedicDeps) (MedicResult, error) {
 	return result, err
 }
 
+// medicDeadlineExceeded reports whether c's medic-owned wall-clock budget has
+// run out as of now. A zero MedicFirstDispatchAt means the medic has never
+// touched c, so there is nothing to time out yet.
+func medicDeadlineExceeded(c *Candidate, deps MedicDeps, now time.Time) bool {
+	return !c.MedicFirstDispatchAt.IsZero() && now.Sub(c.MedicFirstDispatchAt) >= deps.deadline()
+}
+
 // medicBudgetExceeded reports whether c's medic-owned productive-retry
 // budget is exhausted as of now, and if so, the ReasonCode and RetryReason
 // tag to escalate with. The wall-clock deadline is checked first and always
@@ -184,7 +232,7 @@ func (s Store) MedicRunOnce(deps MedicDeps) (MedicResult, error) {
 // regardless of how many dispatches were actually spent — so it must never
 // borrow the more specific resolver/repairer code.
 func medicBudgetExceeded(c *Candidate, deps MedicDeps, now time.Time, dispatchedCode ReasonCode, dispatchedTag string) (bool, ReasonCode, string) {
-	if !c.MedicFirstDispatchAt.IsZero() && now.Sub(c.MedicFirstDispatchAt) >= deps.deadline() {
+	if medicDeadlineExceeded(c, deps, now) {
 		return true, ReasonBudgetExhausted, "medic_deadline_exceeded"
 	}
 	if c.MedicDispatches >= deps.maxDispatches() {
@@ -227,7 +275,17 @@ func medicDispatch(c *Candidate, now time.Time, medicID, verb string) {
 // loop's next prepare() re-runs Speculate, which re-drives resolveConflicts
 // with whatever resolver is configured; the medic itself never launches an
 // agent or runs a git command — or escalate on exhaustion.
-func medicHandleConflict(c *Candidate, deps MedicDeps, now time.Time) (MedicAction, bool) {
+//
+// Position is reset to the back of the line (nextPosition(state.Candidates),
+// exactly what Worker.retryOrPark does for an ordinary failure) rather than
+// left at whatever it was when the candidate parked: before() picks the
+// finalization head by Position, so an un-parked known-stalled candidate
+// that kept its old (often earliest) Position would re-occupy the
+// finalization head and block every healthy candidate behind it for up to
+// MaxDispatches full prepare cycles. A medic dispatching several parked
+// candidates in one pass must not let any of them cut back to the front of
+// a train they already fell out of.
+func medicHandleConflict(c *Candidate, state *State, deps MedicDeps, now time.Time) (MedicAction, bool) {
 	if exceeded, code, tag := medicBudgetExceeded(c, deps, now, ReasonResolverExhausted, "medic_resolver_exhausted"); exceeded {
 		return medicEscalate(c, now, deps.medicID(), tag, code), true
 	}
@@ -237,8 +295,32 @@ func medicHandleConflict(c *Candidate, deps MedicDeps, now time.Time) (MedicActi
 	c.ParkedAt, c.ParkedBy = time.Time{}, ""
 	c.RetryReason, c.ReasonCode = "", ""
 	c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
-	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:medic dispatch_resolver by %s at %s dispatch=%d/%d", deps.medicID(), now.Format(time.RFC3339), c.MedicDispatches, deps.maxDispatches()))
+	c.Position = nextPosition(state.Candidates)
+	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:medic dispatch_resolver by %s at %s dispatch=%d/%d position=%d", deps.medicID(), now.Format(time.RFC3339), c.MedicDispatches, deps.maxDispatches(), c.Position))
 	return MedicAction{CandidateID: c.ID, Verb: "dispatch_resolver", Reason: "needs_conflict_input", At: now}, true
+}
+
+// medicHandleStrandedDispatch is the reaper arm: a candidate the medic
+// already dispatched back to Queued or Reprepare (MedicDispatches > 0) that
+// nothing has re-driven into needs_conflict_input, retry_wait, or a terminal
+// state before its wall-clock deadline. Without this, a dispatch the
+// ordinary worker never re-claims — no worker running for this target, the
+// worker down, or the standalone `queue medic` running with no worker
+// process at all — would sit in Queued/Reprepare forever with its medic
+// budget already spent and never revisited: the switch in MedicRunOnce only
+// matches needs_conflict_input/retry_wait, so once the dispatch moved the
+// candidate out of those phases nothing would ever check its deadline again.
+// This closes that gap so the medic's "every candidate it touches ends up
+// progressing or in needs_human" guarantee holds even when no worker ever
+// re-drives the dispatch. It only ever fires past the deadline — a
+// dispatched candidate still within budget that simply has not been claimed
+// yet is left alone, since it may still be claimed and land normally at any
+// moment.
+func medicHandleStrandedDispatch(c *Candidate, deps MedicDeps, now time.Time) (MedicAction, bool) {
+	if !medicDeadlineExceeded(c, deps, now) {
+		return MedicAction{}, false
+	}
+	return medicEscalate(c, now, deps.medicID(), "medic_deadline_exceeded", ReasonBudgetExhausted), true
 }
 
 // medicHandleGateRetry is the repeated-gate-failure retry_wait path: clear
