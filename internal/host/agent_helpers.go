@@ -47,7 +47,11 @@ func renderAndStripPrompt(ctx context.Context, tmpl string, templateArgs map[str
 // The prefix mirrors the per-handler tempfile names (e.g. "kitsoki-ask-mcp",
 // "kitsoki-decide-mcp") so on-disk artifacts remain attributable to a handler.
 func writeMCPConfigTempfile(mcpServers map[string]any, prefix string) (string, func(), error) {
-	mcpConfig := map[string]any{"mcpServers": mcpServers}
+	expanded, missing := ExpandMCPServerEnvironment(mcpServers)
+	if missing != "" {
+		return "", nil, fmt.Errorf("mcp config references unset env var %s", missing)
+	}
+	mcpConfig := map[string]any{"mcpServers": expanded}
 	mcpBytes, err := json.Marshal(mcpConfig)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshal mcp config: %w", err)
@@ -64,6 +68,98 @@ func writeMCPConfigTempfile(mcpServers map[string]any, prefix string) (string, f
 	_ = f.Close()
 	path := f.Name()
 	return path, func() { _ = os.Remove(path) }, nil
+}
+
+// ExpandMCPServerEnvironment resolves ${VAR} tokens in a story-declared MCP
+// server configuration immediately before it is materialized for a subprocess.
+// Loading remains environment-independent (so validation and deterministic
+// flows do not require a live credential), but a live launch fails closed
+// rather than handing a literal ${VAR} to the bridge process.
+//
+// The walker is intentionally narrow: only strings nested in the MCP config
+// are touched; non-string values and incomplete `${` sequences remain literal.
+func ExpandMCPServerEnvironment(servers map[string]any) (map[string]any, string) {
+	expanded, missing := expandMCPConfigValue(servers)
+	if missing != "" {
+		return nil, missing
+	}
+	return expanded.(map[string]any), ""
+}
+
+func expandMCPConfigValue(value any) (any, string) {
+	switch v := value.(type) {
+	case string:
+		return expandMCPConfigString(v)
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			expanded, missing := expandMCPConfigValue(item)
+			if missing != "" {
+				return nil, missing
+			}
+			out[i] = expanded
+		}
+		return out, ""
+	case []string:
+		out := make([]string, len(v))
+		for i, item := range v {
+			expanded, missing := expandMCPConfigString(item)
+			if missing != "" {
+				return nil, missing
+			}
+			out[i] = expanded
+		}
+		return out, ""
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			expanded, missing := expandMCPConfigValue(item)
+			if missing != "" {
+				return nil, missing
+			}
+			out[key] = expanded
+		}
+		return out, ""
+	case map[string]string:
+		out := make(map[string]string, len(v))
+		for key, item := range v {
+			expanded, missing := expandMCPConfigString(item)
+			if missing != "" {
+				return nil, missing
+			}
+			out[key] = expanded
+		}
+		return out, ""
+	default:
+		return value, ""
+	}
+}
+
+func expandMCPConfigString(value string) (string, string) {
+	var out strings.Builder
+	for offset := 0; offset < len(value); {
+		start := strings.Index(value[offset:], "${")
+		if start < 0 {
+			out.WriteString(value[offset:])
+			break
+		}
+		start += offset
+		out.WriteString(value[offset:start])
+		end := strings.Index(value[start+2:], "}")
+		if end < 0 {
+			out.WriteString(value[start:])
+			break
+		}
+		end += start + 2
+		name := value[start+2 : end]
+		replacement, ok := os.LookupEnv(name)
+		if !ok {
+			return "", name
+		}
+		out.WriteString(replacement)
+		offset = end + 1
+	}
+	return out.String(), ""
 }
 
 // containsBashTool reports whether the (un-rewritten) tool list contains the

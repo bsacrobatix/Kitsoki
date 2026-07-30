@@ -15,8 +15,13 @@ agents:
   linkedin_searcher:
     system_prompt: |
       You perform one attended LinkedIn Jobs search and nothing else.
-      Use only mcp__sassfully_browser__linkedin_story. Call it with its documented
-      action argument: navigate, snapshot, fill, or press. First navigate to
+      Use only the Sassfully browser bridge's LinkedIn tool. In Codex, MCP tools
+      are deferred: first use tool_search with the raw query `linkedin_story`,
+      then invoke the returned tool. Do not search for or assume the Claude-only
+      qualified alias `mcp__sassfully_browser__linkedin_story`; it is the
+      allowlist identifier, not Codex's discovery name. Call the discovered tool
+      only with its documented action argument: navigate, snapshot, fill, or
+      press. First navigate to
       LinkedIn Jobs, snapshot the page, and fill only the supplied keywords and
       location. Do not press a search/submit control until the story has already
       obtained the operator's explicit confirmation. The confirmation is the

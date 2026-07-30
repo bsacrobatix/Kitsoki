@@ -15,6 +15,28 @@ import (
 	"kitsoki/internal/host"
 )
 
+func TestWriteLaunchMCPConfigTempfileExpandsEnvironment(t *testing.T) {
+	t.Setenv("LAUNCH_MCP_BRIDGE_TOKEN", "launch-paired")
+	path, cleanup, err := writeLaunchMCPConfigTempfile(map[string]any{
+		"bridge": map[string]any{"args": []any{"--pairing-code", "${LAUNCH_MCP_BRIDGE_TOKEN}"}},
+	}, "kitsoki-launch-mcp-env-test")
+	require.NoError(t, err)
+	defer cleanup()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "launch-paired")
+	require.NotContains(t, string(raw), "${LAUNCH_MCP_BRIDGE_TOKEN}")
+}
+
+func TestWriteLaunchMCPConfigTempfileRejectsMissingEnvironment(t *testing.T) {
+	_, cleanup, err := writeLaunchMCPConfigTempfile(map[string]any{
+		"bridge": map[string]any{"args": []any{"${UNSET_LAUNCH_MCP_BRIDGE_TOKEN}"}},
+	}, "kitsoki-launch-mcp-env-test")
+	require.Error(t, err)
+	require.Nil(t, cleanup)
+	require.Contains(t, err.Error(), "UNSET_LAUNCH_MCP_BRIDGE_TOKEN")
+}
+
 func TestAgentLaunchPlan_UsesStoryAgentAndHarnessProfile(t *testing.T) {
 	dir := t.TempDir()
 	isolateLaunchCodexHome(t, dir)

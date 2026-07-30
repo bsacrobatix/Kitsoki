@@ -1227,7 +1227,11 @@ func launchTOMLStringTable(m map[string]string) string {
 }
 
 func writeLaunchMCPConfigTempfile(mcpServers map[string]any, prefix string) (string, func(), error) {
-	mcpConfig := map[string]any{"mcpServers": mcpServers}
+	expanded, missing := host.ExpandMCPServerEnvironment(mcpServers)
+	if missing != "" {
+		return "", nil, fmt.Errorf("mcp config references unset env var %s", missing)
+	}
+	mcpConfig := map[string]any{"mcpServers": expanded}
 	mcpBytes, err := json.Marshal(mcpConfig)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshal mcp config: %w", err)
