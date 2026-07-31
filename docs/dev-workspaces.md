@@ -233,9 +233,9 @@ scripts/merge-to-main.sh
 ```
 
 **`staging/local` is a shared batch, not your branch.** Every workspace from
-every task lands into it, and promotion is deliberately batched because the
-`main` gate is slow — one `make test` cycle per individual change is the cost the
-stabilization branch exists to avoid.
+every task lands into it. Local-main admission runs the small deterministic
+`make test` gate; the exhaustive `make test-full` suite remains the PR and
+release checkpoint before production.
 
 So `merge-to-main.sh` promotes **every** commit accumulated on `staging/local`,
 not only yours. Read the batch before pressing the button:

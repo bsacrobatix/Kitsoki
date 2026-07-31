@@ -76,17 +76,14 @@ the everyday local loop.
 make test
 ```
 
-It runs short Go tests with bounded package parallelism, deterministic Mode-2
-story flows with bounded flow parallelism, runstatus Vitest, feature/media
-contracts, session-mining/product-journey script tests, and the Python file
-policy. It sets a browser-launch guard, so accidental `playwright`, Chrome, or
-Chromium calls fail loudly. It also avoids overlapping the Node lane with the Go
-and flow lanes by default to reduce local CPU/I/O contention. The full report is
-written under `.artifacts/test-reports/`.
+It runs focused promotion-policy Go smoke tests, correctness-class static
+analysis, Starlark validation, and the Python file policy. It sets a browser-
+launch guard, so accidental `playwright`, Chrome, or Chromium calls fail
+loudly. The full report is written under `.artifacts/test-reports/`.
 
 ### 3.2 Push And Browser Gates
 
-Use the heavier gates only at a remote-readiness boundary:
+Use the full suite at a PR or release-readiness boundary:
 
 ```sh
 make test-full     # exhaustive non-browser gate; used by CI
@@ -94,7 +91,8 @@ make test-browser  # explicit no-LLM Playwright/browser gate
 make push-gate     # test-full + test-browser before pushing/remote validation
 ```
 
-Browser-backed tests are intentionally absent from `make test`. Run
+Story flows, runstatus Vitest, feature/media contracts, and script invariants
+are intentionally absent from `make test`; `make test-full` owns them. Run
 `make test-browser` when a change touches browser-visible behavior, and run
 `make push-gate` before publishing a branch or asking remote CI/merge queues to
 spend capacity.

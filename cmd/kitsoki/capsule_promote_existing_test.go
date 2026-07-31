@@ -87,10 +87,7 @@ func TestRunPromoteExistingCIReconciliationAcquiresCapacity(t *testing.T) {
 }
 
 func TestKitsokiExactSourceCertificationUsesPreparedBoundedGate(t *testing.T) {
-	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
+	repoRoot := testProjectRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, ".kitsoki", "project-profile.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -113,8 +110,8 @@ func TestKitsokiExactSourceCertificationUsesPreparedBoundedGate(t *testing.T) {
 	if profile.Commands.Test != "make test" || profile.DevStoryProfile.Bugfix.Test != "make test" {
 		t.Fatalf("exact-source test contracts = commands:%q bugfix:%q, want make test", profile.Commands.Test, profile.DevStoryProfile.Bugfix.Test)
 	}
-	if profile.Commands.Full != "make test-full" {
-		t.Fatalf("full Capsule-CI contract=%q, want make test-full", profile.Commands.Full)
+	if profile.Commands.Full != "make test" {
+		t.Fatalf("local-main Capsule-CI contract=%q, want make test", profile.Commands.Full)
 	}
 	if profile.Commands.Release != "make test-full && go build ./..." {
 		t.Fatalf("release Capsule-CI contract=%q, want exhaustive tests plus repository build", profile.Commands.Release)
@@ -126,7 +123,8 @@ func TestKitsokiExactSourceCertificationUsesPreparedBoundedGate(t *testing.T) {
 	if !strings.Contains(string(makefile), "test: embed-stories embed-skills") {
 		t.Fatal("make test no longer prepares the embedded story and skill libraries")
 	}
-	if !strings.Contains(string(makefile), `KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short -p 4}"`) {
+	if !strings.Contains(string(makefile), `KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short -p 4 -run=TestTrackedGatePolicy}"`) ||
+		!strings.Contains(string(makefile), `KITSOKI_GO_TEST_PACKAGES="$${KITSOKI_GO_TEST_PACKAGES:-./internal/capsule/queue}"`) {
 		t.Fatal("make test no longer declares the bounded local Go-test lane")
 	}
 }

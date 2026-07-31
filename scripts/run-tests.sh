@@ -2,13 +2,19 @@
 #
 # run-tests.sh — concise runner for the kitsoki non-browser test suite.
 #
-# Runs nine non-browser suites and NEVER bails early — every failure across all is
-# collected before we exit:
+# Profiles never bail early: every selected suite is collected before exit.
+#
+# `local` is the deliberately small local-main confidence gate:
 #   1. go test $KITSOKI_GO_TEST_FLAGS ./...
 #   1b. staticcheck                   (SA correctness class only — dropped
 #                                      errors, nil Context, tautological
 #                                      compares; see `make staticcheck`)
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
+#   8. python file policy             (no new .py files without an explicit
+#                                      repo-tracked exception + justification)
+#
+# `full` adds the deterministic suites that are intentionally non-blocking for
+# local integration, staging, and main landings:
 #   3. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
 #                                      for each tracked stories/*/app.yaml)
 #   4. runstatus Vitest               (web UI unit/component tests; started in
@@ -18,8 +24,6 @@
 #                                      warning when pnpm/node_modules absent)
 #   6. demo media contract            (no-LLM product-site/deck media layout)
 #   7. session-mining no-LLM invariants
-#   8. python file policy             (no new .py files without an explicit
-#                                      repo-tracked exception + justification)
 #
 # Output contract:
 #   - success → one terse line per suite, plus the report path.
@@ -27,11 +31,9 @@
 #   - ALWAYS  → a complete report written to .artifacts/test-reports/, with only
 #               the most recent $KEEP reports retained (older ones rotated out).
 #
-# Used by `make test`; direct runs still skip Node-backed lanes when their
-# dependencies are absent unless KITSOKI_REQUIRE_VITEST=1 is set. Browser-backed
-# Playwright/Chrome suites belong in `make test-browser` / `make push-gate`, not
-# this runner. Set KITSOKI_FORBID_BROWSER_TESTS=1 to fail loudly if a local lane
-# accidentally tries to launch a browser command.
+# `make test` selects `local`; `make test-full` selects `full`. Direct runs
+# default to `full` for backward compatibility. Browser-backed Playwright/Chrome
+# suites belong in `make test-browser` / `make push-gate`, not this runner.
 #
 # Timeout knobs (seconds, all overridable): KITSOKI_TEST_GO_TIMEOUT_SECONDS=300,
 # KITSOKI_TEST_BUILD_TIMEOUT_SECONDS=120, KITSOKI_TEST_STARLARK_TIMEOUT_SECONDS=120,
@@ -45,6 +47,12 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
+
+TEST_PROFILE=${KITSOKI_TEST_PROFILE:-full}
+case "$TEST_PROFILE" in
+	local|full) ;;
+	*) echo "error: KITSOKI_TEST_PROFILE must be 'local' or 'full', got '$TEST_PROFILE'" >&2; exit 2 ;;
+esac
 
 # A shared Go build cache is fast, but a concurrent workspace can prune or
 # replace entries while this broad suite is linking helper binaries. Keep the
@@ -167,14 +175,15 @@ collect_vitest() {
 	fi
 }
 
-# Build the plain kitsoki binary once for all suites that need a command-line
-# executable. The flow suite uses it directly, and Go tests can opt into the same
-# binary via KITSOKI_TEST_KITSOKI_BINARY instead of linking their own copies.
+# Build the plain kitsoki binary only for the full profile's flow suite. The
+# local profile intentionally avoids this duplicate link step.
 FLOW_BINARY="$TMP/kitsoki-flows"
 flow_built=1
-if ! run_timed "$BUILD_TIMEOUT_SECONDS" "build flow runner" go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
-	flow_built=0
-	flow_failures=1
+if [ "$TEST_PROFILE" = "full" ]; then
+	if ! run_timed "$BUILD_TIMEOUT_SECONDS" "build flow runner" go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
+		flow_built=0
+		flow_failures=1
+	fi
 fi
 
 # Start the web UI unit suite early by default so its wall time overlaps with
@@ -183,7 +192,7 @@ fi
 # The Make targets install deps first and set KITSOKI_REQUIRE_VITEST so this lane
 # is mandatory for `make test` / `make test-full`; direct script runs keep the
 # existing "skip optional Node-backed checks when deps are absent" behavior.
-if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
+if [ "$TEST_PROFILE" = "full" ] && command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
 	if [ "${KITSOKI_TEST_PARALLEL_NODE:-1}" = "0" ]; then
 		(
 			cd tools/runstatus || exit 2
@@ -206,7 +215,7 @@ if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
 		) >"$VITEST_OUT" 2>&1 &
 		vitest_pid=$!
 	fi
-else
+elif [ "$TEST_PROFILE" = "full" ]; then
 	if [ "$vitest_required" = "1" ]; then
 		vitest_failures=1
 		echo "FAILED: pnpm or tools/runstatus/node_modules missing; run 'make setup' or 'make vitest-check' first" >"$VITEST_OUT"
@@ -225,16 +234,17 @@ GO_TEST_LABEL="go test"
 if [ -n "$GO_TEST_FLAGS" ]; then
 	GO_TEST_LABEL="$GO_TEST_LABEL $GO_TEST_FLAGS"
 fi
-GO_TEST_LABEL="$GO_TEST_LABEL ./..."
+GO_TEST_PACKAGES=${KITSOKI_GO_TEST_PACKAGES:-./...}
+GO_TEST_LABEL="$GO_TEST_LABEL $GO_TEST_PACKAGES"
 section "$GO_TEST_LABEL"
 # Intentionally split KITSOKI_GO_TEST_FLAGS on shell words so callers can pass
 # ordinary go-test flags like "-short -run TestName".
 # shellcheck disable=SC2086
-if [ "$flow_built" -eq 1 ]; then
+if [ "$TEST_PROFILE" = "full" ] && [ "$flow_built" -eq 1 ]; then
 	export KITSOKI_TEST_KITSOKI_BINARY="$FLOW_BINARY"
-	run_timed "$GO_TIMEOUT_SECONDS" "$GO_TEST_LABEL" go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+	run_timed "$GO_TIMEOUT_SECONDS" "$GO_TEST_LABEL" go test -json $GO_TEST_FLAGS $GO_TEST_PACKAGES >"$GO_JSON" 2>"$TMP/go.stderr"
 else
-	run_timed "$GO_TIMEOUT_SECONDS" "$GO_TEST_LABEL" go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+	run_timed "$GO_TIMEOUT_SECONDS" "$GO_TEST_LABEL" go test -json $GO_TEST_FLAGS $GO_TEST_PACKAGES >"$GO_JSON" 2>"$TMP/go.stderr"
 fi
 go_rc=$?
 
@@ -282,6 +292,30 @@ run_timed "$STARLARK_TIMEOUT_SECONDS" "starlark validation" make --no-print-dire
 starlark_rc=$?
 cat "$TMP/starlark.out" >>"$REPORT"
 [ "$starlark_rc" -ne 0 ] && starlark_failures=1
+
+# The local profile is intentionally bounded to checks that are fast, isolated,
+# and deterministic. Every broader suite remains mandatory in `test-full`.
+if [ "$TEST_PROFILE" = "local" ]; then
+	section "python file policy"
+	run_timed "$PYTHON_TIMEOUT_SECONDS" "python file policy" bash "$ROOT/scripts/check-python-files.sh" >"$TMP/python-policy.out" 2>&1
+	python_policy_rc=$?
+	cat "$TMP/python-policy.out" >>"$REPORT"
+	[ "$python_policy_rc" -ne 0 ] && python_policy_failures=1
+
+	ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do rm -f "$old"; done
+	total_failures=$((go_failures + staticcheck_failures + starlark_failures + python_policy_failures))
+	if [ "$total_failures" -eq 0 ]; then
+		printf '%s✓%s %s   %s%d packages%s\n' "$GREEN" "$RST" "$GO_TEST_LABEL" "$DIM" "$go_pkgs_total" "$RST"
+		printf '%s✓%s staticcheck (SA correctness)\n' "$GREEN" "$RST"
+		printf '%s✓%s starlark check\n' "$GREEN" "$RST"
+		printf '%s✓%s python policy\n' "$GREEN" "$RST"
+		printf '%s✓ local test gate passed%s   %s· report: %s%s\n' "$BOLD$GREEN" "$RST" "$DIM" "$REPORT" "$RST"
+		exit 0
+	fi
+	printf '\n%s✗ local test gate: %d failure group(s)%s   %s· full report: %s%s\n' \
+		"$BOLD$RED" "$total_failures" "$RST" "$DIM" "$REPORT" "$RST"
+	exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Suite 3: story flow fixtures

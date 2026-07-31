@@ -407,25 +407,25 @@ web-dev-logs:
 	  echo "tailing $$latest" >&2; \
 	  tail -f "$$latest"
 
-# test runs the local low-contention, non-browser gate: short Go tests, Mode-2
-# deterministic story flow suites, runstatus Vitest, feature catalog, and
-# session-mining no-LLM invariants. It deliberately forbids Playwright/Chrome and
-# caps local parallelism so everyday agent work does not contend with browser
-# stacks or broad CI-style fan-out.
+# test runs the local-main gate: promotion-policy Go smoke tests, correctness-class static
+# analysis, Starlark validation, and the Python-footprint policy. It is the
+# deliberately small deterministic gate used to keep integration, staging, and
+# local-main landings moving. Flows, UI, generated-artifact, and script suites
+# belong to test-full, which PR CI and release readiness run before production.
 test: embed-stories embed-skills
-	$(call runstatus_pnpm_install,--silent)
-	@KITSOKI_REQUIRE_VITEST=1 \
+	@KITSOKI_TEST_PROFILE=local \
+	 KITSOKI_TEST_PROJECT_ROOT="$(CURDIR)" \
 	 KITSOKI_FORBID_BROWSER_TESTS=1 \
-	 KITSOKI_TEST_PARALLEL_NODE="$${KITSOKI_TEST_PARALLEL_NODE:-0}" \
-	 KITSOKI_FLOW_JOBS="$${KITSOKI_FLOW_JOBS:-2}" \
-	 KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short -p 4}" \
+	 KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short -p 4 -run=TestTrackedGatePolicy}" \
+	 KITSOKI_GO_TEST_PACKAGES="$${KITSOKI_GO_TEST_PACKAGES:-./internal/capsule/queue}" \
+	 STATICCHECK_PACKAGES="$${STATICCHECK_PACKAGES:-./internal/capsule/queue}" \
 	 ./scripts/run-tests.sh
 
-# test-full preserves the exhaustive non-browser lane for CI/release gates and
-# local validation of integration/property tests skipped by -short.
+# test-full is the exhaustive deterministic non-browser suite for PR CI and
+# release readiness. It includes integration/property tests skipped by -short.
 test-full: embed-stories embed-skills
 	$(call runstatus_pnpm_install,--silent)
-	@KITSOKI_REQUIRE_VITEST=1 ./scripts/run-tests.sh
+	@KITSOKI_TEST_PROFILE=full KITSOKI_TEST_PROJECT_ROOT="$(CURDIR)" KITSOKI_REQUIRE_VITEST=1 ./scripts/run-tests.sh
 
 # test-browser is the explicit no-LLM browser gate. Keep it out of `make test`;
 # run it before pushing/remote validation when the change touches browser-visible
@@ -766,9 +766,10 @@ vet:
 # narrowing the check set.
 STATICCHECK_VERSION ?= v0.7.0
 STATICCHECK_CHECKS  ?= SA*,-SA1019
+STATICCHECK_PACKAGES ?= ./...
 staticcheck:
 	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) \
-		-checks '$(STATICCHECK_CHECKS)' ./...
+		-checks '$(STATICCHECK_CHECKS)' $(STATICCHECK_PACKAGES)
 
 staticcheck-full:
 	@go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) \

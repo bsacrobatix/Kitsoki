@@ -666,13 +666,11 @@ func TestQueueProcessCLIRejectsWeakMainGateFromTrackedProfile(t *testing.T) {
 }
 
 func TestQueueGatePolicyCLIResolvesKitsokiTrackedMainGate(t *testing.T) {
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	project := filepath.Clean(filepath.Join(cwd, "..", ".."))
+	project := testProjectRoot(t)
 	required, configured, err := queue.RequiredGateCommand(project, "main")
 	require.NoError(t, err)
 	require.True(t, configured)
-	require.Equal(t, "make test-full", required)
+	require.Equal(t, "make test", required)
 
 	cmd := queueGatePolicyCmd()
 	cmd.SetArgs([]string{"--project", project, "--target", "main"})
@@ -680,4 +678,16 @@ func TestQueueGatePolicyCLIResolvesKitsokiTrackedMainGate(t *testing.T) {
 	cmd.SetOut(out)
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, required, strings.TrimSpace(out.String()))
+}
+
+func testProjectRoot(t *testing.T) string {
+	t.Helper()
+	for _, root := range []string{os.Getenv("KITSOKI_TEST_PROJECT_ROOT"), os.Getenv("PWD")} {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			return filepath.Clean(root)
+		}
+	}
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	return filepath.Clean(filepath.Join(cwd, "..", ".."))
 }

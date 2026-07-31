@@ -16,7 +16,9 @@ commands:
   build: "go build ./..."
   test: "make test"
   change: "make capsule-ci-quick"
-  full: "make test-full"
+  # The full queue tier protects local main, but its command is intentionally
+  # the small local gate. PR CI and release retain make test-full below.
+  full: "make test"
   release: "make test-full && go build ./..."
 tracker:
   sources:

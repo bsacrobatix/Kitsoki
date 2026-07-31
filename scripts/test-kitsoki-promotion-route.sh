@@ -17,7 +17,7 @@ printf '%s\n' "$*" >>"${KITSOKI_ROUTE_TEST_LOG:?}"
 case "$*" in
   "queue gate-policy "*)
     case "$*" in
-      *"--target main"*) printf 'make test-full\n' ;;
+      *"--target main"*) printf 'make test\n' ;;
       *) printf 'make capsule-ci-quick\n' ;;
     esac
     ;;
@@ -78,14 +78,14 @@ KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_Q
   KITSOKI_QUEUE_REVIEW_POLICY_DIGEST="sha256:review-policy" \
   "$root/scripts/kitsoki-promotion-route.sh" staging-to-main \
   --repo "$repo" --sha 0123456789012345678901234567890123456789 \
-  --gate "make test-full" >/dev/null
+  --gate "make test" >/dev/null
 [ "$(wc -l <"$log" | tr -d ' ')" = 3 ] || {
   echo "main route did not use exactly one policy resolution, admission, and drain" >&2
   exit 1
 }
 grep -F -- "--queue-root $queue_root" "$log" >/dev/null
-grep -F -- "--pipeline change --gate make test-full --json --capacity-pool default --capacity 1" "$log" >/dev/null
-grep -F -- "queue process --project $repo --queue-root $queue_root --candidate queue-main --target main --gate make test-full --capacity-pool default --capacity 1 --repair repair candidate --repair-review review repair --repairer-id repairer-1 --reviewer-id reviewer-1 --review-policy-digest sha256:review-policy" "$log" >/dev/null
+grep -F -- "--pipeline change --gate make test --json --capacity-pool default --capacity 1" "$log" >/dev/null
+grep -F -- "queue process --project $repo --queue-root $queue_root --candidate queue-main --target main --gate make test --capacity-pool default --capacity 1 --repair repair candidate --repair-review review repair --repairer-id repairer-1 --reviewer-id reviewer-1 --review-policy-digest sha256:review-policy" "$log" >/dev/null
 [ ! -e "$repo/.capsules/queue" ] || {
   echo "external authority route forked project-local queue state" >&2
   exit 1
@@ -97,7 +97,7 @@ if KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOK
   echo "ordinary main route accepted a weakened custom gate" >&2
   exit 1
 fi
-grep -F "requires the tracked full gate 'make test-full'" "$tmp/weaken-main.out" >/dev/null
+grep -F "requires the tracked full gate 'make test'" "$tmp/weaken-main.out" >/dev/null
 
 : >"$log"
 KITSOKI_PROMOTION_KITSOKI="$tmp/kitsoki" KITSOKI_ROUTE_TEST_LOG="$log" KITSOKI_QUEUE_ROOT="$queue_root" \
@@ -182,8 +182,8 @@ case "$action" in
     "${KITSOKI_SURFACE_GIT:?}" -C "$repo" update-ref refs/heads/staging/local "$tip" "$old"
     ;;
   staging-to-main)
-    [ -z "$gate" ] || [ "$gate" = "make test-full" ] || {
-      echo "ordinary main promotion requires the tracked full gate 'make test-full'" >&2
+    [ -z "$gate" ] || [ "$gate" = "make test" ] || {
+	  echo "ordinary main promotion requires the tracked full gate 'make test'" >&2
       exit 2
     }
     "${KITSOKI_SURFACE_GIT:?}" -C "$repo" reset --hard "$sha" >/dev/null
@@ -283,7 +283,7 @@ if (cd "$surface" && KITSOKI_SURFACE_LOG="$surface_log" KITSOKI_SURFACE_GIT="$(c
   echo "merge helper accepted an arbitrary main gate" >&2
   exit 1
 fi
-grep -F "requires the tracked full gate 'make test-full'" "$tmp/custom-main-gate.out" >/dev/null
+grep -F "requires the tracked full gate 'make test'" "$tmp/custom-main-gate.out" >/dev/null
 [ "$(git -C "$surface" rev-parse main)" = "$main_before" ] &&
   [ "$(git -C "$surface" rev-parse staging/local)" = "$staging_before" ] &&
   [ "$(wc -l <"$surface_log" | tr -d ' ')" = 1 ] &&
