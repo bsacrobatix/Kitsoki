@@ -165,7 +165,7 @@ tour:
       placement: left
       kind: explain
       advance: next
-      waitForTarget: media-slideshow-frame
+      waitForTarget: chat-transcript
       dwellMs: 7000
       drive:
         - type: reveal-turn

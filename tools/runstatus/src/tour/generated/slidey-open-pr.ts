@@ -46,13 +46,13 @@ export const SLIDEY_OPEN_PR_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "sop-intro-observe",
     route: "interactive",
-    target: "observe-link",
-    title: "Drive here, observe there",
+    target: "chat-transcript",
+    title: "Drive the recorded run",
     body: "We're on the drive view. The pipeline is parked at idle with the PR metadata loaded — title fix(timing): align grid-cards narration past 6 cards, branch fix/grid-cards-narration, base main. Each operator action advances exactly one room and the state badge tracks where we are. Let's open the PR.",
     placement: "bottom",
     kind: "explain",
     advance: "next",
-    waitForTarget: "observe-link",
+    waitForTarget: "chat-transcript",
     dwellMs: 5500,
   },
   {

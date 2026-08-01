@@ -83,7 +83,7 @@ tour:
         - type: type-and-send
           text: continue
         - type: wait-state
-          state: core.design
+          state: core.design_search
         - type: reveal-turn
         - type: type-and-send
           text: realize the speaker-notes-export PRD as a slidey runtime design

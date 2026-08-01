@@ -67,7 +67,7 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6000,
-    drive: [{"type":"type-and-send","text":"continue"},{"type":"wait-state","state":"core.design"},{"type":"reveal-turn"},{"type":"type-and-send","text":"realize the speaker-notes-export PRD as a slidey runtime design"},{"type":"wait-state","state":"core.design_search"},{"type":"reveal-turn"}],
+    drive: [{"type":"type-and-send","text":"continue"},{"type":"wait-state","state":"core.design_search"},{"type":"reveal-turn"},{"type":"type-and-send","text":"realize the speaker-notes-export PRD as a slidey runtime design"},{"type":"wait-state","state":"core.design_search"},{"type":"reveal-turn"}],
   },
   {
     id: "sad-design-refine",

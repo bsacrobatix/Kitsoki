@@ -5773,7 +5773,7 @@ nodes:
               drive:
                 - text: continue
                   type: type-and-send
-                - state: core.design
+                - state: core.design_search
                   type: wait-state
                 - type: reveal-turn
                 - text: realize the speaker-notes-export PRD as a slidey runtime design
@@ -5975,9 +5975,9 @@ nodes:
               kind: explain
               placement: bottom
               route: interactive
-              target: observe-link
-              title: Drive here, observe there
-              waitForTarget: observe-link
+              target: chat-transcript
+              title: Drive the recorded run
+              waitForTarget: chat-transcript
             - advance: next
               body: 'bf.reproducing — the agent confirms the bug is real before touching code. The frame estimator and the renderer must produce identical frame totals (a documented lock-step contract). For a grid cards scene the estimator sums `cards_item_<i> ?? 30` over every card, but the table only keys items 0–5; the renderer holds `?? 20`. A failing unit test on an 8-item grid shows the 20-frame overcount: estimate 484 vs render 464. Accept to move on.'
               drive:
@@ -6518,7 +6518,7 @@ nodes:
               route: interactive
               target: chat-transcript
               title: The mockup, rendered inline
-              waitForTarget: media-slideshow-frame
+              waitForTarget: chat-transcript
     sources:
       - source-slidey-dev-prd-design-feature
     edges:
@@ -6652,9 +6652,9 @@ nodes:
               kind: explain
               placement: bottom
               route: interactive
-              target: observe-link
-              title: Drive here, observe there
-              waitForTarget: observe-link
+              target: chat-transcript
+              title: Drive the recorded run
+              waitForTarget: chat-transcript
             - advance: next
               body: 'open_pr — the room calls iface.vcs.open_pr and binds the PR id and url. The PR is opened against main from fix/grid-cards-narration, titled ''fix(timing): align grid-cards narration past 6 cards (slidey-128)'', its body summarizing the one-line fallback fix and the 19/19 + 94/94 node --test result. Accept to start monitoring CI.'
               drive:

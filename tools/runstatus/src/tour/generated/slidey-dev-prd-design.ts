@@ -117,7 +117,7 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     placement: "left",
     kind: "explain",
     advance: "next",
-    waitForTarget: "media-slideshow-frame",
+    waitForTarget: "chat-transcript",
     dwellMs: 7000,
     drive: [{"type":"reveal-turn"}],
   },

@@ -46,13 +46,13 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "sb-intro-observe",
     route: "interactive",
-    target: "observe-link",
-    title: "Drive here, observe there",
+    target: "chat-transcript",
+    title: "Drive the recorded run",
     body: "We're on the drive view: each operator accept advances the pipeline exactly one room, and the state badge tracks where we are. The ticket — slidey-128, grid `cards` scenes with more than six items desync their narration — is already loaded. Let's reproduce it.",
     placement: "bottom",
     kind: "explain",
     advance: "next",
-    waitForTarget: "observe-link",
+    waitForTarget: "chat-transcript",
     dwellMs: 5500,
   },
   {
