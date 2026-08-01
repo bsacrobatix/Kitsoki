@@ -66,6 +66,11 @@ skipped=0
 declare -a FAILED
 
 while IFS=$'\t' read -r id profile format renderer specName artifactDir target yaml spec flow cassette story rrweb viewer; do
+	# jq emits this sentinel for optional TSV columns: without it, Bash's
+	# whitespace IFS coalesces empty columns and corrupts the capture paths.
+	[ "$flow" = "-" ] && flow=""
+	[ "$cassette" = "-" ] && cassette=""
+	[ "$story" = "-" ] && story=""
 	# Stamp inputs: catalog entry, spec, story inputs, binary. The profile picks
 	# the camera env (KITSOKI_DEMO_PROFILE) + a per-profile stamp file so each
 	# variant re-records independently; desktop keeps the original .stamp name and
@@ -126,10 +131,13 @@ done < <(jq -r '
 	| ($f.demo.format // "rrweb") as $fmt
 	| if $fmt == "rrweb" then
 	    select(($f.demo.rrwebSpec // $f.demo.spec) != null)
+	    # `read` treats tabs as whitespace, collapsing adjacent empty TSV fields.
+	    # Keep an explicit harmless sentinel for optional fields so `rrweb` and
+	    # `viewer` never shift left when a catalog entry has no flow/cassette/story.
 	    | [ $f.id, "desktop", $fmt, ($f.demo.renderer // "playwright"), ($f.demo.rrwebSpecName // $f.demo.specName // $f.id), $f.demo.artifactDir,
 	        $f.demo.rrwebViewer,
 	        "features/\($f.id).yaml", ($f.demo.rrwebSpec // $f.demo.spec),
-	        ($f.demo.flow // ""), ($f.demo.hostCassette // ""), ($f.demo.story // ""),
+	        ($f.demo.flow // "-"), ($f.demo.hostCassette // "-"), ($f.demo.story // "-"),
 	        $f.demo.rrweb, $f.demo.rrwebViewer ]
 	  else
 	    select($f.demo.embed == null and ($f.demo.spec != null or $f.demo.renderer == "binary"))
