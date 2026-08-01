@@ -12,7 +12,8 @@ related:
   - slidey-bugfix
 demo:
   format: rrweb
-  spec: tests/playwright/slidey-open-pr-video.spec.ts
+  spec: tests/playwright/slidey-open-pr-rrweb-capture.spec.ts
+  rrwebSpec: tests/playwright/slidey-open-pr-rrweb-capture.spec.ts
   artifactDir: slidey-open-pr
   videoBase: slidey-open-pr-demo
   posterStep: sop-intro-home

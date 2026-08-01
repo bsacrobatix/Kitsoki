@@ -333,6 +333,15 @@ test("agent action transcripts feature-spotlight video", async () => {
                 intent: "start",
                 slots: {},
               });
+              // `start` stops at implementing after its artifact task. Drive the
+              // next explicit operator checkpoint as well so this recording
+              // truthfully contains both the task transcript and the judge's
+              // decide/guardrail transcript that the later chapters inspect.
+              await server.rpc("runstatus.session.submit", {
+                session_id: sessionId,
+                intent: "accept",
+                slots: {},
+              });
               await waitForAgentTranscripts(sessionId, 40000);
               // The RPC settle above proves the SERVER trace carries both
               // calls; the page renders them only after the next SSE poll

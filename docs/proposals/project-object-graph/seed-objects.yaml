@@ -763,7 +763,7 @@ nodes:
         videoBase: operator-ask-demo
         posterStep: oa-intro-home
       - story: stories/bugfix
-        flow: stories/bugfix/flows/happy_llm.yaml
+        flow: stories/bugfix/flows/chat_stream_demo.yaml
         hostCassette: stories/bugfix/flows/demo.cassette.yaml
     sources:
       - source-operator-ask-feature
@@ -1180,16 +1180,27 @@ nodes:
         title: Spin up a run
         waitForTarget: new-session-btn
       - advance: route-match
-        advanceRoute: any
-        body: The agent-action transcripts live in the read-only observer view, where every recorded call can be inspected and replayed. Switch to it to open this run.
-        dwellMs: 4000
-        id: aa-intro-observe
+        advanceRoute: home
+        body: The agent-action transcripts live in the read-only observer view, where every recorded call can be inspected and replayed. Head back to the story library to open this run there.
+        dwellMs: 3500
+        id: aa-intro-back
         kind: action
         placement: bottom
         route: interactive
-        target: observe-link
-        title: Switch to the observer
-        waitForTarget: observe-link
+        target: back-stories
+        title: Back to the story library
+        waitForTarget: back-stories
+      - advance: route-match
+        advanceRoute: any
+        body: This run is now listed as active. Open it to switch into the read-only observer.
+        dwellMs: 4000
+        id: aa-intro-open
+        kind: action
+        placement: left
+        route: home
+        target: session-open
+        title: Open the run in the observer
+        waitForTarget: session-open
       - advance: next
         body: 'Every agent call — task, decide, ask, converse — runs a rich native execution stream: tool calls, reasoning, MCP submissions. kitsoki captures that stream byte-verbatim to a per-call sidecar, renders it here, and replays it deterministically from the cassette. We lead with the one move a coding agent can''t make, then walk the full per-call stream.'
         dwellMs: 5000
@@ -3516,9 +3527,9 @@ nodes:
               kind: explain
               placement: top
               route: interactive
-              target: text-floor-input
+              target: composer-input
               title: Entering the idea
-              waitForTarget: text-floor-input
+              waitForTarget: composer-input
             - advance: next
               body: kitsoki searched existing designs for overlap. No conflicts found — the idea is clear to proceed. The current room shows at the top, and every stage lands on the live trace.
               dwellMs: 5500
@@ -3560,15 +3571,15 @@ nodes:
               title: Press ready for the judge
               waitForTarget: intent-actions
             - advance: next
-              body: 'The brief judge''s verdict is "continue": clear why, scoped change, kind is story. "advance to draft" is now the primary action — proceed to draft authoring.'
+              body: "The brief judge's verdict is \"continue\": clear why, scoped change, kind is story. The passing verdict auto-advances the pipeline straight into draft authoring — no extra click needed."
               dwellMs: 5500
               id: pw-judge
               kind: explain
-              placement: top
+              placement: right
               route: interactive
-              target: intent-actions
+              target: chat-section
               title: Brief approved
-              waitForTarget: intent-btn-advance_brief
+              waitForTarget: current-state
             - advance: next
               body: 'The brief was approved, so a draft author wrote the full design document: a persistent virtual-pet widget in the session header, its mood tracking the story phase, state persisted in world vars.'
               dwellMs: 6000
@@ -3734,7 +3745,7 @@ nodes:
               title: The state diagram is your route
               waitForTarget: diagram-metro
             - advance: next
-              body: The bright leg is ground truth from the trace — each stop labelled with the intent that got you there (via go_idea, via discuss …).
+              body: The bright leg is ground truth from the trace — each stop labelled with the intent that got you there (via discuss, via confirm …).
               dwellMs: 5000
               id: dsg-metro-traveled
               kind: explain
@@ -5152,14 +5163,24 @@ nodes:
               title: Meta mode
               waitForTarget: meta-button
             - advance: route-match
-              advanceRoute: any
-              body: Switch to a read-only observer view — handy for watching an LLM-driven run, or reviewing a finished one.
+              advanceRoute: home
+              body: Head back to the story library anytime — your run keeps going and stays listed there as an active session.
               id: iv-observe
               kind: action
               placement: bottom
               route: interactive
-              target: observe-link
+              target: back-stories
+              title: Back to your stories
+            - advance: route-match
+              advanceRoute: any
+              body: Open an active session from the list to get the read-only observer view — handy for watching an LLM-driven run, or reviewing a finished one.
+              id: home-observe
+              kind: action
+              placement: left
+              route: home
+              target: session-open
               title: Observe mode
+              waitForTarget: session-open
             - advance: next
               body: 'You know the layout: drive the story from the left, watch the trace on the right, switch to observer mode for a focused read-only view, and hit the meta button to inspect or edit the story YAML live. Hit ''?'' anytime to replay this tour.'
               dwellMs: 4000
@@ -5646,7 +5667,8 @@ nodes:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/architect-design.rrweb.json
     producers:
-      - tests/playwright/slidey-architect-design-video.spec.ts
+      - tests/playwright/slidey-architect-design-rrweb-capture.spec.ts
+    rrwebSpec: tests/playwright/slidey-architect-design-rrweb-capture.spec.ts
     artifacts:
       - artifactDir: slidey-architect-design
         videoBase: slidey-architect-design
@@ -5857,7 +5879,8 @@ nodes:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/slidey-bugfix.rrweb.json
     producers:
-      - tests/playwright/slidey-bugfix-video.spec.ts
+      - tests/playwright/slidey-bugfix-rrweb-capture.spec.ts
+    rrwebSpec: tests/playwright/slidey-bugfix-rrweb-capture.spec.ts
     artifacts:
       - artifactDir: slidey-bugfix
         videoBase: slidey-bugfix-demo
@@ -6295,7 +6318,8 @@ nodes:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/pm-idea.rrweb.json
     producers:
-      - tests/playwright/slidey-pm-idea-video.spec.ts
+      - tests/playwright/slidey-pm-idea-rrweb-capture.spec.ts
+    rrwebSpec: tests/playwright/slidey-pm-idea-rrweb-capture.spec.ts
     artifacts:
       - artifactDir: slidey-pm-idea
         videoBase: slidey-pm-idea
@@ -6532,7 +6556,8 @@ nodes:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/open-pr.rrweb.json
     producers:
-      - tests/playwright/slidey-open-pr-video.spec.ts
+      - tests/playwright/slidey-open-pr-rrweb-capture.spec.ts
+    rrwebSpec: tests/playwright/slidey-open-pr-rrweb-capture.spec.ts
     artifacts:
       - artifactDir: slidey-open-pr
         videoBase: slidey-open-pr-demo
@@ -7117,15 +7142,26 @@ nodes:
               waitForTarget: new-session-btn
             - advance: route-match
               advanceRoute: any
-              body: The trace tools live in the read-only observer view — built for inspecting a run while it's live or after it's finished. Switch to it to introspect this run.
-              dwellMs: 4000
-              id: trace-intro-observe
+              body: The trace tools live in the read-only observer view — built for inspecting a run while it's live or after it's finished. Head back to the story library to open this run there.
+              dwellMs: 3500
+              id: trace-intro-back
               kind: action
               placement: bottom
               route: interactive
-              target: observe-link
-              title: Switch to the observer
-              waitForTarget: observe-link
+              target: back-stories
+              title: Back to the story library
+              waitForTarget: back-stories
+            - advance: route-match
+              advanceRoute: any
+              body: This run is now listed as active. Open it to switch into the read-only observer and introspect it.
+              dwellMs: 4000
+              id: trace-intro-open
+              kind: action
+              placement: left
+              route: home
+              target: session-open
+              title: Open the run in the observer
+              waitForTarget: session-open
             - advance: next
               body: kitsoki records every decision, agent call, host call, and world mutation as a structured, immutable event stream. This tour walks the full introspection stack — everything you can see, annotate, and replay from a finished run.
               dwellMs: 4500
@@ -7916,15 +7952,15 @@ nodes:
         title: Spin up a run
         waitForTarget: new-session-btn
       - advance: next
-        body: 'We''re on the drive view: pick intents, submit turns, and watch the state badge advance one room at a time. The Observe link opens the read-only observer for this same run — the trace tree, timeline, and graph. We''ll drive the whole pipeline from here.'
+        body: "We're on the drive view: pick intents, submit turns, and watch the state badge advance one room at a time. Show trace opens the same trace tree, timeline, and graph right beside the conversation. We'll drive the whole pipeline from here."
         dwellMs: 5000
         id: ds-intro-observe
         kind: explain
         placement: bottom
         route: interactive
-        target: observe-link
-        title: Drive here, observe there
-        waitForTarget: observe-link
+        target: trace-column-toggle
+        title: Drive here, trace alongside
+        waitForTarget: trace-column-toggle
       - advance: next
         body: The engineer's day starts in triage. The slotless go_ticket_search intent steps from the main room into ticket_search — the bug triage queue. Let's go there now.
         dwellMs: 4500

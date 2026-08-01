@@ -57,10 +57,6 @@ tour:
       dwellMs: 6000
     - id: pw-idea-input
       route: interactive
-      # composer-input, not text-floor-input: the design intake room renders
-      # its text intents through the composer (with the Discuss selector), so
-      # the free-text floor never mounts here. The recording spec types into
-      # whichever of the two is present (textInput() in the spec).
       target: composer-input
       title: Entering the idea
       body: 'We type the idea into the chat composer: a tamagotchi-style virtual pet widget for the session UI. Submitting mints a slug and kicks off the scout search for overlapping work.'
@@ -113,7 +109,7 @@ tour:
       route: interactive
       target: chat-section
       title: Brief approved
-      body: "The brief judge's verdict is \"continue\": clear why, scoped change, kind is story. The passing verdict auto-advances the pipeline straight into draft authoring — no extra click needed."
+      body: 'The brief judge''s verdict is "continue": clear why, scoped change, kind is story. The passing verdict auto-advances the pipeline straight into draft authoring — no extra click needed.'
       placement: right
       kind: explain
       advance: next

@@ -78,11 +78,14 @@ function inlinePromptSidecars(snapshotJson: string, snapshotPath: string): strin
 export function buildArtifact(snapshotPath: string): string {
   ensureArtifactsDir();
 
-  const distIndex = path.join(projectRoot, "dist", "index.html");
+  let distIndex = path.join(projectRoot, "dist", "index.html");
+  const stagedDistIndex = path.join(repoRoot, ".temp", "runstatus", "dist", "index.html");
+  if (!fs.existsSync(distIndex) && fs.existsSync(stagedDistIndex)) distIndex = stagedDistIndex;
   if (!fs.existsSync(distIndex)) {
-    throw new Error(
-      `dist/index.html not found — run pnpm build first (expected at ${distIndex})`
-    );
+    // Capture specs run outside the normal SPA build target in Pages CI.
+    // Build the deterministic local SPA before composing the file artifact.
+    execSync("pnpm build", { cwd: projectRoot, stdio: "inherit" });
+    if (fs.existsSync(stagedDistIndex)) distIndex = stagedDistIndex;
   }
 
   const snapshotJson = inlinePromptSidecars(

@@ -43,6 +43,7 @@ import {
   type WebServer,
 } from "./_helpers/server.js";
 import { installCapture, dumpCapture, writeEvents } from "./_helpers/rrweb-replay.js";
+import { cameraContext } from "./_helpers/camera.js";
 import { SLIDEY_PM_IDEA_TOUR_STEPS, type TourStep } from "../../src/tour/generated/slidey-dev-prd-design.js";
 
 const CHAPTER_SOURCE = "features/slidey-dev-prd-design.yaml";
@@ -350,10 +351,7 @@ declare global {
 test("slidey PM-idea rrweb capture (baseline + event stream)", async () => {
   test.setTimeout(360000);
   const browser: Browser = await chromium.launch({ headless: true });
-  const context: BrowserContext = await browser.newContext({
-    viewport: { ...VIEWPORT },
-    recordVideo: { dir: VIDEO_DIR, size: { ...VIEWPORT } },
-  });
+  const context: BrowserContext = await browser.newContext(cameraContext({ recordVideoDir: VIDEO_DIR }));
   const page: Page = await context.newPage();
   const video = page.video();
   const shot = makeShot(BASELINE_FRAMES_DIR);

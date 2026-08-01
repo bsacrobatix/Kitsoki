@@ -12,7 +12,8 @@ related:
   - slidey-dev-prd-design
 demo:
   format: rrweb
-  spec: tests/playwright/slidey-architect-design-video.spec.ts
+  spec: tests/playwright/slidey-architect-design-rrweb-capture.spec.ts
+  rrwebSpec: tests/playwright/slidey-architect-design-rrweb-capture.spec.ts
   artifactDir: slidey-architect-design
   videoBase: slidey-architect-design
   posterStep: sad-prd-published

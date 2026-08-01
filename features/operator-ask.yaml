@@ -15,7 +15,7 @@ demo:
   videoBase: operator-ask-demo
   posterStep: oa-intro-home
   story: stories/bugfix
-  flow: stories/bugfix/flows/happy_llm.yaml
+  flow: stories/bugfix/flows/chat_stream_demo.yaml
   hostCassette: stories/bugfix/flows/demo.cassette.yaml
 tour:
   export: OPERATOR_ASK_TOUR_STEPS

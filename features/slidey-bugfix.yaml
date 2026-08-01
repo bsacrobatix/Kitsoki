@@ -12,7 +12,8 @@ related:
   - dev-story-bugfix
 demo:
   format: rrweb
-  spec: tests/playwright/slidey-bugfix-video.spec.ts
+  spec: tests/playwright/slidey-bugfix-rrweb-capture.spec.ts
+  rrwebSpec: tests/playwright/slidey-bugfix-rrweb-capture.spec.ts
   artifactDir: slidey-bugfix
   videoBase: slidey-bugfix-demo
   posterStep: sb-intro-home

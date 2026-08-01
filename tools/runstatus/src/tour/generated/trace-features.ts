@@ -52,7 +52,7 @@ export const TRACE_TOUR_STEPS: readonly TourStep[] = [
     placement: "bottom",
     kind: "action",
     advance: "route-match",
-    advanceRoute: "home",
+    advanceRoute: "any",
     waitForTarget: "back-stories",
     dwellMs: 3500,
   },

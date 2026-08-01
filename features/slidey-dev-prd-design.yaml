@@ -12,7 +12,8 @@ related:
   - slidey-architect-design
 demo:
   format: rrweb
-  spec: tests/playwright/slidey-pm-idea-video.spec.ts
+  spec: tests/playwright/slidey-pm-idea-rrweb-capture.spec.ts
+  rrwebSpec: tests/playwright/slidey-pm-idea-rrweb-capture.spec.ts
   artifactDir: slidey-pm-idea
   videoBase: slidey-pm-idea
   posterStep: spm-intro-home
