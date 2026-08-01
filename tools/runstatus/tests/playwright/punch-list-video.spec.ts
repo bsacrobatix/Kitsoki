@@ -98,32 +98,32 @@ test.describe("punch-list tour video", () => {
         }
         if (step.id === "pl-board") {
           await clickIntent(page, "next_item");
-          await waitForState(page, "board");
+          await waitForState(page, "drive");
         }
         if (step.id === "pl-first-item") {
           await clickIntent(page, "next_item");
-          await waitForState(page, "board");
+          await waitForState(page, "drive");
           await expect(page.getByText(/Processed 1/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-midpoint") {
           for (let i = 0; i < 4; i++) {
             await clickIntent(page, "next_item");
-            await waitForState(page, "board");
+            await waitForState(page, "drive");
           }
           await expect(page.getByText(/Processed 5/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-final-pending") {
           for (let i = 0; i < 4; i++) {
             await clickIntent(page, "next_item");
-            await waitForState(page, "board");
+            await waitForState(page, "drive");
           }
-          await waitForState(page, "board");
+          await waitForState(page, "drive");
           await expect(page.getByText(/Processed 9/).first()).toBeVisible({ timeout: 15000 });
           await expect(page.getByText(/story-qa-workflow/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-report") {
           await clickIntent(page, "next_item");
-          await waitForState(page, "board");
+          await waitForState(page, "drive");
           await expect(page.getByText(/Processed 10/).first()).toBeVisible({ timeout: 15000 });
           await expect(page.getByText(/Pending 0/).first()).toBeVisible({ timeout: 15000 });
           await clickIntent(page, "next_item");

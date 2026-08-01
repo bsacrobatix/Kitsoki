@@ -208,7 +208,7 @@ test("trace introspection feature-spotlight video", async () => {
           await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
           const m = page.url().match(/\/s\/([0-9a-f-]{36})\/chat$/);
           if (m) sessionId = m[1];
-        } else if (step.advance === "route-match" && step.advanceRoute === "any") {
+        } else if (step.advance === "route-match" && step.advanceRoute === "any" && step.id === "trace-intro-open") {
           // "Observe" → the read-only observer. Now that the chat view is no
           // longer the active surface, patch the world and submit so the
           // cassette-backed agent cascade streams its events into the observer's
@@ -239,6 +239,10 @@ test("trace introspection feature-spotlight video", async () => {
             // spotlighting trace rows — SSE timing is wall-clock-variable.
             await waitForAgentComplete(server, sessionId, 2, 40000);
           }
+        } else if (step.advance === "route-match" && step.advanceRoute === "any") {
+          // `trace-intro-back` returns to the library. Only the subsequent
+          // session-open control transitions into the observer route.
+          await page.waitForURL(/#\/$/, { timeout: 15000 });
         }
         // Longer settle for action steps: tab switches / nav need the view to repaint.
         await dwell(page, 1000);
