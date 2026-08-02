@@ -65,6 +65,32 @@ async function waitForState(page: Page, state: string): Promise<void> {
   await expect(page.getByTestId("current-state")).toContainText(state, { timeout: 15000 });
 }
 
+async function continueFromVerifier(page: Page): Promise<void> {
+  // Verify intentionally exposes no quick action. Submit the normal operator
+  // phrasing through the visible composer so routing records the result and
+  // returns to board; this is the same path a real operator uses.
+  const input = page.getByTestId("composer-input").first();
+  await expect(input).toBeEditable({ timeout: 15000 });
+  await input.evaluate((el) => {
+    const textarea = el as HTMLTextAreaElement;
+    textarea.value = "continue";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.getByTestId("composer").first().evaluate((el) => (el as HTMLFormElement).requestSubmit());
+  await dwell(page, SETTLE_MS);
+}
+
+// A board selection starts a real no-LLM drive and lands on its deterministic
+// verifier. The fixture deliberately holds that verifier beat until the next
+// operator action, which records the result and returns to board. Drive events
+// remain visible in the trace, while the tour waits on stable UI states.
+async function processSelectedItem(page: Page): Promise<void> {
+  await clickIntent(page, "next_item");
+  await waitForState(page, "verify");
+  await continueFromVerifier(page);
+  await waitForState(page, "board");
+}
+
 test.describe("punch-list tour video", () => {
   test("tour-driven punch-list happy path", async () => {
     test.setTimeout(240000);
@@ -98,32 +124,27 @@ test.describe("punch-list tour video", () => {
         }
         if (step.id === "pl-board") {
           await clickIntent(page, "next_item");
-          await waitForState(page, "drive");
+          await waitForState(page, "board");
         }
         if (step.id === "pl-first-item") {
-          await clickIntent(page, "next_item");
-          await waitForState(page, "drive");
+          await processSelectedItem(page);
           await expect(page.getByText(/Processed 1/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-midpoint") {
           for (let i = 0; i < 4; i++) {
-            await clickIntent(page, "next_item");
-            await waitForState(page, "drive");
+            await processSelectedItem(page);
           }
           await expect(page.getByText(/Processed 5/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-final-pending") {
           for (let i = 0; i < 4; i++) {
-            await clickIntent(page, "next_item");
-            await waitForState(page, "drive");
+            await processSelectedItem(page);
           }
-          await waitForState(page, "drive");
           await expect(page.getByText(/Processed 9/).first()).toBeVisible({ timeout: 15000 });
           await expect(page.getByText(/story-qa-workflow/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-report") {
-          await clickIntent(page, "next_item");
-          await waitForState(page, "drive");
+          await processSelectedItem(page);
           await expect(page.getByText(/Processed 10/).first()).toBeVisible({ timeout: 15000 });
           await expect(page.getByText(/Pending 0/).first()).toBeVisible({ timeout: 15000 });
           await clickIntent(page, "next_item");
